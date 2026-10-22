@@ -1,0 +1,72 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+@import "@fontsource-variable/geist";
+
+@custom-variant dark (&:is(.dark *));
+
+/* The library is only dark, in the colors of the relay's page. */
+@theme inline {
+	--font-heading: var(--font-sans);
+	--font-sans: "Geist Variable", sans-serif;
+	--color-ring: var(--ring);
+	--color-input: var(--input);
+	--color-border: var(--border);
+	--color-accent-foreground: var(--accent-foreground);
+	--color-accent: var(--accent);
+	--color-muted-foreground: var(--muted-foreground);
+	--color-muted: var(--muted);
+	--color-secondary-foreground: var(--secondary-foreground);
+	--color-secondary: var(--secondary);
+	--color-primary-foreground: var(--primary-foreground);
+	--color-primary: var(--primary);
+	--color-card-foreground: var(--card-foreground);
+	--color-card: var(--card);
+	--color-foreground: var(--foreground);
+	--color-background: var(--background);
+	--color-brand: var(--brand);
+	--radius-sm: calc(var(--radius) * 0.6);
+	--radius-md: calc(var(--radius) * 0.8);
+	--radius-lg: var(--radius);
+	--radius-xl: calc(var(--radius) * 1.4);
+	--radius-2xl: calc(var(--radius) * 1.8);
+}
+
+:root {
+	--background: #09090b;
+	--foreground: #fafafa;
+	--card: #111114;
+	--card-foreground: #fafafa;
+	--primary: #fafafa;
+	--primary-foreground: #09090b;
+	--secondary: #1a1a1f;
+	--secondary-foreground: #fafafa;
+	--muted: #1a1a1f;
+	--muted-foreground: #a1a1aa;
+	--accent: #1a1a1f;
+	--accent-foreground: #fafafa;
+	--border: #232329;
+	--input: #2a2a31;
+	--ring: #71717a;
+	--brand: oklch(0.72 0.15 265);
+	--radius: 0.75rem;
+	color-scheme: dark;
+}
+
+@layer base {
+	* {
+		@apply border-border outline-ring/50;
+	}
+	body {
+		@apply bg-background text-foreground antialiased;
+		background-image: radial-gradient(
+			70rem 36rem at 50% -12%,
+			oklch(0.6 0.17 265 / 0.22),
+			transparent 70%
+		);
+		background-repeat: no-repeat;
+	}
+	html {
+		@apply font-sans;
+	}
+}

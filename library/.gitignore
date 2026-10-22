@@ -1,0 +1,5 @@
+node_modules/
+.direnv/
+dist/
+.wrangler/
+worker/env.d.ts
