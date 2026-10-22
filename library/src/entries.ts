@@ -1,7 +1,7 @@
 /** What the library lists, shared by the worker and the page. */
 
 /** The GitHub topic that puts a repository in the library. */
-export const TOPIC = "byoa-protocol";
+export const TOPIC = "built-on-byoa";
 
 /** The owner whose repositories are the official entries. */
 export const OFFICIAL = "luiswirth";

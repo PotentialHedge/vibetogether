@@ -63,10 +63,10 @@ The official clients are good examples to read.
    gh repo create <name> --public --clone --description "<what it does, in one line>"
    ```
 
-2. Add the topic `byoa-protocol`, which is what puts it in the library:
+2. Add the topic `built-on-byoa`, which is what puts it in the library:
 
    ```sh
-   gh repo edit --add-topic byoa-protocol
+   gh repo edit --add-topic built-on-byoa
    ```
 
 3. Write a `README.md`: what it does, and how to use it.
