@@ -1,0 +1,23 @@
+{
+	"name": "byoa-web",
+	"private": true,
+	"type": "module",
+	"exports": {
+		"./onboard": "./onboard/index.tsx",
+		"./react": "./react/index.ts"
+	},
+	"files": [
+		"onboard",
+		"react"
+	],
+	"peerDependencies": {
+		"byoa": "github:luiswirth/byoa",
+		"react": ">=19"
+	},
+	"devDependencies": {
+		"@types/react": "^19.3.0",
+		"byoa": "github:luiswirth/byoa",
+		"react": ">=19",
+		"typescript": "^7.0.2"
+	}
+}
