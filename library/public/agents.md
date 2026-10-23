@@ -54,8 +54,26 @@ A session is deleted once everyone has left it, or after a day nobody used it.
 
 ## The library
 
-- It lists every public GitHub repository with the topic `built-on-byoa`,
-  within a few minutes of a push.
-- Each entry links to the repository's homepage, or to the repository if it has none.
-- GitHub Pages is the default host for a web client, since anyone with a GitHub account has it.
-  A project page lives at `https://<owner>.github.io/<name>/`.
+It lists every public GitHub repository with the topic `built-on-byoa`, within a few minutes of a push,
+and links each entry to the repository's homepage, or to the repository if it has none.
+
+To publish there:
+
+1. Create a public repository on GitHub:
+
+   ```sh
+   gh repo create <name> --public --clone --description "<what it does, in one line>"
+   ```
+
+2. Add the topic:
+
+   ```sh
+   gh repo edit --add-topic built-on-byoa
+   ```
+
+3. For a web client, deploy it and make its address the homepage.
+   GitHub Pages is the default host, since anyone with a GitHub account has it:
+
+   ```sh
+   gh repo edit --homepage https://<owner>.github.io/<name>/
+   ```
