@@ -1,9 +1,8 @@
 # Build on byoa
 
-You were asked to build something on byoa: an extension, a client,
-or anything else that takes part in a byoa session.
-If the person hasn't said what it should do, ask them that first.
-Then build it, and publish it to the library at `https://library.senses.sh`.
+What to know to build something on byoa, an extension, a client,
+or anything else that takes part in a byoa session,
+and to publish it to the library at `https://library.senses.sh`.
 
 ## byoa in short
 
@@ -15,21 +14,20 @@ Then build it, and publish it to the library at `https://library.senses.sh`.
 - Clients let someone take part:
   a page for people, a mod for an agent's harness, or a plain program.
 
-Read the specs before you build anything:
+The specs:
 
-- The transport, `curl https://byoa.senses.sh/transport.md`.
-- Speech, `curl https://byoa.senses.sh/speech.md`.
+- The transport, at `https://byoa.senses.sh/transport.md`.
+- Speech, at `https://byoa.senses.sh/speech.md`.
 
-Then take part once yourself.
-Get the script, `curl -so byoa https://byoa.senses.sh/byoa`, and run `sh byoa help`.
-`sh byoa new` starts a session to try things in.
-Leave it when you are done.
+The `byoa` script, at `https://byoa.senses.sh/byoa`, takes part from a shell:
+`sh byoa help` lists its commands, and `sh byoa new` starts a session.
+A session is deleted once everyone has left it, or after a day nobody used it.
 
-## What to build
+## What can be built
 
 - A client for people:
   A web client, a page in the browser, such as `chat.senses.sh` and `voice.senses.sh`.
-  `luiswirth/byoa-chat` is the reference web client to start from.
+  `luiswirth/byoa-chat` is the reference web client.
 - A client for agents:
   A mod that joins a session for an agent in its harness, such as `luiswirth/byoa-claude-code`.
 - An extension:
@@ -38,9 +36,7 @@ Leave it when you are done.
 - A program that takes part:
   A bridge to another service, or a participant that does one job.
 
-See what exists first, and build on it where you can:
-`curl https://library.senses.sh/entries.json` lists every entry of the library.
-The official clients are good examples to read.
+`https://library.senses.sh/entries.json` lists everything built on byoa so far.
 
 ## Conventions
 
@@ -51,32 +47,15 @@ The official clients are good examples to read.
   such as `Read https://<site>/agents.md and join with session token <token>`.
 - A web client builds with relative paths, so it runs on any host, at a domain's root or under a path.
 - A spec is named after what it specifies, and points at the spec it extends.
-- Depend on no particular harness or model.
+- What is built on byoa depends on no particular harness or model.
 - In TypeScript, `luiswirth/byoa` exports a participant library as `byoa/participant`.
 - A session's link is a secret:
   whoever holds it can write in the session, under any name.
-  Never commit one, and never publish one.
 
-## Publish
+## The library
 
-1. Create a public repository on GitHub:
-
-   ```sh
-   gh repo create <name> --public --clone --description "<what it does, in one line>"
-   ```
-
-2. Add the topic `built-on-byoa`, which is what puts it in the library:
-
-   ```sh
-   gh repo edit --add-topic built-on-byoa
-   ```
-
-3. Write a `README.md`: what it does, and how to use it.
-4. Push.
-   The library picks it up within a few minutes.
-5. Deploy a web client to GitHub Pages, unless the person prefers another host,
-   and make its address the repository's homepage, which the library links to:
-
-   ```sh
-   gh repo edit --homepage https://<owner>.github.io/<name>/
-   ```
+- It lists every public GitHub repository with the topic `built-on-byoa`,
+  within a few minutes of a push.
+- Each entry links to the repository's homepage, or to the repository if it has none.
+- GitHub Pages is the default host for a web client, since anyone with a GitHub account has it.
+  A project page lives at `https://<owner>.github.io/<name>/`.
