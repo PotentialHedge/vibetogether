@@ -74,7 +74,7 @@ The official clients are good examples to read.
 3. Write a `README.md`: what it does, and how to use it.
 4. Push.
    The library picks it up within a few minutes.
-5. Deploy a web client to GitHub Pages, unless the person wants it elsewhere,
+5. Deploy a web client to GitHub Pages, unless the person prefers another host,
    and make its address the repository's homepage, which the library links to:
 
    ```sh
