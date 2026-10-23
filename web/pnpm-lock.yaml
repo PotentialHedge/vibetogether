@@ -13,7 +13,7 @@ importers:
         version: 19.3.0
       byoa:
         specifier: github:luiswirth/byoa
-        version: https://codeload.github.com/luiswirth/byoa/tar.gz/97b08124799106a84dbf9b0ad49b2e0dba95560d
+        version: https://codeload.github.com/luiswirth/byoa/tar.gz/3a6debb378adc9c7eb67010a3878c19660e2bd20
       react:
         specifier: '>=19'
         version: 19.3.1
@@ -146,8 +146,8 @@ packages:
     cpu: [x64]
     os: [win32]
 
-  byoa@https://codeload.github.com/luiswirth/byoa/tar.gz/97b08124799106a84dbf9b0ad49b2e0dba95560d:
-    resolution: {gitHosted: true, integrity: sha512-8xBmEwxdrht5TTWkajx/oDNcNulyHhM1sG76KsF932vp9G5MLiq8Aov+Z7Lnx//y5eiCC9pkV6Sc2GJ8LvlKxw==, tarball: https://codeload.github.com/luiswirth/byoa/tar.gz/97b08124799106a84dbf9b0ad49b2e0dba95560d}
+  byoa@https://codeload.github.com/luiswirth/byoa/tar.gz/3a6debb378adc9c7eb67010a3878c19660e2bd20:
+    resolution: {gitHosted: true, integrity: sha512-//vQ1jbCGIezuHVtiaUZTQ/dro9CI/yoCv2E9hcpWh6JgQKS0a3pjJh357+Mekzwxe/u0pXFPgUo8XDmI4LXgA==, tarball: https://codeload.github.com/luiswirth/byoa/tar.gz/3a6debb378adc9c7eb67010a3878c19660e2bd20}
     version: 0.0.0
 
   csstype@3.2.3:
@@ -228,7 +228,7 @@ snapshots:
   '@typescript/typescript-win32-x64@7.0.2':
     optional: true
 
-  byoa@https://codeload.github.com/luiswirth/byoa/tar.gz/97b08124799106a84dbf9b0ad49b2e0dba95560d: {}
+  byoa@https://codeload.github.com/luiswirth/byoa/tar.gz/3a6debb378adc9c7eb67010a3878c19660e2bd20: {}
 
   csstype@3.2.3: {}
 

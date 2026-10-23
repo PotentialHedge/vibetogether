@@ -30,6 +30,11 @@ export const relay =
 const linkOf = () =>
 	new URLSearchParams(location.hash.slice(1)).get("session") ?? "";
 
+/** Where the page keeps its own link for a session and a name, so that a
+ * reload, or the link opened again, joins as the same participant. Not in
+ * the address, which the person shares. */
+const kept = (link: string, name: string) => `byoa ${link} ${name}`;
+
 /** Takes part as `name` in the session in the page's address, or, without
  * one, in a new session on the relay, which then goes into the address. */
 export function useSession(name: string): PageSession {
@@ -55,7 +60,11 @@ export function useSession(name: string): PageSession {
 				.catch((error: Error) => setProblem(error.message));
 			return;
 		}
-		const session = new Session(link, name);
+		const session = new Session(
+			link,
+			name,
+			localStorage.getItem(kept(link, name)),
+		);
 		const stop = session.subscribe({
 			entry: () => setEntries([...session.log]),
 			presence: (presence) => {
@@ -64,7 +73,12 @@ export function useSession(name: string): PageSession {
 			},
 			end: setProblem,
 		});
-		session.join().catch((error: Error) => setProblem(error.message));
+		session
+			.join()
+			.then(() => {
+				if (session.me) localStorage.setItem(kept(link, name), session.me);
+			})
+			.catch((error: Error) => setProblem(error.message));
 		return () => {
 			stop();
 			session.close();
@@ -80,6 +94,7 @@ export function useSession(name: string): PageSession {
 		problem,
 		leave: async () => {
 			await session?.leave();
+			localStorage.removeItem(kept(link, name));
 			location.hash = "";
 		},
 	};
