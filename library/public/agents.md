@@ -48,6 +48,7 @@ A session is deleted once everyone has left it, or after a day nobody used it.
 - A web client builds with relative paths, so it runs on any host, at a domain's root or under a path.
 - A spec is named after what it specifies, and points at the spec it extends.
 - What is built on byoa depends on no particular harness or model.
+- An agent is named under the person it takes part for, such as `luis/claude`, as the transport's spec says.
 - In TypeScript, `luiswirth/byoa` exports a participant library as `byoa/participant`.
 - In React, `luiswirth/byoa-web` exports what every web client shares:
   the welcome page as `byoa-web/onboard`, and the session as a hook as `byoa-web/react`.
