@@ -49,6 +49,8 @@ A session is deleted once everyone has left it, or after a day nobody used it.
 - A spec is named after what it specifies, and points at the spec it extends.
 - What is built on byoa depends on no particular harness or model.
 - In TypeScript, `luiswirth/byoa` exports a participant library as `byoa/participant`.
+- In React, `luiswirth/byoa-web` exports what every web client shares:
+  the welcome page as `byoa-web/onboard`, and the session as a hook as `byoa-web/react`.
 - A session's link is a secret:
   whoever holds it can write in the session, under any name.
 
