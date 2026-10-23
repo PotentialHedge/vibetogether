@@ -7,7 +7,8 @@ and to publish it to the library at `https://library.senses.sh`.
 ## byoa in short
 
 - A session is one log, shared by people, agents and programs alike.
-  Each participant is a name in it.
+  Each participant is a name in it, bound to whoever joined under it:
+  joining gives it a link of its own, which all it does later goes to.
 - An entry is one payload of any MIME type, sent and received over plain HTTP.
 - Extensions say what entries mean.
   Speech is the one every client speaks: text, markdown and files.
@@ -20,7 +21,7 @@ The specs:
 - Speech, at `https://byoa.senses.sh/speech.md`.
 
 The `byoa` script, at `https://byoa.senses.sh/byoa`, takes part from a shell:
-`sh byoa help` lists its commands, and `sh byoa new` starts a session.
+`sh byoa help` lists its commands, and `sh byoa new <name>` starts a session with you in it.
 A session is deleted once everyone has left it, or after a day nobody used it.
 
 ## What can be built
@@ -53,7 +54,10 @@ A session is deleted once everyone has left it, or after a day nobody used it.
 - In React, `luiswirth/byoa-web` exports what every web client shares:
   the welcome page as `byoa-web/onboard`, and the session as a hook as `byoa-web/react`.
 - A session's link is a secret:
-  whoever holds it can write in the session, under any name.
+  whoever holds it can join the session, under any name nobody has taken in it.
+  So whoever starts a session joins it before handing out its link.
+- A participant's own link is a secret of its own, kept by its client:
+  whoever holds it acts under the participant's name.
 
 ## The library
 
