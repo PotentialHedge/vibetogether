@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { type Entry, TOPIC } from "./entries.ts";
 
-const GUIDE = `${location.origin}/agents.md`;
+const GUIDE = new URL("agents.md", document.baseURI).href;
 
 /** The prompt that starts an agent on building something: one link, and what
  * the person wants, if they said. */
@@ -23,7 +23,7 @@ type Listing =
 function useListing(): Listing {
 	const [listing, setListing] = useState<Listing>({ state: "loading" });
 	useEffect(() => {
-		fetch("/entries.json")
+		fetch("entries.json")
 			.then((response) => {
 				if (!response.ok) throw new Error(String(response.status));
 				return response.json() as Promise<Entry[]>;
@@ -134,13 +134,13 @@ export function App() {
 	return (
 		<main className="mx-auto max-w-5xl px-6">
 			<nav className="flex items-center gap-6 py-6 text-muted-foreground text-sm">
-				<a href="/" className="mr-auto font-mono text-foreground">
+				<a href="./" className="mr-auto font-mono text-foreground">
 					byoa library
 				</a>
 				<a href="https://byoa.senses.sh" className="hover:text-foreground">
 					byoa
 				</a>
-				<a href="/agents.md" className="hover:text-foreground">
+				<a href="agents.md" className="hover:text-foreground">
 					Build guide
 				</a>
 			</nav>
