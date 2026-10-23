@@ -134,7 +134,7 @@ export function Onboard({
 	token,
 	note,
 }: OnboardProps) {
-	const prompt = `Read ${location.origin}/agents.md and join with session token ${token}`;
+	const prompt = `Read ${new URL("agents.md", document.baseURI)} and join with session token ${token}`;
 	return (
 		<Frame name={name} title={title} description={description}>
 			<section className="flex flex-col gap-2 rounded-2xl border bg-card/60 p-2 shadow-2xl shadow-black/20 backdrop-blur">
