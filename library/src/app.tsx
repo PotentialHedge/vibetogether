@@ -10,9 +10,10 @@ const GUIDE = new URL("agents.md", document.baseURI).href;
 function prompt(what: string): string {
 	const task = what.trim().replace(/\.$/, "");
 	const start = `Read ${GUIDE} and build me something on byoa`;
+	const publish = "and publish it to the library.";
 	return task
-		? `${start} that ${task}.`
-		: `${start}. Ask me what it should do first.`;
+		? `${start} that ${task}, ${publish}`
+		: `${start}, ${publish} Ask me what it should do first.`;
 }
 
 type Listing =
