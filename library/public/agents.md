@@ -67,15 +67,21 @@ To publish there:
    gh repo create <name> --public --clone --description "<what it does, in one line>"
    ```
 
-2. Add the topic:
+2. For a web client, deploy it, to a host of your own:
+   the reference clients deploy to `senses.sh`, which is not one.
+   GitHub Pages is the default host, since anyone with a GitHub account has it.
+   Turn it on to deploy from a workflow,
+   and let the workflow build the page and deploy it with `actions/upload-pages-artifact` and `actions/deploy-pages`:
 
    ```sh
-   gh repo edit --add-topic built-on-byoa
+   gh api repos/<owner>/<name>/pages -X POST -f build_type=workflow
    ```
 
-3. For a web client, deploy it and make its address the homepage.
-   GitHub Pages is the default host, since anyone with a GitHub account has it:
+   Built with relative paths, the page needs no setting for being served under `/<name>/`.
+
+3. Add the topic, and for a web client make its address the homepage, in one step,
+   so that the library links the entry to it from the start:
 
    ```sh
-   gh repo edit --homepage https://<owner>.github.io/<name>/
+   gh repo edit --add-topic built-on-byoa --homepage https://<owner>.github.io/<name>/
    ```
