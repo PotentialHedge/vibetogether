@@ -1,4 +1,4 @@
-import { Check, Copy, Star } from "lucide-react";
+import { Check, CodeXml, Copy, Star } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { type Entry, TOPIC } from "./entries.ts";
@@ -78,12 +78,15 @@ function Build() {
 function Card({ entry }: { entry: Entry }) {
 	const [owner, repository] = entry.name.split("/");
 	return (
-		<a
-			href={entry.homepage ?? entry.url}
-			className="group flex flex-col gap-2 rounded-2xl border bg-card p-5 transition-colors hover:border-ring/60"
-		>
+		<div className="relative flex flex-col gap-2 rounded-2xl border bg-card p-5 transition-colors hover:border-ring/60">
 			<div className="flex items-center gap-2">
-				<span className="font-semibold">{repository}</span>
+				{/* Stretched over the whole card; the source link sits above it. */}
+				<a
+					href={entry.homepage ?? entry.url}
+					className="font-semibold after:absolute after:inset-0 after:rounded-2xl"
+				>
+					{repository}
+				</a>
 				{entry.official && (
 					<span className="rounded-full border border-brand/40 px-2 py-0.5 font-mono text-[0.6875rem] text-brand">
 						official
@@ -93,12 +96,22 @@ function Card({ entry }: { entry: Entry }) {
 					<Star className="size-3.5" />
 					{entry.stars}
 				</span>
+				{entry.homepage && (
+					<a
+						href={entry.url}
+						title="Source"
+						aria-label="Source"
+						className="relative text-muted-foreground hover:text-foreground"
+					>
+						<CodeXml className="size-4" />
+					</a>
+				)}
 			</div>
 			<span className="font-mono text-muted-foreground text-xs">{owner}</span>
 			{entry.description && (
 				<p className="text-muted-foreground text-sm">{entry.description}</p>
 			)}
-		</a>
+		</div>
 	);
 }
 
