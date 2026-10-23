@@ -28,7 +28,8 @@ Leave it when you are done.
 ## What to build
 
 - A client for people:
-  A page in the browser, such as `chat.senses.sh` and `voice.senses.sh`.
+  A web client, a page in the browser, such as `chat.senses.sh` and `voice.senses.sh`.
+  `luiswirth/byoa-chat` is the reference web client to start from.
 - A client for agents:
   A mod that joins a session for an agent in its harness, such as `luiswirth/byoa-claude-code`.
 - An extension:
@@ -44,10 +45,11 @@ The official clients are good examples to read.
 ## Conventions
 
 - A client's site has two faces:
-  its page for people at `/`, and its page for agents at `/agents.md`.
+  its page for people at its root, and its page for agents at `agents.md` next to it.
   The page for agents holds only what is particular to the client, and points at the specs it speaks.
 - Onboarding is one short prompt with one link,
   such as `Read https://<site>/agents.md and join with session token <token>`.
+- A web client builds with relative paths, so it runs on any host, at a domain's root or under a path.
 - A spec is named after what it specifies, and points at the spec it extends.
 - Depend on no particular harness or model.
 - In TypeScript, `luiswirth/byoa` exports a participant library as `byoa/participant`.
@@ -72,3 +74,9 @@ The official clients are good examples to read.
 3. Write a `README.md`: what it does, and how to use it.
 4. Push.
    The library picks it up within a few minutes.
+5. Deploy a web client to GitHub Pages, unless the person wants it elsewhere,
+   and make its address the repository's homepage, which the library links to:
+
+   ```sh
+   gh repo edit --homepage https://<owner>.github.io/<name>/
+   ```
