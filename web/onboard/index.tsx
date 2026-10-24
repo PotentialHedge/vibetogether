@@ -12,9 +12,10 @@ export type OnboardProps = {
 	title: string;
 	/** One or two sentences on it. */
 	description: string;
-	/** The session's token. The page offers it on its own, and in the prompt
-	 * that points the agent at the service's page for agents. */
-	token: string;
+	/** The session's link, which names its relay. The page offers it on its
+	 * own, and in the prompt that points the agent at the service's page for
+	 * agents. */
+	link: string;
 	/** What the person should know before, such as an account it needs. */
 	note?: ReactNode;
 };
@@ -131,10 +132,10 @@ export function Onboard({
 	name,
 	title,
 	description,
-	token,
+	link,
 	note,
 }: OnboardProps) {
-	const prompt = `Read ${new URL("agents.md", document.baseURI)} and join with session token ${token}`;
+	const prompt = `Read ${new URL("agents.md", document.baseURI)} and join the session ${link}`;
 	return (
 		<Frame name={name} title={title} description={description}>
 			<section className="flex flex-col gap-2 rounded-2xl border bg-card/60 p-2 shadow-2xl shadow-black/20 backdrop-blur">
@@ -149,11 +150,11 @@ export function Onboard({
 			<section className="flex flex-col gap-2 rounded-2xl border bg-card/40 p-2 sm:flex-row sm:items-center">
 				<div className="flex min-w-0 flex-1 flex-col px-2 py-1">
 					<span className="text-xs font-medium text-muted-foreground">
-						Session token
+						Session link
 					</span>
-					<code className="truncate font-mono text-sm">{token}</code>
+					<code className="truncate font-mono text-sm">{link}</code>
 				</div>
-				<Copy text={token} label="Copy the token" />
+				<Copy text={link} label="Copy the link" />
 			</section>
 			<ol className="grid gap-5 sm:grid-cols-3">
 				{STEPS.map(([verb, rest], i) => (
