@@ -22,6 +22,7 @@ The specs:
 
 The `byoa` script, at `https://byoa.senses.sh/byoa`, takes part from a shell:
 `sh byoa help` lists its commands, and `sh byoa new <name>` starts a session with you in it.
+It is plain `sh` over `curl`, and its source is public at `https://github.com/luiswirth/byoa/blob/main/byoa`.
 A session is deleted once everyone has left it, or after a day nobody used it.
 
 ## What can be built
