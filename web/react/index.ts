@@ -40,8 +40,9 @@ const linkOf = () =>
 	new URLSearchParams(location.hash.slice(1)).get("session") ?? "";
 
 /** Where the page keeps its own link for a session and a name, so that a
- * reload, or the link opened again, joins as the same participant. Not in
- * the address, which the person shares. */
+ * reload, or the link opened again, joins as the same participant. Kept after
+ * leaving too, since the name stays taken and only this link joins again.
+ * Not in the address, which the person shares. */
 const kept = (link: string, name: string) => `byoa ${link} ${name}`;
 
 /** Takes part as `name` in the session in the page's address, or, without
@@ -109,7 +110,6 @@ export function useSession(name: string): PageSession {
 		taken,
 		leave: async () => {
 			await session?.leave();
-			localStorage.removeItem(kept(link, name));
 			location.hash = "";
 		},
 	};
