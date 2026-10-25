@@ -23,25 +23,31 @@ export type OnboardProps = {
 const STEPS = [
 	["Copy", "the prompt above."],
 	["Paste", "it into your agent, such as Claude Code."],
-	["Open", "the link your agent gives you. It sets up everything else."],
+	["Wait", "here: once your agent has joined, this page goes on."],
 ] as const;
 
 const NAME = "byoa-name";
 
 /** Asks the person for the name they take part under, once per browser, and
- * renders the page under it. Every person in a session has a name of their
- * own, as every agent has. */
+ * renders the page under it, with `rename` to ask again, such as for a name
+ * that is taken in the session. Every person in a session has a name of
+ * their own, as every agent has. */
 export function Named({
 	service,
 	children,
 }: {
 	/** The service, as the person knows it, such as `voice.senses.sh`. */
 	service: string;
-	children: (name: string) => ReactNode;
+	children: (name: string, rename: () => void) => ReactNode;
 }) {
 	const [name, setName] = useState(() => localStorage.getItem(NAME));
 	const [draft, setDraft] = useState("");
-	if (name) return children(name);
+	if (name)
+		return children(name, () => {
+			localStorage.removeItem(NAME);
+			setDraft(name);
+			setName(null);
+		});
 	const chosen = draft.trim();
 	return (
 		<Frame
@@ -79,8 +85,9 @@ export function Named({
 	);
 }
 
-/** The look every page of a person's onboarding shares. */
-function Frame({
+/** The look every page of a person's onboarding shares, for a service's own
+ * steps too. */
+export function Frame({
 	name,
 	title,
 	description,

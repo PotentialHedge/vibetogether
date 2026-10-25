@@ -1,7 +1,13 @@
 /** The client for a service's page in React: the session the page takes part
  * in, as every service's page has it. */
 
-import { create, type Entry, type Presence, Session } from "byoa/participant";
+import {
+	create,
+	type Entry,
+	type Presence,
+	RelayError,
+	Session,
+} from "byoa/participant";
 import { useEffect, useState, useSyncExternalStore } from "react";
 
 export type PageSession = {
@@ -15,6 +21,9 @@ export type PageSession = {
 	/** Whether nobody else has joined yet. */
 	alone: boolean;
 	problem: string | null;
+	/** Whether the problem is that the page's name is taken in the session,
+	 * by someone else or by this person on another device. */
+	taken: boolean;
 	/** Leaves, and starts a new session. */
 	leave(): Promise<void>;
 };
@@ -46,12 +55,14 @@ export function useSession(name: string): PageSession {
 	const [entries, setEntries] = useState<Entry[]>([]);
 	const [presence, setPresence] = useState<Presence>({});
 	const [problem, setProblem] = useState<string | null>(null);
+	const [taken, setTaken] = useState(false);
 
 	useEffect(() => {
 		setSession(null);
 		setEntries([]);
 		setPresence({});
 		setProblem(null);
+		setTaken(false);
 		if (!link) {
 			create(relay)
 				.then((link) => {
@@ -78,7 +89,10 @@ export function useSession(name: string): PageSession {
 			.then(() => {
 				if (session.me) localStorage.setItem(kept(link, name), session.me);
 			})
-			.catch((error: Error) => setProblem(error.message));
+			.catch((error: Error) => {
+				setProblem(error.message);
+				setTaken(error instanceof RelayError && error.status === 409);
+			});
 		return () => {
 			stop();
 			session.close();
@@ -92,6 +106,7 @@ export function useSession(name: string): PageSession {
 		presence,
 		alone: !entries.some((entry) => entry.from !== name),
 		problem,
+		taken,
 		leave: async () => {
 			await session?.leave();
 			localStorage.removeItem(kept(link, name));
