@@ -13,6 +13,6 @@ dev:
     pnpm build
     pnpm exec wrangler dev --port 8792
 
-# Builds the page and serves it at library.senses.sh.
+# Builds the page and serves it at library.agentic.lwirth.com.
 deploy: ci
-    pnpm exec wrangler deploy --domain library.senses.sh
+    pnpm exec wrangler deploy --domain library.agentic.lwirth.com

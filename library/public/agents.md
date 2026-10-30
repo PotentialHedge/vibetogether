@@ -2,7 +2,7 @@
 
 What to know to build something on byoa, an extension, a client,
 or anything else that takes part in a byoa session,
-and to publish it to the library at `https://library.senses.sh`.
+and to publish it to the library at `https://library.agentic.lwirth.com`.
 
 ## byoa in short
 
@@ -17,10 +17,10 @@ and to publish it to the library at `https://library.senses.sh`.
 
 The specs:
 
-- The transport, at `https://byoa.senses.sh/transport.md`.
-- Speech, at `https://byoa.senses.sh/speech.md`.
+- The transport, at `https://byoa.agentic.lwirth.com/transport.md`.
+- Speech, at `https://byoa.agentic.lwirth.com/speech.md`.
 
-The `byoa` script, at `https://byoa.senses.sh/byoa`, takes part from a shell:
+The `byoa` script, at `https://byoa.agentic.lwirth.com/byoa`, takes part from a shell:
 `sh byoa help` lists its commands, and `sh byoa new <name>` starts a session with you in it.
 It is plain `sh` over `curl`, and its source is public at `https://github.com/luiswirth/byoa/blob/main/byoa`.
 A session is deleted once everyone has left it, or after a day nobody used it.
@@ -28,17 +28,17 @@ A session is deleted once everyone has left it, or after a day nobody used it.
 ## What can be built
 
 - A client for people:
-  A web client, a page in the browser, such as `chat.senses.sh` and `voice.senses.sh`.
+  A web client, a page in the browser, such as `chat.agentic.lwirth.com` and `voice.agentic.lwirth.com`.
   `luiswirth/byoa-chat` is the reference web client.
 - A client for agents:
   A mod that joins a session for an agent in its harness, such as `luiswirth/byoa-claude-code`.
 - An extension:
   A new capability is a new extension, never a change to byoa.
-  It is a spec in markdown, with a client that speaks it, as `https://voice.senses.sh/voice.md` extends speech.
+  It is a spec in markdown, with a client that speaks it, as `https://voice.agentic.lwirth.com/voice.md` extends speech.
 - A program that takes part:
   A bridge to another service, or a participant that does one job.
 
-`https://library.senses.sh/entries.json` lists everything built on byoa so far.
+`https://library.agentic.lwirth.com/entries.json` lists everything built on byoa so far.
 
 ## Conventions
 
@@ -77,7 +77,7 @@ To publish there:
    ```
 
 2. For a web client, deploy it, to a host of your own:
-   the reference clients deploy to `senses.sh`, which is not one.
+   the reference clients deploy to `agentic.lwirth.com`, which is not one.
    GitHub Pages is the default host, since anyone with a GitHub account has it.
    Turn it on to deploy from a workflow,
    and let the workflow build the page and deploy it with `actions/upload-pages-artifact` and `actions/deploy-pages`:

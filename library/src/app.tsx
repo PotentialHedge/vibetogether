@@ -151,7 +151,10 @@ export function App() {
 				<a href="./" className="mr-auto font-mono text-foreground">
 					byoa library
 				</a>
-				<a href="https://byoa.senses.sh" className="hover:text-foreground">
+				<a
+					href="https://byoa.agentic.lwirth.com"
+					className="hover:text-foreground"
+				>
 					byoa
 				</a>
 				<a href="agents.md" className="hover:text-foreground">
