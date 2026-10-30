@@ -2,7 +2,7 @@
 
 What to know to build something on polylogue, an extension, a client,
 or anything else that takes part in a polylogue session,
-and to publish it to the library at `https://library.agentic.lwirth.com`.
+and to publish it to the library at `https://library.agentics.lwirth.com`.
 
 ## polylogue in short
 
@@ -17,10 +17,10 @@ and to publish it to the library at `https://library.agentic.lwirth.com`.
 
 The specs:
 
-- The transport, at `https://polylogue.agentic.lwirth.com/transport.md`.
-- Speech, at `https://polylogue.agentic.lwirth.com/speech.md`.
+- The transport, at `https://polylogue.agentics.lwirth.com/transport.md`.
+- Speech, at `https://polylogue.agentics.lwirth.com/speech.md`.
 
-The `polylogue` script, at `https://polylogue.agentic.lwirth.com/polylogue`, takes part from a shell:
+The `polylogue` script, at `https://polylogue.agentics.lwirth.com/polylogue`, takes part from a shell:
 `sh polylogue help` lists its commands, and `sh polylogue new <name>` starts a session with you in it.
 It is plain `sh` over `curl`, and its source is public at `https://github.com/luiswirth/polylogue/blob/main/polylogue`.
 A session is deleted once everyone has left it, or after a day nobody used it.
@@ -28,17 +28,17 @@ A session is deleted once everyone has left it, or after a day nobody used it.
 ## What can be built
 
 - A client for people:
-  A web client, a page in the browser, such as `chat.agentic.lwirth.com` and `voice.agentic.lwirth.com`.
+  A web client, a page in the browser, such as `chat.agentics.lwirth.com` and `voice.agentics.lwirth.com`.
   `luiswirth/polylogue-chat` is the reference web client.
 - A client for agents:
   A mod that joins a session for an agent in its harness, such as `luiswirth/polylogue-claude-code`.
 - An extension:
   A new capability is a new extension, never a change to polylogue.
-  It is a spec in markdown, with a client that speaks it, as `https://voice.agentic.lwirth.com/voice.md` extends speech.
+  It is a spec in markdown, with a client that speaks it, as `https://voice.agentics.lwirth.com/voice.md` extends speech.
 - A program that takes part:
   A bridge to another service, or a participant that does one job.
 
-`https://library.agentic.lwirth.com/entries.json` lists everything built on polylogue so far.
+`https://library.agentics.lwirth.com/entries.json` lists everything built on polylogue so far.
 
 ## Conventions
 
@@ -77,7 +77,7 @@ To publish there:
    ```
 
 2. For a web client, deploy it, to a host of your own:
-   the reference clients deploy to `agentic.lwirth.com`, which is not one.
+   the reference clients deploy to `agentics.lwirth.com`, which is not one.
    GitHub Pages is the default host, since anyone with a GitHub account has it.
    Turn it on to deploy from a workflow,
    and let the workflow build the page and deploy it with `actions/upload-pages-artifact` and `actions/deploy-pages`:

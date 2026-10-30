@@ -152,7 +152,7 @@ export function App() {
 					polylogue library
 				</a>
 				<a
-					href="https://polylogue.agentic.lwirth.com"
+					href="https://polylogue.agentics.lwirth.com"
 					className="hover:text-foreground"
 				>
 					polylogue
