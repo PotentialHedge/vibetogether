@@ -29,12 +29,12 @@ export type PageSession = {
 };
 
 /** The relay: the one in the page's address as `?relay=<url>`, or else the
- * local one while developing, and byoa.senses.sh once deployed. */
+ * local one while developing, and byoa.agentic.lwirth.com once deployed. */
 export const relay =
 	new URLSearchParams(location.search).get("relay") ??
 	(location.hostname === "localhost"
 		? "http://localhost:8790"
-		: "https://byoa.senses.sh");
+		: "https://byoa.agentic.lwirth.com");
 
 const linkOf = () =>
 	new URLSearchParams(location.hash.slice(1)).get("session") ?? "";
