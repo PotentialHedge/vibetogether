@@ -1,7 +1,7 @@
-/** The page a person meets first on any byoa service: one prompt to give
+/** The page a person meets first on any polylogue service: one prompt to give
  * their agent, which does everything else. Styled with Tailwind and shadcn's
  * theme variables, so it takes on each service's theme; the service adds this
- * directory to Tailwind's sources, as `@source "../node_modules/byoa-web/onboard"`. */
+ * directory to Tailwind's sources, as `@source "../node_modules/polylogue-web/onboard"`. */
 
 import { type ReactNode, useState } from "react";
 
@@ -29,7 +29,7 @@ const STEPS = [
 	["Wait", "here: once your agent has joined, this page goes on."],
 ] as const;
 
-const NAME = "byoa-name";
+const NAME = "polylogue-name";
 
 /** Asks the person for the name they take part under, once per browser, and
  * renders the page under it, with `rename` to ask again, such as for a name
@@ -127,9 +127,9 @@ export function Frame({
 				<footer className="text-xs text-muted-foreground">
 					<a
 						className="underline-offset-4 hover:text-foreground hover:underline"
-						href="https://byoa.agentic.lwirth.com"
+						href="https://polylogue.agentic.lwirth.com"
 					>
-						byoa
+						polylogue
 					</a>
 					: bring your own agent
 				</footer>

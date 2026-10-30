@@ -11,9 +11,9 @@ importers:
       '@types/react':
         specifier: ^19.3.0
         version: 19.3.0
-      byoa:
-        specifier: github:luiswirth/byoa
-        version: https://codeload.github.com/luiswirth/byoa/tar.gz/9f7ae73fda36c86fa14967430b96705f74ec25d0
+      polylogue:
+        specifier: github:luiswirth/polylogue
+        version: https://codeload.github.com/luiswirth/polylogue/tar.gz/727979fadeaba23af9adeff6320a7c6edba835a3
       react:
         specifier: '>=19'
         version: 19.3.1
@@ -146,12 +146,12 @@ packages:
     cpu: [x64]
     os: [win32]
 
-  byoa@https://codeload.github.com/luiswirth/byoa/tar.gz/9f7ae73fda36c86fa14967430b96705f74ec25d0:
-    resolution: {gitHosted: true, integrity: sha512-ToPpldGNMReG7TjA4ocCisVKaDA2zFjPLPbmH13noLO+jdNNZoSn/GSDqqdc5K5fiQWX5kyzk6OXeecwjnTvUg==, tarball: https://codeload.github.com/luiswirth/byoa/tar.gz/9f7ae73fda36c86fa14967430b96705f74ec25d0}
-    version: 0.0.0
-
   csstype@3.2.3:
     resolution: {integrity: sha512-z1HGKcYy2xA8AGQfwrn0PAy+PB7X/GSj3UVJW9qKyn43xWa+gl5nXmU4qqLMRzWVLFC8KusUX8T/0kCiOYpAIQ==}
+
+  polylogue@https://codeload.github.com/luiswirth/polylogue/tar.gz/727979fadeaba23af9adeff6320a7c6edba835a3:
+    resolution: {gitHosted: true, integrity: sha512-YFJbwJd9zNNZ3b4L3TtMklDJLOp30JbU3D9nqFt/ac9Cpy25MDd6WEbQ82WHSm0DYtU855DZySsZ7ITz9TlY5w==, tarball: https://codeload.github.com/luiswirth/polylogue/tar.gz/727979fadeaba23af9adeff6320a7c6edba835a3}
+    version: 0.0.0
 
   react@19.3.1:
     resolution: {integrity: sha512-QNhWdt7nrgVWWQG58QuGsAR3jv3Hbe4mb4vz7w2csnHavciZJgda1CPNaldF6eVxv90ud3jUXpKlHL69gO38yw==}
@@ -228,9 +228,9 @@ snapshots:
   '@typescript/typescript-win32-x64@7.0.2':
     optional: true
 
-  byoa@https://codeload.github.com/luiswirth/byoa/tar.gz/9f7ae73fda36c86fa14967430b96705f74ec25d0: {}
-
   csstype@3.2.3: {}
+
+  polylogue@https://codeload.github.com/luiswirth/polylogue/tar.gz/727979fadeaba23af9adeff6320a7c6edba835a3: {}
 
   react@19.3.1: {}
 

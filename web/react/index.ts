@@ -7,7 +7,7 @@ import {
 	type Presence,
 	RelayError,
 	Session,
-} from "byoa/participant";
+} from "polylogue/participant";
 import { useEffect, useState, useSyncExternalStore } from "react";
 
 export type PageSession = {
@@ -29,12 +29,12 @@ export type PageSession = {
 };
 
 /** The relay: the one in the page's address as `?relay=<url>`, or else the
- * local one while developing, and byoa.agentic.lwirth.com once deployed. */
+ * local one while developing, and polylogue.agentic.lwirth.com once deployed. */
 export const relay =
 	new URLSearchParams(location.search).get("relay") ??
 	(location.hostname === "localhost"
 		? "http://localhost:8790"
-		: "https://byoa.agentic.lwirth.com");
+		: "https://polylogue.agentic.lwirth.com");
 
 const linkOf = () =>
 	new URLSearchParams(location.hash.slice(1)).get("session") ?? "";
@@ -43,7 +43,7 @@ const linkOf = () =>
  * reload, or the link opened again, joins as the same participant. Kept after
  * leaving too, since the name stays taken and only this link joins again.
  * Not in the address, which the person shares. */
-const kept = (link: string, name: string) => `byoa ${link} ${name}`;
+const kept = (link: string, name: string) => `polylogue ${link} ${name}`;
 
 /** Takes part as `name` in the session in the page's address, or, without
  * one, in a new session on the relay, which then goes into the address. */

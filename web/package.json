@@ -1,5 +1,5 @@
 {
-	"name": "byoa-web",
+	"name": "polylogue-web",
 	"private": true,
 	"type": "module",
 	"exports": {
@@ -11,12 +11,12 @@
 		"react"
 	],
 	"peerDependencies": {
-		"byoa": "github:luiswirth/byoa",
+		"polylogue": "github:luiswirth/polylogue",
 		"react": ">=19"
 	},
 	"devDependencies": {
 		"@types/react": "^19.3.0",
-		"byoa": "github:luiswirth/byoa",
+		"polylogue": "github:luiswirth/polylogue",
 		"react": ">=19",
 		"typescript": "^7.0.2"
 	}
