@@ -6,7 +6,7 @@
 import { type ReactNode, useState } from "react";
 
 export type OnboardProps = {
-	/** The service, as the person knows it, such as `voice.agentic.lwirth.com`. */
+	/** The service, as the person knows it, such as `voice.agentics.lwirth.com`. */
 	name: string;
 	/** What the person gets, in a few words. */
 	title: string;
@@ -39,7 +39,7 @@ export function Named({
 	service,
 	children,
 }: {
-	/** The service, as the person knows it, such as `voice.agentic.lwirth.com`. */
+	/** The service, as the person knows it, such as `voice.agentics.lwirth.com`. */
 	service: string;
 	children: (name: string, rename: () => void) => ReactNode;
 }) {
@@ -127,7 +127,7 @@ export function Frame({
 				<footer className="text-xs text-muted-foreground">
 					<a
 						className="underline-offset-4 hover:text-foreground hover:underline"
-						href="https://polylogue.agentic.lwirth.com"
+						href="https://polylogue.agentics.lwirth.com"
 					>
 						polylogue
 					</a>
