@@ -1,10 +1,10 @@
-# Build on byoa
+# Build on polylogue
 
-What to know to build something on byoa, an extension, a client,
-or anything else that takes part in a byoa session,
+What to know to build something on polylogue, an extension, a client,
+or anything else that takes part in a polylogue session,
 and to publish it to the library at `https://library.agentic.lwirth.com`.
 
-## byoa in short
+## polylogue in short
 
 - A session is one log, shared by people, agents and programs alike.
   Each participant is a name in it, bound to whoever joined under it:
@@ -17,28 +17,28 @@ and to publish it to the library at `https://library.agentic.lwirth.com`.
 
 The specs:
 
-- The transport, at `https://byoa.agentic.lwirth.com/transport.md`.
-- Speech, at `https://byoa.agentic.lwirth.com/speech.md`.
+- The transport, at `https://polylogue.agentic.lwirth.com/transport.md`.
+- Speech, at `https://polylogue.agentic.lwirth.com/speech.md`.
 
-The `byoa` script, at `https://byoa.agentic.lwirth.com/byoa`, takes part from a shell:
-`sh byoa help` lists its commands, and `sh byoa new <name>` starts a session with you in it.
-It is plain `sh` over `curl`, and its source is public at `https://github.com/luiswirth/byoa/blob/main/byoa`.
+The `polylogue` script, at `https://polylogue.agentic.lwirth.com/polylogue`, takes part from a shell:
+`sh polylogue help` lists its commands, and `sh polylogue new <name>` starts a session with you in it.
+It is plain `sh` over `curl`, and its source is public at `https://github.com/luiswirth/polylogue/blob/main/polylogue`.
 A session is deleted once everyone has left it, or after a day nobody used it.
 
 ## What can be built
 
 - A client for people:
   A web client, a page in the browser, such as `chat.agentic.lwirth.com` and `voice.agentic.lwirth.com`.
-  `luiswirth/byoa-chat` is the reference web client.
+  `luiswirth/polylogue-chat` is the reference web client.
 - A client for agents:
-  A mod that joins a session for an agent in its harness, such as `luiswirth/byoa-claude-code`.
+  A mod that joins a session for an agent in its harness, such as `luiswirth/polylogue-claude-code`.
 - An extension:
-  A new capability is a new extension, never a change to byoa.
+  A new capability is a new extension, never a change to polylogue.
   It is a spec in markdown, with a client that speaks it, as `https://voice.agentic.lwirth.com/voice.md` extends speech.
 - A program that takes part:
   A bridge to another service, or a participant that does one job.
 
-`https://library.agentic.lwirth.com/entries.json` lists everything built on byoa so far.
+`https://library.agentic.lwirth.com/entries.json` lists everything built on polylogue so far.
 
 ## Conventions
 
@@ -49,14 +49,14 @@ A session is deleted once everyone has left it, or after a day nobody used it.
   such as `Read https://<site>/agents.md and join the session <link>`.
 - A web client builds with relative paths, so it runs on any host, at a domain's root or under a path.
 - A spec is named after what it specifies, and points at the spec it extends.
-- What is built on byoa depends on no particular harness or model.
+- What is built on polylogue depends on no particular harness or model.
 - A client receives with a receive that waits, as long as it can, and never polls:
   each receive is one request to the relay, which has its limits.
   After a failure it waits longer each time before it tries again.
 - An agent is named under the person it takes part for, such as `luis/claude`, as the transport's spec says.
-- In TypeScript, `luiswirth/byoa` exports a participant library as `byoa/participant`.
-- In React, `luiswirth/byoa-web` exports what every web client shares:
-  the welcome page as `byoa-web/onboard`, and the session as a hook as `byoa-web/react`.
+- In TypeScript, `luiswirth/polylogue` exports a participant library as `polylogue/participant`.
+- In React, `luiswirth/polylogue-web` exports what every web client shares:
+  the welcome page as `polylogue-web/onboard`, and the session as a hook as `polylogue-web/react`.
 - A session's link is a secret:
   whoever holds it can join the session, under any name nobody has taken in it.
   So whoever starts a session joins it before handing out its link.
@@ -65,7 +65,7 @@ A session is deleted once everyone has left it, or after a day nobody used it.
 
 ## The library
 
-It lists every public GitHub repository with the topic `built-on-byoa`, within a few minutes of a push,
+It lists every public GitHub repository with the topic `built-on-polylogue`, within a few minutes of a push,
 and links each entry to the repository's homepage, or to the repository if it has none.
 
 To publish there:
@@ -92,5 +92,5 @@ To publish there:
    so that the library links the entry to it from the start:
 
    ```sh
-   gh repo edit --add-topic built-on-byoa --homepage https://<owner>.github.io/<name>/
+   gh repo edit --add-topic built-on-polylogue --homepage https://<owner>.github.io/<name>/
    ```

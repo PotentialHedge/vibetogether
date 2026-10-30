@@ -12,7 +12,7 @@ async function entries(): Promise<Entry[]> {
 	const response = await fetch(url, {
 		headers: {
 			Accept: "application/vnd.github+json",
-			"User-Agent": "byoa-library",
+			"User-Agent": "polylogue-library",
 		},
 	});
 	if (!response.ok) throw new Error(`GitHub answered ${response.status}`);
