@@ -19,6 +19,10 @@ export type OnboardProps = {
 	/** What the agent is to do once it has joined, such as `set up voice so we
 	 * can talk`: without it, agents read the prompt as only joining. */
 	goal?: string;
+	/** Ways to set the service up that the person chooses between before the
+	 * prompt, such as where voice runs. The chosen one's goal replaces `goal`,
+	 * and no prompt shows until one is chosen. */
+	choice?: Choice;
 	/** The person's name, under which the prompt names their agent, as
 	 * `<person>/<your name>`. */
 	person?: string;
@@ -26,11 +30,24 @@ export type OnboardProps = {
 	note?: ReactNode;
 };
 
-const STEPS = [
-	["Copy", "the prompt above."],
-	["Paste", "it into your agent, such as Claude Code."],
-	["Wait", "here: once your agent has joined, this page goes on."],
-] as const;
+export type Choice = {
+	options: Option[];
+	/** The option chosen, by its `id`, null for none yet. */
+	chosen: string | null;
+	choose(id: string): void;
+};
+
+export type Option = {
+	id: string;
+	/** Its name, in a word or two. */
+	title: string;
+	/** What it is, in one short sentence. */
+	description: string;
+	/** What it costs or needs, in a few words each, such as `Free`. */
+	facts?: string[];
+	/** What the agent is to do once it has joined, as `goal`. */
+	goal: string;
+};
 
 const NAME = "polylogue-name";
 
@@ -147,46 +164,111 @@ export function Onboard({
 	description,
 	link,
 	goal,
+	choice,
 	person,
 	note,
 }: OnboardProps) {
+	const chosen = choice?.options.find((option) => option.id === choice.chosen);
 	const as = person ? ` as ${person}/<your name>` : "";
-	const then = goal ? ` and ${goal}` : "";
+	const aim = chosen ? chosen.goal : goal;
+	const then = aim ? ` and ${aim}` : "";
 	const prompt = `Read ${new URL("agents.md", document.baseURI)}, join the session ${link}${as}${then}.`;
 	return (
 		<Frame name={name} title={title} description={description}>
-			<section className="flex flex-col gap-2 rounded-2xl border bg-card/60 p-2 shadow-2xl shadow-black/20 backdrop-blur">
-				<span className="px-2 pt-1 text-xs font-medium text-muted-foreground">
-					Give your agent this
-				</span>
-				<pre className="rounded-xl bg-background/80 p-4 font-mono text-sm leading-relaxed whitespace-pre-wrap">
-					{prompt}
-				</pre>
-				<Copy text={prompt} label="Copy the prompt" primary />
-			</section>
-			<section className="flex flex-col gap-2 rounded-2xl border bg-card/40 p-2 sm:flex-row sm:items-center">
-				<div className="flex min-w-0 flex-1 flex-col px-2 py-1">
-					<span className="text-xs font-medium text-muted-foreground">
-						Session link
-					</span>
-					<code className="truncate font-mono text-sm">{link}</code>
-				</div>
-				<Copy text={link} label="Copy the link" />
-			</section>
-			<ol className="grid gap-5 sm:grid-cols-3">
-				{STEPS.map(([verb, rest], i) => (
-					<li key={verb} className="flex gap-3 text-sm sm:flex-col sm:gap-2">
-						<span className="flex size-6 shrink-0 items-center justify-center rounded-full border font-mono text-xs text-muted-foreground">
-							{i + 1}
-						</span>
-						<span className="text-muted-foreground">
-							<span className="font-medium text-foreground">{verb}</span> {rest}
-						</span>
-					</li>
-				))}
-			</ol>
+			{choice && <Options choice={choice} />}
+			{(!choice || chosen) && (
+				<section className="flex flex-col gap-3">
+					<div className="flex flex-col gap-2 rounded-2xl border bg-card/60 p-2 shadow-2xl shadow-black/20 backdrop-blur">
+						<pre className="rounded-xl bg-background/80 p-4 font-mono text-sm leading-relaxed whitespace-pre-wrap">
+							{prompt}
+						</pre>
+						<Copy
+							text={prompt}
+							label="Copy the prompt for your agent"
+							primary
+						/>
+					</div>
+					<p className="px-2 text-sm text-pretty text-muted-foreground">
+						Paste it into your agent, such as Claude Code, and keep this page
+						open: it goes on once your agent has joined.{" "}
+						<CopyLink link={link} />
+					</p>
+				</section>
+			)}
 			{note && <p className="text-sm text-muted-foreground">{note}</p>}
 		</Frame>
+	);
+}
+
+/** The ways to set the service up, as large buttons side by side. */
+function Options({ choice }: { choice: Choice }) {
+	return (
+		<fieldset className="grid gap-3 sm:grid-cols-2">
+			{choice.options.map((option) => {
+				const on = option.id === choice.chosen;
+				return (
+					<label
+						key={option.id}
+						className={`flex cursor-pointer flex-col gap-2 rounded-2xl border p-5 transition-all has-focus-visible:ring-3 has-focus-visible:ring-ring/50 active:translate-y-px ${on ? "border-primary/70 bg-card shadow-2xl shadow-black/30 ring-1 ring-primary/40" : "bg-card/40 hover:border-foreground/30 hover:bg-card/70"}`}
+					>
+						<input
+							type="radio"
+							name="onboard-choice"
+							className="sr-only"
+							checked={on}
+							onChange={() => choice.choose(option.id)}
+						/>
+						<span className="flex items-center justify-between gap-3">
+							<span className="text-xl font-semibold tracking-tight">
+								{option.title}
+							</span>
+							<span
+								aria-hidden
+								className={`flex size-5 shrink-0 items-center justify-center rounded-full border transition ${on ? "border-primary bg-primary" : "border-muted-foreground/40"}`}
+							>
+								{on && (
+									<span className="size-2 rounded-full bg-primary-foreground" />
+								)}
+							</span>
+						</span>
+						<span className="text-sm text-pretty text-muted-foreground">
+							{option.description}
+						</span>
+						{option.facts && (
+							<span className="mt-1 flex flex-wrap gap-1.5">
+								{option.facts.map((fact) => (
+									<span
+										key={fact}
+										className="rounded-full border px-2 py-0.5 text-xs text-muted-foreground"
+									>
+										{fact}
+									</span>
+								))}
+							</span>
+						)}
+					</label>
+				);
+			})}
+		</fieldset>
+	);
+}
+
+/** The session's link alone, for an agent that is given it some other way. */
+function CopyLink({ link }: { link: string }) {
+	const [copied, setCopied] = useState(false);
+	return (
+		<button
+			type="button"
+			title={link}
+			className="text-foreground/80 underline underline-offset-4 hover:text-foreground"
+			onClick={async () => {
+				await navigator.clipboard.writeText(link);
+				setCopied(true);
+				setTimeout(() => setCopied(false), 2000);
+			}}
+		>
+			{copied ? "Link copied" : "Copy the session link alone"}
+		</button>
 	);
 }
 
