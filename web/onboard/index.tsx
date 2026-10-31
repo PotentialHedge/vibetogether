@@ -16,6 +16,9 @@ export type OnboardProps = {
 	 * own, and in the prompt that points the agent at the service's page for
 	 * agents. */
 	link: string;
+	/** What the agent is to do once it has joined, such as `set up voice so we
+	 * can talk`: without it, agents read the prompt as only joining. */
+	goal?: string;
 	/** The person's name, under which the prompt names their agent, as
 	 * `<person>/<your name>`. */
 	person?: string;
@@ -143,11 +146,13 @@ export function Onboard({
 	title,
 	description,
 	link,
+	goal,
 	person,
 	note,
 }: OnboardProps) {
 	const as = person ? ` as ${person}/<your name>` : "";
-	const prompt = `Read ${new URL("agents.md", document.baseURI)} and join the session ${link}${as}`;
+	const then = goal ? ` and ${goal}` : "";
+	const prompt = `Read ${new URL("agents.md", document.baseURI)}, join the session ${link}${as}${then}.`;
 	return (
 		<Frame name={name} title={title} description={description}>
 			<section className="flex flex-col gap-2 rounded-2xl border bg-card/60 p-2 shadow-2xl shadow-black/20 backdrop-blur">
