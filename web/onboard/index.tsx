@@ -28,6 +28,9 @@ export type OnboardProps = {
 	person?: string;
 	/** What the person should know before, such as an account it needs. */
 	note?: ReactNode;
+	/** Called once the person copied the prompt, such as to go on to waiting
+	 * for the agent. */
+	copied?: () => void;
 };
 
 export type Choice = {
@@ -161,6 +164,14 @@ export function Frame({
 	);
 }
 
+/** The prompt that brings an agent into the session at `link`: to read the
+ * service's page for agents, join under the person's prefix, and do `goal`. */
+export function promptFor(link: string, person?: string, goal?: string) {
+	const as = person ? ` as ${person}/<your name>` : "";
+	const then = goal ? ` and ${goal}` : "";
+	return `Read ${new URL("agents.md", document.baseURI)}, join the session ${link}${as}${then}.`;
+}
+
 export function Onboard({
 	name,
 	title,
@@ -170,12 +181,10 @@ export function Onboard({
 	choice,
 	person,
 	note,
+	copied,
 }: OnboardProps) {
 	const chosen = choice?.options.find((option) => option.id === choice.chosen);
-	const as = person ? ` as ${person}/<your name>` : "";
-	const aim = chosen ? chosen.goal : goal;
-	const then = aim ? ` and ${aim}` : "";
-	const prompt = `Read ${new URL("agents.md", document.baseURI)}, join the session ${link}${as}${then}.`;
+	const prompt = promptFor(link, person, chosen ? chosen.goal : goal);
 	return (
 		<Frame name={name} title={title} description={description}>
 			{choice && <Options choice={choice} />}
@@ -190,6 +199,7 @@ export function Onboard({
 							text={prompt}
 							label="Copy the prompt for your agent"
 							primary
+							copied={copied}
 						/>
 					</div>
 					<p className="px-2 text-sm text-pretty text-muted-foreground">
@@ -280,10 +290,12 @@ function Copy({
 	text,
 	label,
 	primary = false,
+	copied: done,
 }: {
 	text: string;
 	label: string;
 	primary?: boolean;
+	copied?: (() => void) | undefined;
 }) {
 	const [copied, setCopied] = useState(false);
 	return (
@@ -294,6 +306,7 @@ function Copy({
 				await navigator.clipboard.writeText(text);
 				setCopied(true);
 				setTimeout(() => setCopied(false), 2000);
+				done?.();
 			}}
 		>
 			<svg
