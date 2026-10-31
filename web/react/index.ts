@@ -45,6 +45,11 @@ const linkOf = () =>
  * Not in the address, which the person shares. */
 const kept = (link: string, name: string) => `polylogue ${link} ${name}`;
 
+/** The join on its way for each kept link, which a page mounted again waits
+ * for, as under React's StrictMode: a second join without the link the first
+ * brings would find the name taken. */
+const joining = new Map<string, Promise<void>>();
+
 /** Takes part as `name` in the session in the page's address, or, without
  * one, in a new session on the relay, which then goes into the address. */
 export function useSession(name: string): PageSession {
@@ -72,31 +77,39 @@ export function useSession(name: string): PageSession {
 				.catch((error: Error) => setProblem(error.message));
 			return;
 		}
-		const session = new Session(
-			link,
-			name,
-			localStorage.getItem(kept(link, name)),
-		);
-		const stop = session.subscribe({
-			entry: () => setEntries([...session.log]),
-			presence: (presence) => {
-				setPresence(presence);
-				if (name in presence) setSession(session);
-			},
-			end: setProblem,
-		});
-		session
-			.join()
-			.then(() => {
-				if (session.me) localStorage.setItem(kept(link, name), session.me);
-			})
-			.catch((error: Error) => {
+		const key = kept(link, name);
+		let session: Session | null = null;
+		let stop = () => {};
+		let gone = false;
+		const join = (joining.get(key) ?? Promise.resolve()).then(async () => {
+			if (gone) return;
+			const joined = new Session(link, name, localStorage.getItem(key));
+			session = joined;
+			stop = joined.subscribe({
+				entry: () => setEntries([...joined.log]),
+				presence: (presence) => {
+					setPresence(presence);
+					if (name in presence) setSession(joined);
+				},
+				end: setProblem,
+			});
+			try {
+				await joined.join();
+				if (joined.me) localStorage.setItem(key, joined.me);
+			} catch (error) {
+				if (gone || !(error instanceof Error)) return;
 				setProblem(error.message);
 				setTaken(error instanceof RelayError && error.status === 409);
-			});
+			}
+		});
+		joining.set(key, join);
+		void join.then(() => {
+			if (joining.get(key) === join) joining.delete(key);
+		});
 		return () => {
+			gone = true;
 			stop();
-			session.close();
+			session?.close();
 		};
 	}, [link, name]);
 
