@@ -61,6 +61,13 @@ export type Option = {
 
 const NAME = "polylogue-name";
 
+/** What the person types, in the form of a name as it is typed: lower case,
+ * with hyphens for spaces, as `luis-wirth`. A slash goes, since it divides
+ * an agent's name from its person's. */
+function nameForm(typed: string): string {
+	return typed.toLowerCase().replace(/\s+/g, "-").replaceAll("/", "");
+}
+
 /** Asks the person for the name they take part under, once per browser, and
  * renders the page under it, with `rename` to ask again, such as for a name
  * that is taken in the session. Every person in a session has a name of
@@ -81,7 +88,7 @@ export function Named({
 			setDraft(name);
 			setName(null);
 		});
-	const chosen = draft.trim();
+	const chosen = draft.replace(/^-+|-+$/g, "");
 	return (
 		<Frame
 			name={service}
@@ -104,7 +111,7 @@ export function Named({
 					placeholder="Your name"
 					maxLength={64}
 					value={draft}
-					onChange={(event) => setDraft(event.target.value)}
+					onChange={(event) => setDraft(nameForm(event.target.value))}
 				/>
 				<button
 					type="submit"
