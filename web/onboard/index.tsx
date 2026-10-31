@@ -179,7 +179,7 @@ export function Onboard({
 			{(!choice || chosen) && (
 				<section className="flex flex-col gap-3">
 					<div className="flex flex-col gap-2 rounded-2xl border bg-card/60 p-2 shadow-2xl shadow-black/20 backdrop-blur">
-						<pre className="rounded-xl bg-background/80 p-4 font-mono text-sm leading-relaxed whitespace-pre-wrap">
+						<pre className="rounded-xl bg-background/80 p-4 font-mono text-sm leading-relaxed whitespace-pre-wrap wrap-anywhere">
 							{prompt}
 						</pre>
 						<Copy
