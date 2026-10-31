@@ -47,6 +47,9 @@ export type Option = {
 	facts?: string[];
 	/** What the agent is to do once it has joined, as `goal`. */
 	goal: string;
+	/** What the person can do here once it is chosen, such as entering a key,
+	 * shown under the options, before the prompt. */
+	detail?: ReactNode;
 };
 
 const NAME = "polylogue-name";
@@ -176,6 +179,7 @@ export function Onboard({
 	return (
 		<Frame name={name} title={title} description={description}>
 			{choice && <Options choice={choice} />}
+			{chosen?.detail}
 			{(!choice || chosen) && (
 				<section className="flex flex-col gap-3">
 					<div className="flex flex-col gap-2 rounded-2xl border bg-card/60 p-2 shadow-2xl shadow-black/20 backdrop-blur">
