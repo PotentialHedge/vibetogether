@@ -28,9 +28,10 @@ export type OnboardProps = {
 	person?: string;
 	/** What the person should know before, such as an account it needs. */
 	note?: ReactNode;
-	/** Called once the person copied the prompt, such as to go on to waiting
-	 * for the agent. */
-	copied?: () => void;
+	/** What follows the prompt on the service's side, such as the agent's
+	 * steps once it joined, shown under it on the same page: copying the
+	 * prompt only copies it, and the page changes in place. */
+	children?: ReactNode;
 };
 
 export type Choice = {
@@ -38,6 +39,9 @@ export type Choice = {
 	/** The option chosen, by its `id`, null for none yet. */
 	chosen: string | null;
 	choose(id: string): void;
+	/** Whether the choice is settled, such as once the agent joined: the
+	 * options fold away, and the chosen one's detail and prompt stay. */
+	folded?: boolean;
 };
 
 export type Option = {
@@ -166,7 +170,7 @@ export function Frame({
 
 /** The prompt that brings an agent into the session at `link`: to read the
  * service's page for agents, join under the person's prefix, and do `goal`. */
-export function promptFor(link: string, person?: string, goal?: string) {
+function promptFor(link: string, person?: string, goal?: string) {
 	const as = person ? ` as ${person}/<your name>` : "";
 	const then = goal ? ` and ${goal}` : "";
 	return `Read ${new URL("agents.md", document.baseURI)}, join the session ${link}${as}${then}.`;
@@ -181,7 +185,7 @@ export function Onboard({
 	choice,
 	person,
 	note,
-	copied,
+	children,
 }: OnboardProps) {
 	const chosen = choice?.options.find((option) => option.id === choice.chosen);
 	const prompt = promptFor(link, person, chosen ? chosen.goal : goal);
@@ -199,7 +203,6 @@ export function Onboard({
 							text={prompt}
 							label="Copy the prompt for your agent"
 							primary
-							copied={copied}
 						/>
 					</div>
 					<p className="px-2 text-sm text-pretty text-muted-foreground">
@@ -209,61 +212,71 @@ export function Onboard({
 					</p>
 				</section>
 			)}
+			{children}
 			{note && <p className="text-sm text-muted-foreground">{note}</p>}
 		</Frame>
 	);
 }
 
-/** The ways to set the service up, as large buttons side by side. */
+/** The ways to set the service up, as large buttons side by side, which
+ * fold away in place once the choice is settled, so that nothing below jumps. */
 function Options({ choice }: { choice: Choice }) {
+	const folded = choice.folded ?? false;
 	return (
-		<fieldset className="grid gap-3 sm:grid-cols-2">
-			{choice.options.map((option) => {
-				const on = option.id === choice.chosen;
-				return (
-					<label
-						key={option.id}
-						className={`flex cursor-pointer flex-col gap-2 rounded-2xl border p-5 transition-all has-focus-visible:ring-3 has-focus-visible:ring-ring/50 active:translate-y-px ${on ? "border-primary/70 bg-card shadow-2xl shadow-black/30 ring-1 ring-primary/40" : "bg-card/40 hover:border-foreground/30 hover:bg-card/70"}`}
-					>
-						<input
-							type="radio"
-							name="onboard-choice"
-							className="sr-only"
-							checked={on}
-							onChange={() => choice.choose(option.id)}
-						/>
-						<span className="flex items-center justify-between gap-3">
-							<span className="text-xl font-semibold tracking-tight">
-								{option.title}
+		<div
+			inert={folded}
+			className={`grid transition-all duration-500 ease-out ${folded ? "-mb-10 grid-rows-[0fr] opacity-0" : "grid-rows-[1fr]"}`}
+		>
+			<fieldset
+				className={`grid min-h-0 gap-3 sm:grid-cols-2 ${folded ? "overflow-hidden" : ""}`}
+			>
+				{choice.options.map((option) => {
+					const on = option.id === choice.chosen;
+					return (
+						<label
+							key={option.id}
+							className={`flex cursor-pointer flex-col gap-2 rounded-2xl border p-5 transition-all has-focus-visible:ring-3 has-focus-visible:ring-ring/50 active:translate-y-px ${on ? "border-primary/70 bg-card shadow-2xl shadow-black/30 ring-1 ring-primary/40" : "bg-card/40 hover:border-foreground/30 hover:bg-card/70"}`}
+						>
+							<input
+								type="radio"
+								name="onboard-choice"
+								className="sr-only"
+								checked={on}
+								onChange={() => choice.choose(option.id)}
+							/>
+							<span className="flex items-center justify-between gap-3">
+								<span className="text-xl font-semibold tracking-tight">
+									{option.title}
+								</span>
+								<span
+									aria-hidden
+									className={`flex size-5 shrink-0 items-center justify-center rounded-full border transition ${on ? "border-primary bg-primary" : "border-muted-foreground/40"}`}
+								>
+									{on && (
+										<span className="size-2 rounded-full bg-primary-foreground" />
+									)}
+								</span>
 							</span>
-							<span
-								aria-hidden
-								className={`flex size-5 shrink-0 items-center justify-center rounded-full border transition ${on ? "border-primary bg-primary" : "border-muted-foreground/40"}`}
-							>
-								{on && (
-									<span className="size-2 rounded-full bg-primary-foreground" />
-								)}
+							<span className="text-sm text-pretty text-muted-foreground">
+								{option.description}
 							</span>
-						</span>
-						<span className="text-sm text-pretty text-muted-foreground">
-							{option.description}
-						</span>
-						{option.facts && (
-							<span className="mt-1 flex flex-wrap gap-1.5">
-								{option.facts.map((fact) => (
-									<span
-										key={fact}
-										className="rounded-full border px-2 py-0.5 text-xs text-muted-foreground"
-									>
-										{fact}
-									</span>
-								))}
-							</span>
-						)}
-					</label>
-				);
-			})}
-		</fieldset>
+							{option.facts && (
+								<span className="mt-1 flex flex-wrap gap-1.5">
+									{option.facts.map((fact) => (
+										<span
+											key={fact}
+											className="rounded-full border px-2 py-0.5 text-xs text-muted-foreground"
+										>
+											{fact}
+										</span>
+									))}
+								</span>
+							)}
+						</label>
+					);
+				})}
+			</fieldset>
+		</div>
 	);
 }
 
@@ -290,12 +303,10 @@ function Copy({
 	text,
 	label,
 	primary = false,
-	copied: done,
 }: {
 	text: string;
 	label: string;
 	primary?: boolean;
-	copied?: (() => void) | undefined;
 }) {
 	const [copied, setCopied] = useState(false);
 	return (
@@ -306,7 +317,6 @@ function Copy({
 				await navigator.clipboard.writeText(text);
 				setCopied(true);
 				setTimeout(() => setCopied(false), 2000);
-				done?.();
 			}}
 		>
 			<svg
