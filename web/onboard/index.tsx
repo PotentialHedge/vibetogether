@@ -210,6 +210,10 @@ export function Onboard({
 						open: it goes on once your agent has joined.{" "}
 						<CopyLink link={link} />
 					</p>
+					<p className="px-2 text-sm text-pretty text-muted-foreground">
+						The session link is like a password: share it only with people you
+						trust.
+					</p>
 				</section>
 			)}
 			{children}
