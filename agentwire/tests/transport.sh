@@ -152,6 +152,15 @@ wait "$paged" "$waiting"
 check "the receives an entry answers share the presence" "$(tail -1 "$work/answered" | jq '.presence.luis.receiving')" true
 curl -s -X POST "$observer/leave" >/dev/null
 
+# A receive answered at once stirs the others with the read position it moved.
+check "send" "$(curl -s --data-binary 'Ready?' "$luis")" '{"n":19}'
+curl -s "$luis?after=19&own=1&presence=1" >"$work/acknowledged" &
+waiting=$!
+until_receiving "$claude?after=0&presence=1&wait=0" luis
+curl -s "$claude?wait=0" >/dev/null
+wait "$waiting"
+check "the presence a receive stirs shows what it read" "$(tail -1 "$work/acknowledged" | jq '.presence["luis/claude"].read')" 19
+
 check "join with no name" "$(status -X POST "$link/join")" 400
 check "bad after" "$(status "$luis?after=x")" 400
 check "no session" "$(status "$relay/v1/s/AAAAAAAAAAAAAAAAAAAAAA/join?as=luis" -X POST)" 404

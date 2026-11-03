@@ -458,12 +458,15 @@ impl Sessions {
                 answer,
             },
         );
+        // A receive answered at once stirs the others only as it ends, so that
+        // the presence they get shows what it read.
+        let ready = self.ready(session, &name)?;
         match replaced {
             Some(replaced) => _ = replaced.answer.send(Answer::Replaced),
-            None if !presence => self.stir(session, &name)?,
+            None if !presence && !ready => self.stir(session, &name)?,
             None => {}
         }
-        if self.ready(session, &name)? {
+        if ready {
             self.answer(session, &name)?;
         }
         let ticket = Ticket {
