@@ -24,7 +24,7 @@ export type OnboardProps = {
 	 * and no prompt shows until one is chosen. */
 	choice?: Choice;
 	/** The person's name, under which the prompt names their agent, as
-	 * `<person>/<your name>`. */
+	 * `<person>/<agent>`. */
 	person?: string;
 	/** What the person should know before, such as an account it needs. */
 	note?: ReactNode;
@@ -193,7 +193,7 @@ function sessionOf(link: string) {
  * It holds one link, to the page for agents, and names the session by
  * `sessionOf`. */
 function promptFor(link: string, person?: string, goal?: string) {
-	const as = person ? ` as ${person}/<your name>` : "";
+	const as = person ? ` as ${person}/<agent>` : "";
 	const then = goal ? `, and ${goal}` : "";
 	return `Read ${new URL("agents.md", document.baseURI)} and join the session ${sessionOf(link)}${as}${then}.`;
 }
