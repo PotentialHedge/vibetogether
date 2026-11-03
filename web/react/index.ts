@@ -9,6 +9,7 @@ import {
 	Session,
 } from "polylogue/participant";
 import { useEffect, useState, useSyncExternalStore } from "react";
+import { defaultRelay } from "../onboard/index.tsx";
 
 export type PageSession = {
 	/** The session's link, from the page's address, as `#session=<link>`. */
@@ -29,12 +30,10 @@ export type PageSession = {
 };
 
 /** The relay: the one in the page's address as `?relay=<url>`, or else the
- * local one while developing, and polylogue.agentics.lwirth.com once deployed. */
+ * local one while developing, and the default relay once deployed. */
 export const relay =
 	new URLSearchParams(location.search).get("relay") ??
-	(location.hostname === "localhost"
-		? "http://localhost:8790"
-		: "https://polylogue.agentics.lwirth.com");
+	(location.hostname === "localhost" ? "http://localhost:8790" : defaultRelay);
 
 const linkOf = () =>
 	new URLSearchParams(location.hash.slice(1)).get("session") ?? "";

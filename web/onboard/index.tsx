@@ -14,7 +14,7 @@ export type OnboardProps = {
 	description: string;
 	/** The session's link, which names its relay. The page offers it on its
 	 * own, and in the prompt that points the agent at the service's page for
-	 * agents. */
+	 * agents, as its token alone where it is on the default relay. */
 	link: string;
 	/** What the agent is to do once it has joined, such as `set up voice so we
 	 * can talk`: without it, agents read the prompt as only joining. */
@@ -175,12 +175,27 @@ export function Frame({
 	);
 }
 
+/** The default relay, which every service's page for agents names, so that a
+ * session's token alone means a session on it. */
+export const defaultRelay = "https://polylogue.agentics.lwirth.com";
+
+/** What names the session at `link` for an agent: its token alone where it is
+ * on the default relay, and its full link on any other. */
+function sessionOf(link: string) {
+	const token = link.slice(`${defaultRelay}/v1/s/`.length);
+	return link === `${defaultRelay}/v1/s/${token}` && /^[\w-]+$/.test(token)
+		? token
+		: link;
+}
+
 /** The prompt that brings an agent into the session at `link`: to read the
- * service's page for agents, join under the person's prefix, and do `goal`. */
+ * service's page for agents, join under the person's prefix, and do `goal`.
+ * It holds one link, to the page for agents, and names the session by
+ * `sessionOf`. */
 function promptFor(link: string, person?: string, goal?: string) {
 	const as = person ? ` as ${person}/<your name>` : "";
-	const then = goal ? ` and ${goal}` : "";
-	return `Read ${new URL("agents.md", document.baseURI)}, join the session ${link}${as}${then}.`;
+	const then = goal ? `, and ${goal}` : "";
+	return `Read ${new URL("agents.md", document.baseURI)} and join the session ${sessionOf(link)}${as}${then}.`;
 }
 
 export function Onboard({
@@ -218,8 +233,8 @@ export function Onboard({
 						<CopyLink link={link} />
 					</p>
 					<p className="px-2 text-sm text-pretty text-muted-foreground">
-						The session link is like a password: share it only with people you
-						trust.
+						The session {sessionOf(link) === link ? "link" : "token"} is like a
+						password: share it only with people you trust.
 					</p>
 				</section>
 			)}
@@ -291,21 +306,26 @@ function Options({ choice }: { choice: Choice }) {
 	);
 }
 
-/** The session's link alone, for an agent that is given it some other way. */
+/** The session alone, as the prompt names it, for an agent that is given it
+ * some other way, such as an adapter's command. */
 function CopyLink({ link }: { link: string }) {
 	const [copied, setCopied] = useState(false);
+	const session = sessionOf(link);
+	const what = session === link ? "link" : "token";
 	return (
 		<button
 			type="button"
-			title={link}
+			title={session}
 			className="text-foreground/80 underline underline-offset-4 hover:text-foreground"
 			onClick={async () => {
-				await navigator.clipboard.writeText(link);
+				await navigator.clipboard.writeText(session);
 				setCopied(true);
 				setTimeout(() => setCopied(false), 2000);
 			}}
 		>
-			{copied ? "Link copied" : "Copy the session link alone"}
+			{copied
+				? `${what === "link" ? "Link" : "Token"} copied`
+				: `Copy the session ${what} alone`}
 		</button>
 	);
 }
