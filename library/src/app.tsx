@@ -1,7 +1,7 @@
 import { Check, CodeXml, Copy, Star } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { type Entry, TOPIC } from "./entries.ts";
+import { type Entry, entries, TOPIC } from "./entries.ts";
 
 const GUIDE = new URL("agents.md", document.baseURI).href;
 
@@ -24,11 +24,7 @@ type Listing =
 function useListing(): Listing {
 	const [listing, setListing] = useState<Listing>({ state: "loading" });
 	useEffect(() => {
-		fetch("entries.json")
-			.then((response) => {
-				if (!response.ok) throw new Error(String(response.status));
-				return response.json() as Promise<Entry[]>;
-			})
+		entries()
 			.then((entries) => setListing({ state: "loaded", entries }))
 			.catch(() => setListing({ state: "failed" }));
 	}, []);

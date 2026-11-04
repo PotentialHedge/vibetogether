@@ -38,7 +38,7 @@ A session is deleted once everyone has left it, or after a day nobody used it.
 - A program that takes part:
   A bridge to another service, or a participant that does one job.
 
-`https://library.agentics.lwirth.com/entries.json` lists everything built on polylogue so far.
+Everything built on polylogue so far carries the GitHub topic `built-on-polylogue`, listed at `https://github.com/topics/built-on-polylogue`.
 
 ## Conventions
 

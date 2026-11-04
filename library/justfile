@@ -3,15 +3,12 @@ ci:
     nix fmt -- --ci
     pnpm install --frozen-lockfile
     biome check
-    pnpm types
     pnpm exec tsc -p .
-    pnpm exec tsc -p worker
     pnpm build
 
-# The page and the worker, locally, on port 8792.
+# The page, at localhost:5173.
 dev:
-    pnpm build
-    pnpm exec wrangler dev --port 8792
+    pnpm dev
 
 # Builds the page and serves it at library.agentics.lwirth.com.
 deploy: ci

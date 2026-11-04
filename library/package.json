@@ -4,8 +4,7 @@
 	"type": "module",
 	"scripts": {
 		"dev": "vite",
-		"build": "vite build",
-		"types": "wrangler types worker/env.d.ts"
+		"build": "vite build"
 	},
 	"dependencies": {
 		"@base-ui/react": "^1.9.0",

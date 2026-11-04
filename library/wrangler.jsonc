@@ -1,12 +1,9 @@
 {
 	"$schema": "node_modules/wrangler/config-schema.json",
 	"name": "polylogue-library",
-	"main": "worker/index.ts",
 	"compatibility_date": "2026-10-01",
 	"workers_dev": false,
 	"assets": {
-		"directory": "dist",
-		"binding": "ASSETS",
-		"run_worker_first": ["/entries.json"]
+		"directory": "dist"
 	}
 }
