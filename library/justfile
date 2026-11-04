@@ -10,6 +10,7 @@ ci:
 dev:
     pnpm dev
 
-# Builds the page and serves it at library.agentics.lwirth.com.
+# Builds the page and serves it at library.agentics.lwirth.com, from lwirth-cloud,
+# whose serve.nix in dotcloud says how.
 deploy: ci
-    pnpm exec wrangler deploy --domain library.agentics.lwirth.com
+    rsync -rlpt --delete --delay-updates --chmod=D755,F644 dist/ root@lwirth-cloud:/srv/library/
