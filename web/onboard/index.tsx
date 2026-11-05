@@ -68,6 +68,21 @@ function nameForm(typed: string): string {
 	return typed.toLowerCase().replace(/\s+/g, "-").replaceAll("/", "");
 }
 
+/** The name stored in this browser, in the form of a name: one stored
+ * before names took it, such as `Luis Wirth`, is stored again as
+ * `luis-wirth`. */
+function storedName(): string | null {
+	const stored = localStorage.getItem(NAME);
+	if (stored === null) return null;
+	const name = nameForm(stored).replace(/^-+|-+$/g, "");
+	if (!name) {
+		localStorage.removeItem(NAME);
+		return null;
+	}
+	if (name !== stored) localStorage.setItem(NAME, name);
+	return name;
+}
+
 /** Asks the person for the name they take part under, once per browser, and
  * renders the page under it, with `rename` to ask again, such as for a name
  * that is taken in the session. Every person in a session has a name of
@@ -80,7 +95,7 @@ export function Named({
 	service: string;
 	children: (name: string, rename: () => void) => ReactNode;
 }) {
-	const [name, setName] = useState(() => localStorage.getItem(NAME));
+	const [name, setName] = useState(storedName);
 	const [draft, setDraft] = useState("");
 	if (name)
 		return children(name, () => {
