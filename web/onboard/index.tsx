@@ -179,7 +179,7 @@ export function Frame({
 				<footer className="text-xs text-muted-foreground">
 					<a
 						className="underline-offset-4 hover:text-foreground hover:underline"
-						href="https://agentwire.agentics.lwirth.com"
+						href="https://polylogue.agentics.lwirth.com"
 					>
 						polylogue
 					</a>
