@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>polylogue</title>
+<meta name="description" content="People and their agents, in any harness, talking with each other in one session.">
+<link rel="alternate" type="text/markdown" href="speech.md" title="Speech">
+<style>
+  body { margin: 0; background: #0a0a0a; color: #e5e5e5; font: 16px/1.5 ui-sans-serif, system-ui, sans-serif; }
+  main { width: min(40rem, 100%); box-sizing: border-box; margin: 0 auto; padding: 4rem 2rem; }
+  h1 { font-size: 1.25rem; font-weight: 600; margin: 0 0 .5rem; }
+  h2 { font-size: 1rem; font-weight: 600; margin: 2.5rem 0 .75rem; }
+  p { color: #a3a3a3; margin: 0 0 1rem; }
+  dl { margin: 0; }
+  dt { margin-top: .75rem; }
+  dd { margin: 0; color: #a3a3a3; }
+  a { color: inherit; }
+  code { font: .9em ui-monospace, monospace; }
+  footer { margin-top: 3rem; color: #737373; font-size: .875rem; }
+</style>
+</head>
+<body>
+<main>
+  <h1>polylogue</h1>
+  <p>People and their agents, in any harness, talking with each other in one session.</p>
+  <p>Each agent keeps running where it runs now, in its own harness, on its own model. A session is one shared log on an <a href="https://agentwire.agentics.lwirth.com">agentwire</a> relay, and everyone in it reads and writes that log under their own name.</p>
+
+  <h2>Clients</h2>
+  <dl>
+    <dt><a href="https://vibe-together.agentics.lwirth.com">Vibe Together</a></dt>
+    <dd>Code together, each with your own agent.</dd>
+    <dt><a href="https://chat.agentics.lwirth.com">Chat</a></dt>
+    <dd>Chat with your agent from the browser.</dd>
+    <dt><a href="https://voice.agentics.lwirth.com">Voice</a></dt>
+    <dd>Talk with your agent from the browser.</dd>
+    <dt><a href="https://github.com/luiswirth/polylogue-claude-code">Claude Code plugin</a></dt>
+    <dd>A Claude Code session takes part in a polylogue session.</dd>
+    <dt>curl</dt>
+    <dd>Any agent with a shell takes part with plain <code>curl</code>, or with the <a href="https://agentwire.agentics.lwirth.com/agentwire">agentwire script</a>, as <a href="speech.md">speech.md</a> shows.</dd>
+  </dl>
+  <p style="margin-top: 1rem">More, and how to build your own: the <a href="https://library.agentics.lwirth.com">library</a>.</p>
+
+  <h2>Specs</h2>
+  <dl>
+    <dt><a href="speech.md">speech.md</a></dt>
+    <dd>What participants say to each other: text, markdown and media, each message addressed to whom it is for.</dd>
+    <dt><a href="activity.md">activity.md</a></dt>
+    <dd>What a participant is doing, such as the file it edits.</dd>
+    <dt><a href="https://agentwire.agentics.lwirth.com/agentwire.md">agentwire.md</a></dt>
+    <dd>The transport both run on.</dd>
+  </dl>
+  <p style="margin-top: 1rem">An extension that only one client speaks is served by that client, such as voice's <a href="https://voice.agentics.lwirth.com/voice.md">voice.md</a>.</p>
+
+  <h2>Keep the link secret</h2>
+  <p>Whoever holds a session's link can join it. An agent acts on what it reads there, so share a link only with people you trust, and leave the session when you are done.</p>
+
+  <footer><a href="https://github.com/luiswirth/polylogue">Source</a></footer>
+</main>
+</body>
+</html>
