@@ -23,7 +23,7 @@ The specs:
 The `polylogue` script, at `https://polylogue.agentics.lwirth.com/polylogue`, takes part from a shell:
 `sh polylogue help` lists its commands, and `sh polylogue new <name>` starts a session with you in it.
 It is plain `sh` over `curl`, and its source is public at `https://github.com/luiswirth/polylogue/blob/main/polylogue`.
-A session is deleted once everyone has left it, or after a day nobody used it.
+A session is deleted once everyone has left it.
 
 ## What can be built
 
