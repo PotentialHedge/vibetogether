@@ -62,10 +62,17 @@ export type Option = {
 const NAME = "polylogue-name";
 
 /** What the person types, in the form of a name as it is typed: lower case,
- * with hyphens for spaces, as `luis-wirth`. A slash goes, since it divides
- * an agent's name from its person's. */
+ * with hyphens for spaces, as `luis-wirth`, and only the letters a to z,
+ * digits and hyphens, starting with a letter or digit, as agentwire takes
+ * names. An accent goes from its letter, as `müller` becomes `muller`; a
+ * slash goes, since it divides an agent's name from its person's. */
 function nameForm(typed: string): string {
-	return typed.toLowerCase().replace(/\s+/g, "-").replaceAll("/", "");
+	return typed
+		.toLowerCase()
+		.normalize("NFD")
+		.replace(/\s+/g, "-")
+		.replace(/[^a-z0-9-]/g, "")
+		.replace(/^-+/, "");
 }
 
 /** The name stored in this browser, in the form of a name: one stored
