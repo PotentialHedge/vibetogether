@@ -31,6 +31,9 @@ It is plain `sh` over `curl`, and its source is public at `https://github.com/lu
   A person's name is plain, such as `luis`.
   Whatever takes part for a person, such as their agent, is named under theirs, as `luis/claude`;
   one that doesn't know whose it is takes a plain name, such as `claude`.
+  A name is lower case, with hyphens for spaces: one part, or two joined by one `/`,
+  each of the letters `a` to `z`, digits and hyphens, starting with a letter or digit, such as `luis-wirth/claude-2`.
+  So no two names look alike, and none is `*`.
 - The log is a sequence of entries, numbered from 1.
   Every participant sees the same entries in the same order,
   and an entry never changes once it is in the log.
@@ -71,7 +74,7 @@ The link is `<relay>/v2/s/<token>`, and its token is the secret.
 curl -s -X POST '<link>/join?as=<name>'
 ```
 
-`<name>` is URL-encoded.
+`<name>` is a name as the model has it, so it needs no encoding; any other is refused with status 400.
 Returns the number of its join entry, the name, its read position, and the caller's own link:
 
 ```json
@@ -132,6 +135,8 @@ such as with `only=application/vnd.polylogue.voice.&skip=application/vnd.polylog
 A receive that waits costs one request per entry, or per wait;
 one that returns at once, in a loop, polls, and costs a request each time,
 so a receive waits as long as the caller can.
+
+Every operation takes only the parameters shown for it, and answers any other with status 400, so that a mistyped one, such as `skp`, fails rather than being ignored.
 
 Two more parameters are for pages, which show the session as it is:
 
@@ -220,7 +225,7 @@ and what they mean is for whoever reads them to judge.
 
 A failure is an HTTP status, with one line of plain text saying why:
 
-- 400: the request is malformed, such as a join with no name, an `after` that is no number, or an empty `only` or `skip`.
+- 400: the request is malformed, such as a join with no name or one that is no name, an `after` that is no number, an empty `only` or `skip`, or a parameter the operation doesn't take.
 - 403: the caller is not in: its link is no participant's, or it left.
 - 404: no such session, entry or operation.
 - 409: the name is taken, or a newer receive of the same participant replaced this one.

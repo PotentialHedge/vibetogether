@@ -182,6 +182,24 @@ fn origin(headers: &HeaderMap) -> String {
     format!("{scheme}://{host}")
 }
 
+/// Refuses a query with a parameter `operation` doesn't take, so that a
+/// mistyped one, such as `skp`, fails rather than being ignored.
+fn takes(query: &str, operation: &str, keys: &[&str]) -> Result<(), Fail> {
+    match form_urlencoded::parse(query.as_bytes()).find(|(key, _)| !keys.contains(&key.as_ref())) {
+        None => Ok(()),
+        Some((key, _)) => Err(fail(
+            400,
+            match keys {
+                [] => format!("{operation} takes no parameters, and {key} is none"),
+                _ => format!(
+                    "{operation} takes only {}, and {key} is none of them",
+                    keys.join(", ")
+                ),
+            },
+        )),
+    }
+}
+
 fn param<'a>(query: &'a str, key: &str) -> Option<Cow<'a, str>> {
     form_urlencoded::parse(query.as_bytes())
         .find(|(k, _)| k == key)
@@ -224,6 +242,7 @@ async fn route(relay: &Relay, request: Request) -> Result<Response, Fail> {
         ["s", ..] => Err(gone(&origin)),
         [version, ..] if is_version(version) && *version != VERSION => Err(gone(&origin)),
         [VERSION, "s"] if parts.method == Method::POST => {
+            takes(query, "creating a session", &[])?;
             let id = relay.sessions().create()?;
             Ok(text(format!("{origin}/{VERSION}/s/{id}\n"), PLAIN))
         }
@@ -269,22 +288,36 @@ async fn session(
     let get = method == Method::GET;
     match (*secret, operation) {
         ("join", []) if post => {
+            takes(query, "a join", &["as"])?;
             let joined = relay
                 .sessions()
                 .join(id, param(query, "as").as_deref(), link)?;
             Ok(json(&joined))
         }
-        (_, []) if post => send(relay, id, secret, headers, query, body).await,
-        (_, []) if get => receive(relay, id, secret, query).await,
+        (_, []) if post => {
+            takes(query, "a send", &["filename"])?;
+            send(relay, id, secret, headers, query, body).await
+        }
+        (_, []) if get => {
+            takes(
+                query,
+                "a receive",
+                &["after", "wait", "only", "skip", "own", "presence"],
+            )?;
+            receive(relay, id, secret, query).await
+        }
         (_, ["join"]) if post => {
+            takes(query, "joining again", &[])?;
             let joined = relay.sessions().rejoin(id, secret, &me)?;
             Ok(json(&joined))
         }
         (_, ["leave"]) if post => {
+            takes(query, "a leave", &[])?;
             let n = relay.sessions().leave(id, secret)?;
             Ok(numbered(n))
         }
         (_, [n]) if get && number(n).is_some() => {
+            takes(query, "a fetch", &[])?;
             let n = number(n).unwrap_or_default();
             payload(relay, id, secret, n)
         }

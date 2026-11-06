@@ -22,11 +22,11 @@ claude() { XDG_STATE_HOME=$work/claude AGENTWIRE_RELAY=$relay sh agentwire "$@";
 
 check "served at /agentwire" "$(curl -s "$relay/agentwire" | cmp - agentwire && echo same)" same
 
-link=$(luis new 'Luis W.')
+link=$(luis new luis-w)
 check "new" "$(printf %s "$link" | grep -cE "^$relay/v2/s/[A-Za-z0-9_-]{22}\$")" 1
 token=${link##*/}
-check "new joins" "$(luis receive "$token" --wait 0 | tail -n 1 | grep -o '"Luis W."')" '"Luis W."'
-check "a name taken" "$(claude join "$token" 'Luis W.' 2>&1)" "agentwire: Luis W. is taken in this session"
+check "new joins" "$(luis receive "$token" --wait 0 | tail -n 1 | grep -o '"luis-w"')" '"luis-w"'
+check "a name taken" "$(claude join "$token" luis-w 2>&1)" "agentwire: luis-w is taken in this session"
 check "join a link" "$(claude join "$link" luis/claude | cut -c1-37)" '{"n":2,"name":"luis/claude","read":0,'
 check "send" "$(echo 'Hello.' | luis send "$token")" '{"n":3}'
 check "send markdown" "$(echo '**Hi.**' | luis send "$token" --type text/markdown)" '{"n":4}'
@@ -34,7 +34,7 @@ printf 'a,b\n1,2\n' >"$work/data.csv"
 check "send a file" "$(luis send "$token" "$work/data.csv")" '{"n":5}'
 
 out=$(claude receive "$token")
-check "receive" "$(printf '%s\n' "$out" | sed -n 2p | grep -o '"from":"Luis W.".*"text":"Hello.\\n"')" '"from":"Luis W.","type":"text/plain; charset=utf-8","size":7,"text":"Hello.\n"'
+check "receive" "$(printf '%s\n' "$out" | sed -n 2p | grep -o '"from":"luis-w".*"text":"Hello.\\n"')" '"from":"luis-w","type":"text/plain; charset=utf-8","size":7,"text":"Hello.\n"'
 check "receive a file" "$(printf '%s\n' "$out" | sed -n 4p | grep -o '"filename":"data.csv"')" '"filename":"data.csv"'
 check "presence last" "$(printf '%s\n' "$out" | tail -n 1 | cut -c1-12)" '{"presence":'
 check "receive goes on" "$(claude receive "$token" --wait 0 | wc -l | tr -d ' ')" 1
@@ -54,9 +54,9 @@ check "join with an own link" "$(luis join "$me" | cut -c1-31)" '{"n":9,"name":"
 check "an own link here" "$(echo 'Mine.' | luis send "$token" --as other)" '{"n":10}'
 check "leave the own link" "$(luis leave "$token" --as other)" '{"n":11}'
 claude receive "$token" --as luis/claude --wait 0 >/dev/null
-echo '[]' | luis send "$token" --as 'Luis W.' --type application/vnd.polylogue.voice.trace+json >/dev/null
+echo '[]' | luis send "$token" --as luis-w --type application/vnd.polylogue.voice.trace+json >/dev/null
 check "receive --skip" "$(claude receive "$token" --as luis/claude --skip application/vnd.polylogue.voice.trace --wait 0 | wc -l | tr -d ' ')" 1
-echo '[]' | luis send "$token" --as 'Luis W.' --type application/vnd.polylogue.voice.trace+json >/dev/null
+echo '[]' | luis send "$token" --as luis-w --type application/vnd.polylogue.voice.trace+json >/dev/null
 check "receive --only" "$(claude receive "$token" --as luis/claude --only text/ --wait 0 | wc -l | tr -d ' ')" 1
 
 check "no session" "$(luis join AAAAAAAAAAAAAAAAAAAAAA x 2>&1)" "agentwire: no such session"
@@ -64,6 +64,6 @@ check "not joined" "$(luis send "$(curl -s -X POST "$relay/v2/s")" </dev/null 2>
 check "several here need --as" "$(claude leave "$token" 2>&1)" "agentwire: several joined this session here: give --as <name>"
 check "leave" "$(claude leave "$token" --as luis/claude)" '{"n":14}'
 check "left" "$(claude receive "$token" --as luis/claude 2>&1)" "agentwire: you have left: join again with POST <your link>/join"
-luis leave "$token" --as "Luis W." >/dev/null
+luis leave "$token" --as "luis-w" >/dev/null
 
 exit $failed

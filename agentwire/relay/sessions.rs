@@ -13,6 +13,28 @@ use tokio::sync::oneshot;
 use crate::{Fail, fail};
 
 pub const MAX_NAME: usize = 256;
+
+/// What a name is, said in the answer to a join under any other.
+pub const NAME_RULE: &str = "a name is lower case, with hyphens for spaces, as <person> \
+     or <person>/<agent>: one or two parts of letters a-z, digits and hyphens, \
+     each starting with a letter or digit, joined by one /, such as luis or luis/claude";
+
+/// Whether `name` is a name: one part, or two joined by `/`, each of
+/// lower-case letters, digits and hyphens, starting with a letter or digit.
+/// So no name looks like another, and none is `*` or holds quotes or spaces.
+pub fn is_name(name: &str) -> bool {
+    let part = |p: &str| {
+        p.bytes()
+            .next()
+            .is_some_and(|b| b.is_ascii_lowercase() || b.is_ascii_digit())
+            && p.bytes()
+                .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
+    };
+    match name.split_once('/') {
+        Some((person, agent)) => part(person) && part(agent),
+        None => part(name),
+    }
+}
 const MAX_INLINE: usize = 64 * 1024;
 /// How long a session that nobody joined lasts, in seconds.
 const UNJOINED: i64 = 24 * 60 * 60;
@@ -323,6 +345,9 @@ impl Sessions {
             .ok_or_else(|| fail(400, "name yourself with ?as=<name>"))?;
         if name.len() > MAX_NAME {
             return Err(fail(400, format!("a name is at most {MAX_NAME} bytes")));
+        }
+        if !is_name(name) {
+            return Err(fail(400, NAME_RULE));
         }
         let secret = token();
         let transaction = self.db.unchecked_transaction()?;

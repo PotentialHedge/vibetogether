@@ -161,6 +161,16 @@ wait "$waiting"
 check "the presence a receive stirs shows what it read" "$(tail -1 "$work/acknowledged" | jq '.presence["luis/claude"].read')" 19
 
 check "join with no name" "$(status -X POST "$link/join")" 400
+for name in 'Luis' 'luis%20wirth' 'a/b/c' '%2A' 'luis%22' '-luis' 'luis/' '/claude' 'luis_wirth' 'luis%0A'; do
+  check "no name: $name" "$(status -X POST "$link/join?as=$name")" 400
+done
+check "the rule in the answer" "$(curl -s -X POST "$link/join?as=Luis" | grep -c 'lower case')" 1
+hyphened=$(curl -s -X POST "$link/join?as=luis-wirth/claude-2" | jq -r .link)
+check "a name with digits and hyphens" "$(status -X POST "$hyphened/leave")" 200
+check "an unknown parameter to a receive" "$(status "$luis?skp=text/&wait=0")" 400
+check "an unknown parameter to a send" "$(status --data-binary 'Hi.' "$luis?to=x")" 400
+check "an unknown parameter to a join" "$(status -X POST "$link/join?as=probe&role=x")" 400
+check "an unknown parameter to a leave" "$(status -X POST "$luis/leave?now=1")" 400
 check "bad after" "$(status "$luis?after=x")" 400
 check "no session" "$(status "$relay/v2/s/AAAAAAAAAAAAAAAAAAAAAA/join?as=luis" -X POST)" 404
 check "older version" "$(status "$relay/s/AAAAAAAAAAAAAAAAAAAAAA/join?as=luis" -X POST)" 410
