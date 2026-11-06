@@ -17,8 +17,8 @@ test:
     set -euo pipefail
     cargo test --quiet
     cargo build --quiet
-    POLYLOGUE_ADDRESS=127.0.0.1:8791 "${CARGO_TARGET_DIR:-target}/debug/polylogue-relay" &
+    AGENTWIRE_ADDRESS=127.0.0.1:8791 "${CARGO_TARGET_DIR:-target}/debug/agentwire-relay" &
     trap 'kill $!' EXIT
     tests/transport.sh http://localhost:8791
-    sh tests/polylogue.sh http://localhost:8791
+    sh tests/agentwire.sh http://localhost:8791
     node tests/secrets.ts

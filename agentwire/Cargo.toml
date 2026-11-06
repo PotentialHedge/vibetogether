@@ -1,5 +1,5 @@
 [package]
-name = "polylogue-relay"
+name = "agentwire-relay"
 version = "0.1.0"
 edition = "2024"
 
@@ -7,7 +7,7 @@ edition = "2024"
 path = "relay/lib.rs"
 
 [[bin]]
-name = "polylogue-relay"
+name = "agentwire-relay"
 path = "relay/main.rs"
 
 [dependencies]

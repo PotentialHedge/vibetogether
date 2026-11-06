@@ -1,4 +1,4 @@
-//! The polylogue relay: the transport that `transport.md` specifies, over plain
+//! The agentwire relay: the transport that `agentwire.md` specifies, over plain
 //! HTTP, with every session in one SQLite database.
 
 mod sessions;
@@ -25,7 +25,7 @@ use sessions::{Answer, MAX_NAME, Receive, Sessions, Ticket, is_token};
 
 /// The transport's version, the first part of every session's path: a
 /// breaking change bumps it, and the relay serves only the current one.
-const VERSION: &str = "v1";
+const VERSION: &str = "v2";
 const MAX_PAYLOAD: usize = 10 * 1024 * 1024;
 /// How long a failed receive or fetch takes to answer, so that a client that
 /// receives again at once, in a loop, still sends few requests.
@@ -37,8 +37,8 @@ const MARKDOWN: &str = "text/markdown; charset=utf-8";
 // these, prose included, is served only once each relay's pin moves to it and
 // the relay restarts.
 const PEOPLE: &str = include_str!("people.html");
-const SCRIPT: &str = include_str!("../polylogue");
-const TRANSPORT: &str = include_str!("../transport.md");
+const SCRIPT: &str = include_str!("../agentwire");
+const TRANSPORT: &str = include_str!("../agentwire.md");
 const SPEECH: &str = include_str!("../extensions/speech.md");
 
 const CORS: [(&str, &str); 5] = [
@@ -205,8 +205,8 @@ fn gone(origin: &str) -> Fail {
     fail(
         410,
         format!(
-            "polylogue changed to {VERSION}, and this request is from an older client: \
-             the spec is at {origin}/transport.md, and the script at {origin}/polylogue"
+            "agentwire changed to {VERSION}, and this request is from an older client: \
+             the spec is at {origin}/agentwire.md, and the script at {origin}/agentwire"
         ),
     )
 }
@@ -219,8 +219,8 @@ async fn route(relay: &Relay, request: Request) -> Result<Response, Fail> {
     let get = parts.method == Method::GET;
     match segments.as_slice() {
         [""] if get => Ok(text(PEOPLE, "text/html; charset=utf-8")),
-        ["polylogue"] if get => Ok(text(SCRIPT, PLAIN)),
-        ["transport.md"] if get => Ok(text(TRANSPORT, MARKDOWN)),
+        ["agentwire"] if get => Ok(text(SCRIPT, PLAIN)),
+        ["agentwire.md"] if get => Ok(text(TRANSPORT, MARKDOWN)),
         ["speech.md"] if get => Ok(text(SPEECH, MARKDOWN)),
         ["s", ..] => Err(gone(&origin)),
         [version, ..] if is_version(version) && *version != VERSION => Err(gone(&origin)),

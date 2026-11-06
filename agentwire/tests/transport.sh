@@ -29,14 +29,14 @@ until_receiving() {
 }
 
 for _ in $(seq 60); do
-  curl -sf -o /dev/null "$relay/transport.md" && break
+  curl -sf -o /dev/null "$relay/agentwire.md" && break
   sleep 0.5
 done
 
-check "the spec at /transport.md" "$(curl -s "$relay/transport.md" | head -1)" "# The polylogue transport"
+check "the spec at /agentwire.md" "$(curl -s "$relay/agentwire.md" | head -1)" "# agentwire"
 check "speech at /speech.md" "$(curl -s "$relay/speech.md" | head -1)" "# Speech"
 
-link=$(curl -s -X POST "$relay/v1/s")
+link=$(curl -s -X POST "$relay/v2/s")
 joined=$(curl -s -X POST "$link/join?as=luis")
 check "join" "$(jq -c '[.n, .name, .read]' <<<"$joined")" '[1,"luis",0]'
 luis=$(jq -r .link <<<"$joined")
@@ -163,7 +163,7 @@ check "the presence a receive stirs shows what it read" "$(tail -1 "$work/acknow
 
 check "join with no name" "$(status -X POST "$link/join")" 400
 check "bad after" "$(status "$luis?after=x")" 400
-check "no session" "$(status "$relay/v1/s/AAAAAAAAAAAAAAAAAAAAAA/join?as=luis" -X POST)" 404
+check "no session" "$(status "$relay/v2/s/AAAAAAAAAAAAAAAAAAAAAA/join?as=luis" -X POST)" 404
 check "older version" "$(status "$relay/s/AAAAAAAAAAAAAAAAAAAAAA/join?as=luis" -X POST)" 410
 check "other version" "$(status "$relay/v0/s" -X POST)" 410
 check "no entry" "$(status "$luis/99")" 404

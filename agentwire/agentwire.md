@@ -1,16 +1,16 @@
-# The polylogue transport
+# agentwire
 
-The polylogue transport lets participants exchange anything over plain HTTP:
+agentwire is a transport that lets participants exchange anything over plain HTTP:
 agents, people through a page, and plain programs alike.
 Any participant with `curl` can use it, and none of them is special:
 send and receive are always from whoever calls.
 
 Extensions give entries meaning on top of it,
-such as speech, at `https://polylogue.agentics.lwirth.com/speech.md`.
+such as polylogue's speech, at `https://agentwire.agentics.lwirth.com/speech.md`.
 
 Every operation is one plain `curl` request, so this spec is all a participant needs to take part, or to write a client of its own.
-The `polylogue` script makes the requests for convenience: `curl -so polylogue https://polylogue.agentics.lwirth.com/polylogue`, then `sh polylogue help`.
-It is plain `sh` over `curl`, and its source is public at `https://github.com/luiswirth/polylogue/blob/main/polylogue`.
+The `agentwire` script makes the requests for convenience: `curl -so agentwire https://agentwire.agentics.lwirth.com/agentwire`, then `sh agentwire help`.
+It is plain `sh` over `curl`, and its source is public at `https://github.com/luiswirth/agentwire/blob/main/agentwire`.
 
 ## Model
 
@@ -57,11 +57,11 @@ and the relay serves only the current version: it answers any other with status 
 ### Create a session
 
 ```sh
-curl -s -X POST '<relay>/v1/s'
+curl -s -X POST '<relay>/v2/s'
 ```
 
 Returns the link of a new, empty session, as one line of text.
-The link is `<relay>/v1/s/<token>`, and its token is the secret.
+The link is `<relay>/v2/s/<token>`, and its token is the secret.
 
 ### Join
 
@@ -73,7 +73,7 @@ curl -s -X POST '<link>/join?as=<name>'
 Returns the number of its join entry, the name, its read position, and the caller's own link:
 
 ```json
-{"n":1,"name":"luis","read":0,"link":"https://polylogue.agentics.lwirth.com/v1/s/<token>/<secret>"}
+{"n":1,"name":"luis","read":0,"link":"https://agentwire.agentics.lwirth.com/v2/s/<token>/<secret>"}
 ```
 
 Keep the link to yourself: whoever holds it acts under your name.
@@ -188,8 +188,8 @@ An entry is one line of JSON:
 Joining and leaving have types of their own, and an empty payload:
 
 ```json
-{"n":1,"time":"2026-10-21T09:14:40Z","from":"luis/claude","type":"application/vnd.polylogue.join","size":0}
-{"n":9,"time":"2026-10-21T09:31:12Z","from":"luis/claude","type":"application/vnd.polylogue.leave","size":0}
+{"n":1,"time":"2026-10-21T09:14:40Z","from":"luis/claude","type":"application/vnd.agentwire.join","size":0}
+{"n":9,"time":"2026-10-21T09:31:12Z","from":"luis/claude","type":"application/vnd.agentwire.leave","size":0}
 ```
 
 ## Presence
@@ -236,8 +236,8 @@ so that a client that receives again at once still sends few requests.
 
 ## Extensions
 
-An extension defines types for its own entries,
-named `application/vnd.polylogue.<extension>.<entry>`, with `+json` for structured ones.
+An extension defines types for its own entries, under a vendor name of its own,
+such as polylogue's `application/vnd.polylogue.<extension>.<entry>`, with `+json` for structured ones.
 The transport carries them like any other entry.
 A participant that does not know a type can still see that an entry was sent, by whom, and what type it has.
 
@@ -246,10 +246,10 @@ A participant that does not know a type can still see that an entry was sent, by
 The log keeps everything, so a secret, such as an API key, goes into it only encrypted to its recipient.
 This is optional: a participant that can't encrypt sends no secrets, and an extension offers another way.
 
-- `application/vnd.polylogue.key`: a participant's public key, as PEM, for RSA-OAEP with SHA-256.
+- `application/vnd.agentwire.key`: a participant's public key, as PEM, for RSA-OAEP with SHA-256.
   It asks for secrets, and the extension says which.
   Fetch it by its number: `curl -s -o key.pem '<me>/<n>'`.
-- `application/vnd.polylogue.secret+json`, as `{"key":12,"name":"elevenlabs","data":"…"}`:
+- `application/vnd.agentwire.secret+json`, as `{"key":12,"name":"elevenlabs","data":"…"}`:
   a secret encrypted to the public key in entry `key`, base64 in `data`, with `name` saying what it is.
   At most 318 bytes, which a 3072-bit key allows.
 
@@ -259,6 +259,6 @@ Encrypt straight from where the secret is kept, so that it stays out of your tra
 data=$(openssl pkeyutl -encrypt -pubin -inkey key.pem \
   -pkeyopt rsa_padding_mode:oaep -pkeyopt rsa_oaep_md:sha256 -pkeyopt rsa_mgf1_md:sha256 \
   -in <file> | base64 | tr -d '\n')
-curl -s -H 'Content-Type: application/vnd.polylogue.secret+json' \
+curl -s -H 'Content-Type: application/vnd.agentwire.secret+json' \
   --data-binary "{\"key\":<n>,\"name\":\"<name of the secret>\",\"data\":\"$data\"}" '<me>'
 ```

@@ -16,8 +16,8 @@ pub const MAX_NAME: usize = 256;
 const MAX_INLINE: usize = 64 * 1024;
 /// How long a session that nobody joined lasts, in seconds.
 const UNJOINED: i64 = 24 * 60 * 60;
-const JOIN: &str = "application/vnd.polylogue.join";
-const LEAVE: &str = "application/vnd.polylogue.leave";
+const JOIN: &str = "application/vnd.agentwire.join";
+const LEAVE: &str = "application/vnd.agentwire.leave";
 
 const SCHEMA: &str = "
     PRAGMA journal_mode = WAL;
@@ -703,7 +703,7 @@ mod tests {
 
     #[test]
     fn a_database_from_before_opens() {
-        let path = std::env::temp_dir().join(format!("polylogue-{}.db", token()));
+        let path = std::env::temp_dir().join(format!("agentwire-{}.db", token()));
         Connection::open(&path)
             .unwrap()
             .execute_batch(

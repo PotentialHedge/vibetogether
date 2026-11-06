@@ -1,4 +1,4 @@
-/** A participant's side of a polylogue session, as `transport.md` describes it, for
+/** A participant's side of an agentwire session, as `agentwire.md` describes it, for
  * a page or a script. One `Session` per participant: it owns its one receive,
  * and hands every entry and every change of presence to all who subscribed. */
 
@@ -25,8 +25,8 @@ export type Subscriber = {
 	end?(why: string): void;
 };
 
-export const JOIN = "application/vnd.polylogue.join";
-export const LEAVE = "application/vnd.polylogue.leave";
+export const JOIN = "application/vnd.agentwire.join";
+export const LEAVE = "application/vnd.agentwire.leave";
 
 /** A request the relay refused: its message is the relay's line why, as a
  * page can show it, and `status` tells the cases apart, such as 409 for a
@@ -52,7 +52,7 @@ async function checked(response: Response): Promise<Response> {
 
 /** Creates a session on the relay at `relay`, and returns its link. */
 export async function create(relay: string): Promise<string> {
-	const response = await fetch(`${relay.replace(/\/$/, "")}/v1/s`, {
+	const response = await fetch(`${relay.replace(/\/$/, "")}/v2/s`, {
 		method: "POST",
 	});
 	return (await (await checked(response)).text()).trim();
@@ -213,12 +213,12 @@ export class Session {
 	}
 }
 
-export const KEY = "application/vnd.polylogue.key";
-export const SECRET = "application/vnd.polylogue.secret+json";
+export const KEY = "application/vnd.agentwire.key";
+export const SECRET = "application/vnd.agentwire.secret+json";
 
 const OAEP = { name: "RSA-OAEP", hash: "SHA-256" } as const;
 
-/** A participant's side of secrets, as `transport.md` describes them: a key
+/** A participant's side of secrets, as `agentwire.md` describes them: a key
  * pair that lives as long as the page, and the secrets sent to it. Optional:
  * a page that needs no secrets never makes one. */
 export class Secrets {
