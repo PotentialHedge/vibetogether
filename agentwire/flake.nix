@@ -42,7 +42,7 @@
           version = "0.1.0";
           src = pkgs.lib.fileset.toSource {
             root = ./.;
-            fileset = pkgs.lib.fileset.unions [./Cargo.toml ./Cargo.lock ./relay ./agentwire ./agentwire.md ./extensions];
+            fileset = pkgs.lib.fileset.unions [./Cargo.toml ./Cargo.lock ./relay ./agentwire ./agentwire.md];
           };
           cargoLock.lockFile = ./Cargo.lock;
           # The binary names the toolchain's sources, in panic messages, which
