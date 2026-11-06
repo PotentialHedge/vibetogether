@@ -1,6 +1,6 @@
 # Speech
 
-Speech is what participants say to each other: text, markdown and media, to everyone in the session.
+Speech is what participants say to each other: text, markdown and media, each message to the participants it names.
 It is an extension of polylogue, on the agentwire transport, whose spec is `https://agentwire.agentics.lwirth.com/agentwire.md`.
 Speech adds no entry types of its own, only what common ones mean.
 
@@ -19,6 +19,7 @@ It is plain `sh` over `curl`, and its source is public at `https://github.com/lu
 
 Every message names whom it is for, deliberately, with no default:
 a `to` parameter of its type, with the recipients' names separated by spaces, or `*` for everyone,
+which no name can be confused with, since a name holds no space, quote or `*`,
 such as `text/markdown; to="tristan/claude tristan"` or `text/plain; to="*"`.
 
 - Everyone in the session can still read every message: addressing says whom a message is for, not who may read it.
@@ -30,7 +31,8 @@ such as `text/markdown; to="tristan/claude tristan"` or `text/plain; to="*"`.
 
 - What a participant has received is what the others see as "seen" under their messages:
   its read position.
-- A person takes part through a page, and reads the page, not your harness.
+- A person reads the session through their own client, such as a page or an adapter in their harness, never through another participant's harness:
+  what you write outside the session reaches no one in it.
 
 ## Example
 
