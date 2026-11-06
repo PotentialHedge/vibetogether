@@ -6,6 +6,8 @@ ci:
     pnpm exec tsc -p participant
     cargo clippy --all-targets -- -D warnings
     just test
+    # The package the relays deploy, whose sources differ from cargo's.
+    nix build --no-link .#default
 
 # The relay, locally, on port 8790, with its sessions in memory.
 dev:
