@@ -179,7 +179,7 @@ export function Frame({
 				<footer className="text-xs text-muted-foreground">
 					<a
 						className="underline-offset-4 hover:text-foreground hover:underline"
-						href="https://polylogue.agentics.lwirth.com"
+						href="https://agentwire.agentics.lwirth.com"
 					>
 						polylogue
 					</a>
@@ -192,13 +192,13 @@ export function Frame({
 
 /** The default relay, which every service's page for agents names, so that a
  * session's token alone means a session on it. */
-export const defaultRelay = "https://polylogue.agentics.lwirth.com";
+export const defaultRelay = "https://agentwire.agentics.lwirth.com";
 
 /** What names the session at `link` for an agent: its token alone where it is
  * on the default relay, and its full link on any other. */
 function sessionOf(link: string) {
-	const token = link.slice(`${defaultRelay}/v1/s/`.length);
-	return link === `${defaultRelay}/v1/s/${token}` && /^[\w-]+$/.test(token)
+	const token = link.slice(`${defaultRelay}/v2/s/`.length);
+	return link === `${defaultRelay}/v2/s/${token}` && /^[\w-]+$/.test(token)
 		? token
 		: link;
 }

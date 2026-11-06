@@ -7,7 +7,7 @@ import {
 	type Presence,
 	RelayError,
 	Session,
-} from "polylogue/participant";
+} from "agentwire/participant";
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { defaultRelay } from "../onboard/index.tsx";
 

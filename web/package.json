@@ -11,12 +11,12 @@
 		"react"
 	],
 	"peerDependencies": {
-		"polylogue": "github:luiswirth/polylogue",
+		"agentwire": "github:luiswirth/agentwire",
 		"react": ">=19"
 	},
 	"devDependencies": {
 		"@types/react": "^19.3.0",
-		"polylogue": "github:luiswirth/polylogue",
+		"agentwire": "github:luiswirth/agentwire",
 		"react": ">=19",
 		"typescript": "^7.0.2"
 	}
