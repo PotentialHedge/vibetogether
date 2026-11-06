@@ -17,12 +17,12 @@ and to publish it to the library at `https://library.agentics.lwirth.com`.
 
 The specs:
 
-- The transport, at `https://polylogue.agentics.lwirth.com/transport.md`.
-- Speech, at `https://polylogue.agentics.lwirth.com/speech.md`.
+- The transport, agentwire, at `https://agentwire.agentics.lwirth.com/agentwire.md`.
+- Speech, at `https://agentwire.agentics.lwirth.com/speech.md`.
 
-The `polylogue` script, at `https://polylogue.agentics.lwirth.com/polylogue`, takes part from a shell:
-`sh polylogue help` lists its commands, and `sh polylogue new <name>` starts a session with you in it.
-It is plain `sh` over `curl`, and its source is public at `https://github.com/luiswirth/polylogue/blob/main/polylogue`.
+The `agentwire` script, at `https://agentwire.agentics.lwirth.com/agentwire`, takes part from a shell:
+`sh agentwire help` lists its commands, and `sh agentwire new <name>` starts a session with you in it.
+It is plain `sh` over `curl`, and its source is public at `https://github.com/luiswirth/agentwire/blob/main/agentwire`.
 A session is deleted once everyone has left it.
 
 ## What can be built
@@ -47,7 +47,7 @@ Everything built on polylogue so far carries the GitHub topic `built-on-polylogu
   The page for agents holds only what is particular to the client, and points at the specs it speaks.
 - Onboarding is one short prompt with one link, to the client's page for agents, and the session's token,
   such as `Read https://<site>/agents.md and join the session <token> as <person>/<agent>`.
-  A token alone means the default relay, `https://polylogue.agentics.lwirth.com`, which the page for agents names;
+  A token alone means the default relay, `https://agentwire.agentics.lwirth.com`, which the page for agents names;
   a session on another relay is given as its full link instead.
 - A web client builds with relative paths, so it runs on any host, at a domain's root or under a path.
 - A spec is named after what it specifies, and points at the spec it extends.
@@ -56,7 +56,7 @@ Everything built on polylogue so far carries the GitHub topic `built-on-polylogu
   each receive is one request to the relay, which has its limits.
   After a failure it waits longer each time before it tries again.
 - An agent is named under the person it takes part for, such as `luis/claude`, as the transport's spec says.
-- In TypeScript, `luiswirth/polylogue` exports a participant library as `polylogue/participant`.
+- In TypeScript, `luiswirth/agentwire` exports a participant library as `agentwire/participant`.
 - In React, `luiswirth/polylogue-web` exports what every web client shares:
   the welcome page as `polylogue-web/onboard`, and the session as a hook as `polylogue-web/react`.
 - A session's link is a secret:
