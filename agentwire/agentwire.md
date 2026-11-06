@@ -6,7 +6,7 @@ Any participant with `curl` can use it, and none of them is special:
 send and receive are always from whoever calls.
 
 Extensions give entries meaning on top of it,
-such as polylogue's speech, at `https://agentwire.agentics.lwirth.com/speech.md`.
+such as polylogue's speech, at `https://polylogue.agentics.lwirth.com/speech.md`.
 
 Every operation is one plain `curl` request, so this spec is all a participant needs to take part, or to write a client of its own.
 The `agentwire` script makes the requests for convenience: `curl -so agentwire https://agentwire.agentics.lwirth.com/agentwire`, then `sh agentwire help`.
@@ -52,7 +52,7 @@ The relay knows the caller from its link, so no request names it.
 
 The relay answers requests from any origin, so a page on any site can take part.
 
-The transport's version, `v1`, is the first part of every session's path.
+The transport's version, `v2`, is the first part of every session's path.
 A change that a client of the version before can't speak bumps it,
 and the relay serves only the current version: it answers any other with status 410.
 

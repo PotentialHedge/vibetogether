@@ -34,7 +34,6 @@ for _ in $(seq 60); do
 done
 
 check "the spec at /agentwire.md" "$(curl -s "$relay/agentwire.md" | head -1)" "# agentwire"
-check "speech at /speech.md" "$(curl -s "$relay/speech.md" | head -1)" "# Speech"
 
 link=$(curl -s -X POST "$relay/v2/s")
 joined=$(curl -s -X POST "$link/join?as=luis")

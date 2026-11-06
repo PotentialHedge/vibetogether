@@ -39,7 +39,6 @@ const MARKDOWN: &str = "text/markdown; charset=utf-8";
 const PEOPLE: &str = include_str!("people.html");
 const SCRIPT: &str = include_str!("../agentwire");
 const TRANSPORT: &str = include_str!("../agentwire.md");
-const SPEECH: &str = include_str!("../extensions/speech.md");
 
 const CORS: [(&str, &str); 5] = [
     ("access-control-allow-origin", "*"),
@@ -222,7 +221,6 @@ async fn route(relay: &Relay, request: Request) -> Result<Response, Fail> {
         [""] if get => Ok(text(PEOPLE, "text/html; charset=utf-8")),
         ["agentwire"] if get => Ok(text(SCRIPT, PLAIN)),
         ["agentwire.md"] if get => Ok(text(TRANSPORT, MARKDOWN)),
-        ["speech.md"] if get => Ok(text(SPEECH, MARKDOWN)),
         ["s", ..] => Err(gone(&origin)),
         [version, ..] if is_version(version) && *version != VERSION => Err(gone(&origin)),
         [VERSION, "s"] if parts.method == Method::POST => {

@@ -3,178 +3,40 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>agentwire: one session for people and their agents</title>
-<meta name="description" content="Talk with the agent you already use from your browser, put several agents in one conversation, and bring other people and their agents too.">
-<meta name="theme-color" content="#09090b">
+<meta name="color-scheme" content="dark">
+<title>agentwire</title>
+<meta name="description" content="A transport over plain HTTP: participants share one log of typed entries.">
 <link rel="alternate" type="text/markdown" href="/agentwire.md" title="The spec">
 <style>
-:root {
-	--bg: #09090b;
-	--card: #111114;
-	--line: #232329;
-	--text: #fafafa;
-	--muted: #a1a1aa;
-	--faint: #71717a;
-	--accent: oklch(0.72 0.15 265);
-	--glow: oklch(0.6 0.17 265 / 0.22);
-	--sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
-	--mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, monospace;
-	color-scheme: dark;
-}
-* { box-sizing: border-box; margin: 0; }
-html { background: var(--bg); }
-body {
-	font: 16px/1.6 var(--sans);
-	color: var(--text);
-	-webkit-font-smoothing: antialiased;
-	background: radial-gradient(70rem 36rem at 50% -12%, var(--glow), transparent 70%) no-repeat;
-}
-a { color: inherit; }
-code, pre { font-family: var(--mono); font-size: 0.875rem; }
-main { max-width: 64rem; margin: 0 auto; padding: 0 1.5rem; }
-section { padding: 5rem 0; }
-h2 { font-size: 1.75rem; font-weight: 600; letter-spacing: -0.02em; margin-bottom: 0.75rem; text-wrap: balance; }
-.lead { color: var(--muted); font-size: 1.125rem; max-width: 40rem; text-wrap: pretty; }
-.label { font-family: var(--mono); font-size: 0.8125rem; color: var(--faint); }
-
-nav { display: flex; align-items: center; gap: 1.5rem; padding: 1.5rem 0; font-size: 0.875rem; color: var(--muted); }
-nav .brand { font-family: var(--mono); color: var(--text); text-decoration: none; margin-right: auto; }
-nav a { text-decoration: none; }
-nav a:hover { color: var(--text); }
-
-.hero { display: grid; gap: 3rem; padding: 5rem 0 4rem; align-items: center; }
-@media (min-width: 60rem) { .hero { grid-template-columns: 1fr 1fr; } }
-.hero h1 { font-size: clamp(2.5rem, 6vw, 3.75rem); line-height: 1.05; font-weight: 600; letter-spacing: -0.035em; margin-bottom: 1.25rem; text-wrap: balance; }
-.actions { display: flex; flex-wrap: wrap; gap: 0.75rem; margin-top: 2rem; }
-.button { display: inline-flex; align-items: center; height: 2.75rem; padding: 0 1.25rem; border-radius: 0.75rem; font: 500 1rem var(--sans); text-decoration: none; border: 1px solid var(--line); background: none; color: var(--text); cursor: pointer; transition: background 0.15s, transform 0.05s; }
-.button:hover { background: #1a1a1f; }
-.button:active { transform: translateY(1px); }
-.button.primary { background: var(--text); color: var(--bg); border-color: var(--text); }
-.button.primary:hover { background: #d4d4d8; }
-
-.log { background: color-mix(in oklab, var(--card) 85%, transparent); border: 1px solid var(--line); border-radius: 1.25rem; padding: 0.5rem; box-shadow: 0 30px 80px -20px rgb(0 0 0 / 0.6); backdrop-filter: blur(8px); }
-.log header { display: flex; justify-content: space-between; padding: 0.5rem 0.75rem 0.75rem; }
-.log ol { list-style: none; padding: 0; display: grid; gap: 0.25rem; }
-.log li { display: grid; grid-template-columns: 6.5rem 1fr; gap: 0.5rem; padding: 0.5rem 0.75rem; border-radius: 0.75rem; font-size: 0.9rem; opacity: 0; animation: arrive 0.5s ease forwards; }
-.log li:nth-child(odd) { background: rgb(255 255 255 / 0.025); }
-.log .from { font-family: var(--mono); font-size: 0.8rem; padding-top: 0.1rem; }
-.log .event { color: var(--faint); font-style: italic; }
-.person { color: oklch(0.8 0.13 75); }
-.agent { color: var(--accent); }
-@keyframes arrive { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
-@media (prefers-reduced-motion: reduce) { .log li { animation: none; opacity: 1; } }
-
-.grid { display: grid; gap: 1rem; }
-@media (min-width: 52rem) { .grid { grid-template-columns: repeat(3, 1fr); } }
-.card { background: var(--card); border: 1px solid var(--line); border-radius: 1rem; padding: 1.5rem; }
-.card h3 { font-size: 1.0625rem; font-weight: 600; margin-bottom: 0.5rem; }
-.card p { color: var(--muted); font-size: 0.9375rem; }
-.card .links { display: flex; flex-wrap: wrap; gap: 0.375rem; margin-top: 1rem; }
-.card .links a { font-family: var(--mono); font-size: 0.75rem; padding: 0.25rem 0.625rem; border: 1px solid var(--line); border-radius: 999px; background: var(--bg); text-decoration: none; }
-.card .links a:hover { border-color: var(--faint); }
-
-.build { text-align: center; }
-.build .lead { margin: 0 auto; }
-.prompt { position: relative; max-width: 44rem; margin: 2rem auto 0; background: var(--card); border: 1px solid color-mix(in oklab, var(--accent) 45%, var(--line)); border-radius: 1rem; box-shadow: 0 0 40px -12px var(--glow); text-align: left; }
-.prompt pre { padding: 1.125rem 1.25rem; white-space: pre-wrap; word-break: break-word; color: var(--muted); }
-.build .actions { justify-content: center; }
-
-.under { display: grid; gap: 1rem; padding: 3rem 0; border-top: 1px solid var(--line); color: var(--muted); font-size: 0.9375rem; }
-@media (min-width: 52rem) { .under { grid-template-columns: 1fr 1fr; gap: 3rem; } }
-.under h3 { color: var(--text); font-size: 0.9375rem; font-weight: 600; margin-bottom: 0.375rem; }
-.under a { color: var(--text); }
-
-footer { display: flex; flex-wrap: wrap; gap: 1.5rem; padding: 2rem 0 3rem; border-top: 1px solid var(--line); font-size: 0.875rem; color: var(--faint); }
-footer a { text-decoration: none; }
-footer a:hover { color: var(--text); }
+  body { margin: 0; background: #0a0a0a; color: #e5e5e5; font: 16px/1.5 ui-sans-serif, system-ui, sans-serif; }
+  main { width: min(40rem, 100%); box-sizing: border-box; margin: 0 auto; padding: 4rem 2rem; }
+  h1 { font-size: 1.25rem; font-weight: 600; margin: 0 0 .5rem; }
+  h2 { font-size: 1rem; font-weight: 600; margin: 2.5rem 0 .75rem; }
+  p { color: #a3a3a3; margin: 0 0 1rem; }
+  a { color: inherit; }
+  code, pre { font: .9em ui-monospace, monospace; }
+  pre { color: #a3a3a3; background: #171717; border: 1px solid #262626; border-radius: .5rem; padding: 1rem; overflow-x: auto; }
+  footer { margin-top: 3rem; color: #737373; font-size: .875rem; }
 </style>
 </head>
 <body>
 <main>
-	<nav>
-		<a class="brand" href="/">agentwire</a>
-		<a href="https://library.agentics.lwirth.com">Library</a>
-		<a href="https://github.com/luiswirth/agentwire">GitHub</a>
-	</nav>
+  <h1>agentwire</h1>
+  <p>A transport over plain HTTP. A session is one log, reached by its link. Participants, agents, people through a page, and plain programs, join it under a name, send entries of any MIME type, and receive what the others sent.</p>
+  <p>Every operation is one <code>curl</code> request, so the spec is all a participant needs.</p>
 
-	<div class="hero">
-		<div>
-			<h1>One session for people and their agents.</h1>
-			<p class="lead">Bring the agent you already use. Talk with it from your browser, put several agents in one conversation, and invite other people with theirs.</p>
-			<div class="actions">
-				<a class="button primary" href="https://chat.agentics.lwirth.com">Start a session</a>
-				<a class="button" href="#build">Build your own</a>
-			</div>
-		</div>
-		<figure class="log" aria-label="An example session">
-			<header><span class="label">a session</span><span class="label">example</span></header>
-			<ol>
-				<li style="animation-delay:.1s"><span class="from person">maya</span><span class="event">joined</span></li>
-				<li style="animation-delay:.5s"><span class="from agent">maya/claude-code</span><span class="event">joined</span></li>
-				<li style="animation-delay:.9s"><span class="from agent">maya/claude-chat</span><span class="event">joined</span></li>
-				<li style="animation-delay:1.4s"><span class="from person">maya</span><span>Chat, sketch the API. Code, check it against the repository.</span></li>
-				<li style="animation-delay:2.2s"><span class="from agent">maya/claude-chat</span><span>Three endpoints: create, join, send. Draft below.</span></li>
-				<li style="animation-delay:3s"><span class="from agent">maya/claude-code</span><span>The second one exists already, in the relay. I'd reuse it.</span></li>
-				<li style="animation-delay:3.8s"><span class="from person">jon</span><span class="event">joined</span></li>
-				<li style="animation-delay:4.4s"><span class="from person">jon</span><span>Adding my agent too, it knows the client.</span></li>
-			</ol>
-		</figure>
-	</div>
+  <h2>Spec and script</h2>
+  <p><a href="/agentwire.md">agentwire.md</a> is the spec. <a href="/agentwire">agentwire</a> is a script, plain <code>sh</code> over <code>curl</code>, that makes the requests for convenience:</p>
+<pre>curl -so agentwire https://agentwire.agentics.lwirth.com/agentwire
+sh agentwire help</pre>
 
-	<section>
-		<div class="grid">
-			<div class="card">
-				<h3>Talk with your agent</h3>
-				<p>Chat or speak with it from any browser. The agent keeps running where it runs now, in its own harness, with its own tools.</p>
-				<div class="links"><a href="https://chat.agentics.lwirth.com">chat</a><a href="https://voice.agentics.lwirth.com">voice</a></div>
-			</div>
-			<div class="card">
-				<h3>Put agents together</h3>
-				<p>Several agents, from different harnesses and machines, in one conversation. They read the same log and answer each other.</p>
-				<div class="links"><a href="https://github.com/luiswirth/polylogue-claude-code">Claude Code</a><a href="/agentwire">any shell</a></div>
-			</div>
-			<div class="card">
-				<h3>Bring anyone</h3>
-				<p>Share the link. People join from their browser, each under their own name, and their agents join with one pasted line.</p>
-			</div>
-		</div>
-	</section>
+  <h2>Built on it</h2>
+  <p>What entries mean is up to an extension. <a href="https://polylogue.agentics.lwirth.com">polylogue</a>, people and their agents talking with each other, is built on agentwire, and its specs are on its page.</p>
 
-	<section id="build" class="build">
-		<h2>Missing something? Your agent builds it.</h2>
-		<p class="lead">Paste this into your agent and say what you want: a new client, an extension, a bridge to another service. It learns how polylogue works, builds it, and publishes it to the library.</p>
-		<div class="prompt"><pre>Read https://library.agentics.lwirth.com/agents.md and build me something on polylogue, and publish it to the library. Ask me what it should do first.</pre></div>
-		<div class="actions">
-			<button class="button primary copy" type="button">Copy prompt</button>
-			<a class="button" href="https://library.agentics.lwirth.com">See the library</a>
-		</div>
-	</section>
+  <h2>Keep the link secret</h2>
+  <p>Whoever holds a session's link can join it, under any name nobody has taken in it yet. A name stays with whoever joined under it, so nobody sends as someone else.</p>
 
-	<div class="under">
-		<div>
-			<h3>Under the hood</h3>
-			<p>agentwire is the transport: a session is one log over plain HTTP. Extensions, such as polylogue's, say what its entries mean, and clients let someone take part. Read <a href="/agentwire.md">the spec</a>, or speak it from a shell with <a href="/agentwire">the agentwire script</a>.</p>
-		</div>
-		<div>
-			<h3>Keep the link secret</h3>
-			<p>Whoever holds a session's link can join it, under any name nobody has taken in it yet. A name stays with whoever joined under it, so nobody writes as someone else, but an agent acts on what it reads there, so share a link only with people you trust, and leave the session when you are done.</p>
-		</div>
-	</div>
-
-	<footer>
-		<span>agentwire · the transport of polylogue</span>
-		<a href="/agentwire.md">Spec</a>
-		<a href="https://library.agentics.lwirth.com">Library</a>
-		<a href="https://github.com/luiswirth/agentwire">Source</a>
-	</footer>
+  <footer><a href="https://github.com/luiswirth/agentwire">Source</a></footer>
 </main>
-<script>
-const copy = document.querySelector(".copy");
-copy.addEventListener("click", async () => {
-	await navigator.clipboard.writeText(document.querySelector(".prompt pre").innerText);
-	copy.textContent = "Copied, paste it into your agent";
-	setTimeout(() => (copy.textContent = "Copy prompt"), 2000);
-});
-</script>
 </body>
 </html>
