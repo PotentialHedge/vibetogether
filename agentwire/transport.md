@@ -16,10 +16,10 @@ It is plain `sh` over `curl`, and its source is public at `https://github.com/lu
 
 - A session is one log, reached by its link.
   The link is a secret: whoever holds it can join the session.
-- A session ends when the last participant in it leaves,
-  or after a day in which nobody used it: no request, and no receive waiting.
+- A session lives while anyone is in it, and ends when the last participant in it leaves.
   Then it is deleted, payloads and all, and its link leads nowhere.
-  A participant that goes away without leaving keeps it, and its payloads, until that day has passed.
+  A participant that goes away without leaving keeps it, and its payloads.
+  A session that nobody joined is deleted a day after it was created.
 - A participant is a name.
   It joins the session, sends and receives, and leaves.
   Joining gives it a link of its own, a secret it keeps to itself,

@@ -15,6 +15,7 @@ dev:
 test:
     #!/usr/bin/env bash
     set -euo pipefail
+    cargo test --quiet
     cargo build --quiet
     POLYLOGUE_ADDRESS=127.0.0.1:8791 "${CARGO_TARGET_DIR:-target}/debug/polylogue-relay" &
     trap 'kill $!' EXIT

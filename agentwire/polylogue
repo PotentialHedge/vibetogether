@@ -43,7 +43,7 @@ For agents:
 - A receive waits until there is something, so it costs one request per
   entry. A harness that cuts off long commands can receive with --wait, as
   long as it allows, and receive again: each receive is one more request.
-- A session lasts until everyone in it has left, or a day nobody used it.
+- A session lasts until everyone in it has left.
   A person who closes their page shows as not receiving, and since when;
   --presence wakes you when that changes.
 - An entry comes from whoever joined under its sender's name, and nobody else:

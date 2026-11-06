@@ -14,8 +14,8 @@ use crate::{Fail, fail};
 
 pub const MAX_NAME: usize = 256;
 const MAX_INLINE: usize = 64 * 1024;
-/// How long a session lasts with nobody using it, receiving included, in seconds.
-const IDLE: i64 = 24 * 60 * 60;
+/// How long a session that nobody joined lasts, in seconds.
+const UNJOINED: i64 = 24 * 60 * 60;
 const JOIN: &str = "application/vnd.polylogue.join";
 const LEAVE: &str = "application/vnd.polylogue.leave";
 
@@ -25,7 +25,7 @@ const SCHEMA: &str = "
     PRAGMA foreign_keys = ON;
     CREATE TABLE IF NOT EXISTS sessions (
         id TEXT PRIMARY KEY,
-        used INTEGER NOT NULL
+        created INTEGER NOT NULL
     );
     CREATE TABLE IF NOT EXISTS entries (
         session TEXT NOT NULL REFERENCES sessions ON DELETE CASCADE,
@@ -190,6 +190,13 @@ impl Sessions {
             Some(path) => Connection::open(path)?,
             None => Connection::open_in_memory()?,
         };
+        // A database from before sessions lived while anyone is in them.
+        if db
+            .prepare("SELECT 1 FROM pragma_table_info('sessions') WHERE name = 'used'")?
+            .exists([])?
+        {
+            db.execute("ALTER TABLE sessions RENAME COLUMN used TO created", [])?;
+        }
         db.execute_batch(SCHEMA)?;
         Ok(Self {
             db,
@@ -201,38 +208,42 @@ impl Sessions {
     pub fn create(&mut self) -> Result<String, Fail> {
         let id = token();
         self.db.execute(
-            "INSERT INTO sessions (id, used) VALUES (?, unixepoch())",
+            "INSERT INTO sessions (id, created) VALUES (?, unixepoch())",
             [&id],
         )?;
         Ok(id)
     }
 
-    /// Marks the session as used, which keeps it for another `IDLE`.
+    /// Fails unless the session exists.
     pub fn enter(&self, session: &str) -> Result<(), Fail> {
-        let used = self.db.execute(
-            "UPDATE sessions SET used = unixepoch() WHERE id = ?",
-            [session],
-        )?;
-        if used == 0 {
+        let exists = self
+            .db
+            .prepare_cached("SELECT 1 FROM sessions WHERE id = ?")?
+            .exists([session])?;
+        if !exists {
             return Err(fail(404, "no such session"));
         }
         Ok(())
     }
 
-    /// Ends every session nobody used for `IDLE`, unless someone is still
-    /// receiving in it.
+    /// Ends every session that nobody joined within `UNJOINED` of its
+    /// creation. One that someone joined lives until the last one in it
+    /// leaves.
     pub fn expire(&mut self) -> Result<(), Fail> {
-        let idle = self
+        self.expire_before(UNJOINED)
+    }
+
+    fn expire_before(&mut self, age: i64) -> Result<(), Fail> {
+        let unjoined = self
             .db
-            .prepare("SELECT id FROM sessions WHERE used <= unixepoch() - ?")?
-            .query_map([IDLE], |row| row.get::<_, String>(0))?
+            .prepare(
+                "SELECT id FROM sessions WHERE created <= unixepoch() - ?
+                 AND NOT EXISTS (SELECT 1 FROM participants WHERE session = id)",
+            )?
+            .query_map([age], |row| row.get::<_, String>(0))?
             .collect::<rusqlite::Result<Vec<_>>>()?;
-        for session in idle {
-            if self.waiting.contains_key(&session) {
-                self.enter(&session)?;
-            } else {
-                self.end(&session)?;
-            }
+        for session in unjoined {
+            self.end(&session)?;
         }
         Ok(())
     }
@@ -672,5 +683,38 @@ impl Sessions {
                 Ok((name, presence))
             })?
             .collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn only_a_session_nobody_joined_expires() {
+        let mut sessions = Sessions::open(None).unwrap();
+        let unjoined = sessions.create().ok().unwrap();
+        let joined = sessions.create().ok().unwrap();
+        assert!(sessions.join(&joined, Some("luis"), "link").is_ok());
+        assert!(sessions.expire_before(0).is_ok());
+        assert!(sessions.enter(&unjoined).is_err());
+        assert!(sessions.enter(&joined).is_ok());
+    }
+
+    #[test]
+    fn a_database_from_before_opens() {
+        let path = std::env::temp_dir().join(format!("polylogue-{}.db", token()));
+        Connection::open(&path)
+            .unwrap()
+            .execute_batch(
+                "CREATE TABLE sessions (id TEXT PRIMARY KEY, used INTEGER NOT NULL);
+                 INSERT INTO sessions VALUES ('old', 0);",
+            )
+            .unwrap();
+        let mut sessions = Sessions::open(Some(&path)).unwrap();
+        assert!(sessions.expire().is_ok());
+        assert!(sessions.enter("old").is_err());
+        drop(sessions);
+        std::fs::remove_file(&path).unwrap();
     }
 }

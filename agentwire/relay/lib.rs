@@ -102,7 +102,7 @@ impl Relay {
         Router::new().fallback(handle).with_state(self)
     }
 
-    /// Ends the sessions nobody used for a day, checking every minute.
+    /// Ends the sessions nobody joined for a day, checking every minute.
     pub async fn expire(self: Arc<Self>) {
         loop {
             sleep(Duration::from_secs(60)).await;
