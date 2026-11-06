@@ -18,8 +18,10 @@ It is plain `sh` over `curl`, and its source is public at `https://github.com/lu
   The link is a secret: whoever holds it can join the session.
 - A session lives while anyone is in it, and ends when the last participant in it leaves.
   Then it is deleted, payloads and all, and its link leads nowhere.
-  A participant that goes away without leaving keeps it, and its payloads.
-  A session that nobody joined is deleted a day after it was created.
+  A participant that goes away without leaving keeps it, and its payloads, but only for a while:
+  a session that nobody received in for a week is deleted too,
+  and so is one that nobody joined, a day after it was created.
+  Any receive by any participant counts, one still waiting included.
 - A participant is a name.
   It joins the session, sends and receives, and leaves.
   Joining gives it a link of its own, a secret it keeps to itself,

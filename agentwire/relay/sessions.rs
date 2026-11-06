@@ -16,6 +16,8 @@ pub const MAX_NAME: usize = 256;
 const MAX_INLINE: usize = 64 * 1024;
 /// How long a session that nobody joined lasts, in seconds.
 const UNJOINED: i64 = 24 * 60 * 60;
+/// How long a session lasts once nobody receives in it, in seconds.
+const UNRECEIVED: i64 = 7 * 24 * 60 * 60;
 const JOIN: &str = "application/vnd.agentwire.join";
 const LEAVE: &str = "application/vnd.agentwire.leave";
 
@@ -25,7 +27,8 @@ const SCHEMA: &str = "
     PRAGMA foreign_keys = ON;
     CREATE TABLE IF NOT EXISTS sessions (
         id TEXT PRIMARY KEY,
-        created INTEGER NOT NULL
+        created INTEGER NOT NULL,
+        received INTEGER NOT NULL
     );
     CREATE TABLE IF NOT EXISTS entries (
         session TEXT NOT NULL REFERENCES sessions ON DELETE CASCADE,
@@ -198,6 +201,16 @@ impl Sessions {
             db.execute("ALTER TABLE sessions RENAME COLUMN used TO created", [])?;
         }
         db.execute_batch(SCHEMA)?;
+        // A database from before a session ended once nobody received in it.
+        if !db
+            .prepare("SELECT 1 FROM pragma_table_info('sessions') WHERE name = 'received'")?
+            .exists([])?
+        {
+            db.execute_batch(
+                "ALTER TABLE sessions ADD COLUMN received INTEGER NOT NULL DEFAULT 0;
+                 UPDATE sessions SET received = created;",
+            )?;
+        }
         Ok(Self {
             db,
             waiting: HashMap::new(),
@@ -208,7 +221,7 @@ impl Sessions {
     pub fn create(&mut self) -> Result<String, Fail> {
         let id = token();
         self.db.execute(
-            "INSERT INTO sessions (id, created) VALUES (?, unixepoch())",
+            "INSERT INTO sessions (id, created, received) VALUES (?, unixepoch(), unixepoch())",
             [&id],
         )?;
         Ok(id)
@@ -227,24 +240,39 @@ impl Sessions {
     }
 
     /// Ends every session that nobody joined within `UNJOINED` of its
-    /// creation. One that someone joined lives until the last one in it
-    /// leaves.
+    /// creation, and every one that nobody received in for `UNRECEIVED`.
+    /// Otherwise a session lives until the last one in it leaves.
     pub fn expire(&mut self) -> Result<(), Fail> {
-        self.expire_before(UNJOINED)
+        self.expire_after(UNJOINED, UNRECEIVED)
     }
 
-    fn expire_before(&mut self, age: i64) -> Result<(), Fail> {
-        let unjoined = self
+    fn expire_after(&mut self, unjoined: i64, unreceived: i64) -> Result<(), Fail> {
+        let expired = self
             .db
             .prepare(
-                "SELECT id FROM sessions WHERE created <= unixepoch() - ?
-                 AND NOT EXISTS (SELECT 1 FROM participants WHERE session = id)",
+                "SELECT id FROM sessions WHERE received <= unixepoch() - ?2
+                 OR (created <= unixepoch() - ?1
+                     AND NOT EXISTS (SELECT 1 FROM participants WHERE session = id))",
             )?
-            .query_map([age], |row| row.get::<_, String>(0))?
+            .query_map([unjoined, unreceived], |row| row.get::<_, String>(0))?
             .collect::<rusqlite::Result<Vec<_>>>()?;
-        for session in unjoined {
-            self.end(&session)?;
+        for session in expired {
+            // A receive still waiting is someone receiving now.
+            if self.waiting.contains_key(&session) {
+                self.received(&session)?;
+            } else {
+                self.end(&session)?;
+            }
         }
+        Ok(())
+    }
+
+    /// Marks that someone received in the session, which keeps it for
+    /// another `UNRECEIVED`.
+    fn received(&self, session: &str) -> Result<(), Fail> {
+        self.db
+            .prepare_cached("UPDATE sessions SET received = unixepoch() WHERE id = ?")?
+            .execute([session])?;
         Ok(())
     }
 
@@ -437,6 +465,7 @@ impl Sessions {
         receive: Receive,
     ) -> Result<(Ticket, oneshot::Receiver<Answer>), Fail> {
         let name = self.inside(session, secret)?;
+        self.received(session)?;
         let after = match receive.after {
             Some(after) => after,
             None => self
@@ -696,9 +725,44 @@ mod tests {
         let unjoined = sessions.create().ok().unwrap();
         let joined = sessions.create().ok().unwrap();
         assert!(sessions.join(&joined, Some("luis"), "link").is_ok());
-        assert!(sessions.expire_before(0).is_ok());
+        assert!(sessions.expire_after(0, 60).is_ok());
         assert!(sessions.enter(&unjoined).is_err());
         assert!(sessions.enter(&joined).is_ok());
+    }
+
+    #[test]
+    fn a_session_nobody_received_in_expires() {
+        let mut sessions = Sessions::open(None).unwrap();
+        let session = sessions.create().ok().unwrap();
+        assert!(sessions.join(&session, Some("luis"), "link").is_ok());
+        assert!(sessions.expire_after(60, 60).is_ok());
+        assert!(sessions.enter(&session).is_ok());
+        assert!(sessions.expire_after(60, 0).is_ok());
+        assert!(sessions.enter(&session).is_err());
+    }
+
+    #[test]
+    fn a_waiting_receive_keeps_its_session() {
+        let mut sessions = Sessions::open(None).unwrap();
+        let session = sessions.create().ok().unwrap();
+        assert!(sessions.join(&session, Some("luis"), "link").is_ok());
+        let secret: String = sessions
+            .db
+            .query_row("SELECT secret FROM participants", [], |row| row.get(0))
+            .unwrap();
+        let receive = Receive {
+            after: None,
+            own: false,
+            presence: false,
+            only: vec![],
+            skip: vec![],
+        };
+        let (ticket, _answered) = sessions.receive(&session, &secret, receive).ok().unwrap();
+        assert!(sessions.expire_after(60, 0).is_ok());
+        assert!(sessions.enter(&session).is_ok());
+        assert!(sessions.abandon(&ticket).is_ok());
+        assert!(sessions.expire_after(60, 0).is_ok());
+        assert!(sessions.enter(&session).is_err());
     }
 
     #[test]
