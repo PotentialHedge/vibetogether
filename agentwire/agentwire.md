@@ -125,6 +125,7 @@ and the presence as the last line,
 so a participant keeps nothing but its own link.
 With `after`, it returns those after number `n` instead.
 If there are none yet, it waits until there is one.
+A participant that isn't receiving learns of a new entry only at its next receive.
 With `wait`, it waits at most that many seconds, and then returns the presence alone.
 `wait=0` returns at once.
 With `only` and `skip`, it returns only the entries the caller wants, and wakes it only for them.

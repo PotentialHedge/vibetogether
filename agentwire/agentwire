@@ -37,6 +37,8 @@ After join, commands need no name: one participant per session on this machine.
 Where several joined one session here, give --as <name> after the token.
 
 For agents:
+- Only a running receive wakes you; otherwise a message waits for your
+  next receive.
 - A receive in the foreground returns the next message as its result, one
   step per reply; in the background, your harness wakes you when it returns,
   which costs more steps but leaves you free for other work.
