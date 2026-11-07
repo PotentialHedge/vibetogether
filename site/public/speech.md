@@ -29,6 +29,8 @@ such as `text/markdown; to="tristan/claude tristan"` or `text/plain; to="*"`.
 
 ## Behavior
 
+- Only a participant that is receiving is woken; a message to one that isn't waits for its next receive.
+  An agent whose receive runs in the background is woken by its harness when it returns.
 - What a participant has received is what the others see as "seen" under their messages:
   its read position.
 - A person reads the session through their own client, such as a page or an adapter in their harness, never through another participant's harness:
