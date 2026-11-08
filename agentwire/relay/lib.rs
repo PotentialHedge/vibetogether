@@ -1,10 +1,11 @@
 //! The agentwire relay: the transport that `agentwire.md` specifies, over plain
 //! HTTP, with every session in one SQLite database.
 
+mod access;
 mod sessions;
 
 use std::borrow::Cow;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
@@ -12,8 +13,8 @@ use axum::Router;
 use axum::body::Body;
 use axum::extract::{Request, State};
 use axum::http::header::{
-    CONTENT_DISPOSITION, CONTENT_SECURITY_POLICY, CONTENT_TYPE, HOST, REFERRER_POLICY, RETRY_AFTER,
-    X_CONTENT_TYPE_OPTIONS,
+    AUTHORIZATION, CONTENT_DISPOSITION, CONTENT_SECURITY_POLICY, CONTENT_TYPE, HOST,
+    REFERRER_POLICY, RETRY_AFTER, X_CONTENT_TYPE_OPTIONS,
 };
 use axum::http::{HeaderMap, HeaderValue, Method, StatusCode};
 use axum::response::{IntoResponse, Response};
@@ -21,7 +22,8 @@ use http_body_util::BodyExt;
 use serde::Serialize;
 use tokio::time::{sleep, timeout};
 
-use sessions::{Answer, MAX_NAME, Receive, Sessions, Ticket, is_token};
+use access::Access;
+use sessions::{Answer, MAX_NAME, Receive, Sessions, Ticket, is_name, is_token};
 
 /// The transport's version, the first part of every session's path: a
 /// breaking change bumps it, and the relay serves only the current one.
@@ -33,15 +35,18 @@ const FAILED_RECEIVE: Duration = Duration::from_secs(10);
 const PLAIN: &str = "text/plain; charset=utf-8";
 const MARKDOWN: &str = "text/markdown; charset=utf-8";
 
-// What the relay serves of this repository is compiled in: a change to any of
-// these, prose included, is served only once each relay's pin moves to it and
-// the relay restarts.
+// The relay's own page is compiled in: a change to it is served only once each
+// relay's pin moves to it and the relay restarts. The spec and the script are
+// read from files instead.
 const PEOPLE: &str = include_str!("people.html");
 
 const CORS: [(&str, &str); 5] = [
     ("access-control-allow-origin", "*"),
     ("access-control-allow-methods", "GET, POST"),
-    ("access-control-allow-headers", "Content-Type"),
+    (
+        "access-control-allow-headers",
+        "Authorization, Content-Type",
+    ),
     ("access-control-expose-headers", "Content-Disposition"),
     ("access-control-max-age", "86400"),
 ];
@@ -82,21 +87,32 @@ impl IntoResponse for Fail {
     }
 }
 
+/// How a relay is set up. The default keeps its sessions in memory, serves
+/// no spec, and asks no access service.
+#[derive(Debug, Clone, Default)]
+pub struct Options {
+    /// The database the sessions are kept in.
+    pub database: Option<PathBuf>,
+    /// The directory the spec, `agentwire.md`, and the script, `agentwire`, are
+    /// read from at each request, so that a new wording takes effect without a restart.
+    pub files: Option<PathBuf>,
+    /// The access service's URL, which decides who may be in a session, and
+    /// which sessions last.
+    pub access: Option<String>,
+}
+
 pub struct Relay {
     sessions: Mutex<Sessions>,
-    /// Where the spec, `agentwire.md`, and the script, `agentwire`, are read from at
-    /// each request, so that a new wording takes effect without a restart.
     files: Option<PathBuf>,
+    access: Option<Access>,
 }
 
 impl Relay {
-    /// The relay with its sessions in the database at `path`, or in memory
-    /// without one, serving the spec and the script from the directory `files`,
-    /// or neither without one.
-    pub fn open(path: Option<&Path>, files: Option<PathBuf>) -> rusqlite::Result<Arc<Self>> {
+    pub fn open(options: Options) -> rusqlite::Result<Arc<Self>> {
         Ok(Arc::new(Self {
-            sessions: Mutex::new(Sessions::open(path)?),
-            files,
+            sessions: Mutex::new(Sessions::open(options.database.as_deref())?),
+            files: options.files,
+            access: options.access.as_deref().map(Access::new),
         }))
     }
 
@@ -112,13 +128,51 @@ impl Relay {
         Router::new().fallback(handle).with_state(self)
     }
 
-    /// Ends the sessions nobody joined for a day, or nobody received in for a
-    /// week, checking every minute.
+    /// Ends the sessions nobody joined for a day, nobody received in for a
+    /// week, or everyone left, checking every minute; with an access service,
+    /// only those it doesn't keep.
     pub async fn expire(self: Arc<Self>) {
         loop {
             sleep(Duration::from_secs(60)).await;
-            _ = self.sessions().expire();
+            let Ok(expiring) = self.sessions().expiring() else {
+                continue;
+            };
+            for session in expiring {
+                if self.ends(&session).await {
+                    _ = self.sessions().end(&session);
+                }
+            }
         }
+    }
+
+    /// Whether a session due to end ends: always, unless an access service keeps it.
+    async fn ends(&self, session: &str) -> bool {
+        match &self.access {
+            None => true,
+            Some(access) => access.ends(session).await,
+        }
+    }
+
+    /// Lets the caller act, if the access service lets it be in the session,
+    /// with the token it presents now or else the one it joined with; a new
+    /// token it is let in with is kept, and so is the account vouched for.
+    async fn admit(&self, session: &str, secret: &str, token: Option<&str>) -> Result<(), Fail> {
+        let Some(access) = &self.access else {
+            return Ok(());
+        };
+        // A link that is no participant's fails as the operation would.
+        let Ok((name, kept, vouched)) = self.sessions().credentials(session, secret) else {
+            return Ok(());
+        };
+        let account = access
+            .admit(session, &name, token.or(kept.as_deref()))
+            .await?;
+        let token = token.filter(|token| Some(*token) != kept.as_deref());
+        if token.is_some() || account != vouched {
+            self.sessions()
+                .vouch(session, secret, token, account.as_deref())?;
+        }
+        Ok(())
     }
 
     fn sessions(&self) -> MutexGuard<'_, Sessions> {
@@ -211,6 +265,14 @@ fn takes(query: &str, operation: &str, keys: &[&str]) -> Result<(), Fail> {
     }
 }
 
+/// The token in an `Authorization: Bearer <token>` header.
+fn bearer(headers: &HeaderMap) -> Option<String> {
+    let value = headers.get(AUTHORIZATION)?.to_str().ok()?;
+    let (scheme, token) = value.trim().split_once(' ')?;
+    let token = token.trim();
+    (scheme.eq_ignore_ascii_case("bearer") && !token.is_empty()).then(|| token.to_owned())
+}
+
 fn param<'a>(query: &'a str, key: &str) -> Option<Cow<'a, str>> {
     form_urlencoded::parse(query.as_bytes())
         .find(|(k, _)| k == key)
@@ -297,12 +359,29 @@ async fn session(
     let me = format!("{link}/{secret}");
     let post = method == Method::POST;
     let get = method == Method::GET;
+    let token = bearer(headers);
+    // Leaving is always let through, so that nobody is kept in.
+    if *secret != "join" && operation != ["leave"] {
+        relay.admit(id, secret, token.as_deref()).await?;
+    }
     match (*secret, operation) {
         ("join", []) if post => {
             takes(query, "a join", &["as"])?;
-            let joined = relay
-                .sessions()
-                .join(id, param(query, "as").as_deref(), link)?;
+            let name = param(query, "as");
+            let mut account = None;
+            if let (Some(access), Some(name)) = (&relay.access, name.as_deref())
+                && is_name(name)
+                && name.len() <= MAX_NAME
+            {
+                account = access.admit(id, name, token.as_deref()).await?;
+            }
+            let joined = relay.sessions().join(
+                id,
+                name.as_deref(),
+                link,
+                token.as_deref(),
+                account.as_deref(),
+            )?;
             Ok(json(&joined))
         }
         (_, []) if post => {
@@ -324,7 +403,10 @@ async fn session(
         }
         (_, ["leave"]) if post => {
             takes(query, "a leave", &[])?;
-            let n = relay.sessions().leave(id, secret)?;
+            let (n, anyone) = relay.sessions().leave(id, secret)?;
+            if !anyone && relay.ends(id).await {
+                relay.sessions().end(id)?;
+            }
             Ok(numbered(n))
         }
         (_, [n]) if get && number(n).is_some() => {

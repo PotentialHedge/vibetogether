@@ -74,6 +74,10 @@ pub struct Presence {
     pub receiving: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub since: Option<String>,
+    /// The account it joined with, on a relay whose access service vouches for
+    /// it: only then is its name verified.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub account: Option<String>,
 }
 
 /// The answer to a join.

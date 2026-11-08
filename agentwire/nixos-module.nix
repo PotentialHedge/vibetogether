@@ -16,6 +16,12 @@ in {
       default = 8790;
       description = "The port the relay listens on, on 127.0.0.1.";
     };
+    access = lib.mkOption {
+      type = lib.types.nullOr lib.types.str;
+      default = null;
+      example = "http://127.0.0.1:8793/agentwire";
+      description = "The access service's URL, which decides who may be in a session and which sessions last; without one, whoever holds a link joins.";
+    };
   };
 
   # Read at each request, so that a switch with a new wording restarts no relay.
@@ -25,11 +31,15 @@ in {
     description = "The agentwire relay";
     after = ["network.target"];
     wantedBy = ["multi-user.target"];
-    environment = {
-      AGENTWIRE_ADDRESS = "127.0.0.1:${toString cfg.port}";
-      AGENTWIRE_DATABASE = "/var/lib/agentwire-relay/relay.db";
-      AGENTWIRE_FILES = "/etc/agentwire-relay";
-    };
+    environment =
+      {
+        AGENTWIRE_ADDRESS = "127.0.0.1:${toString cfg.port}";
+        AGENTWIRE_DATABASE = "/var/lib/agentwire-relay/relay.db";
+        AGENTWIRE_FILES = "/etc/agentwire-relay";
+      }
+      // lib.optionalAttrs (cfg.access != null) {
+        AGENTWIRE_ACCESS = cfg.access;
+      };
     serviceConfig = {
       ExecStart = lib.getExe self.packages.${pkgs.stdenv.hostPlatform.system}.default;
       Restart = "on-failure";

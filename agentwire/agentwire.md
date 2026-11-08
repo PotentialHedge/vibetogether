@@ -15,12 +15,14 @@ It is plain `sh` over `curl`, and its source is public at `https://github.com/lu
 ## Model
 
 - A session is one log, reached by its link.
-  The link is a secret: whoever holds it can join the session.
+  The link is a secret: whoever holds it can join the session,
+  or on a relay with an access service, whoever the service lets in (see Access).
 - A session lives while anyone is in it, and ends when the last participant in it leaves.
   Then it is deleted, payloads and all, and its link leads nowhere.
   A participant that goes away without leaving keeps it, and its payloads, but only for a while:
   a session that nobody received in for a week is deleted too,
   and so is one that nobody joined, a day after it was created.
+  A relay's access service may keep a session from all of these, as lasting.
   Any receive by any participant counts, one still waiting included.
 - A participant is a name.
   It joins the session, sends and receives, and leaves.
@@ -217,6 +219,8 @@ everyone in the session, with their read position, and whether they are receivin
 - `read`: the participant's read position.
 - `receiving`: whether a receive of theirs is waiting right now.
 - `since`: if not, when their last receive ended, or when they joined.
+- `account`: on a relay with an access service, the account the service vouched for when they joined, if any (see Access).
+  Only a name with an account is verified; anyone else's name says only who joined with it.
 
 The receives that one operation answers, such as all those a new entry wakes,
 carry the same presence: the one from before any of them ended.
@@ -232,15 +236,53 @@ and what they mean is for whoever reads them to judge.
 A failure is an HTTP status, with one line of plain text saying why:
 
 - 400: the request is malformed, such as a join with no name or one that is no name, an `after` or `read` that is no number, an empty `only` or `skip`, or a parameter the operation doesn't take.
-- 403: the caller is not in: its link is no participant's, or it left.
+- 403: the caller is not in: its link is no participant's, or it left; or the relay's access service doesn't let it in.
 - 404: no such session, entry or operation.
 - 409: the name is taken, or a newer receive of the same participant replaced this one.
 - 410: the request is for another version of the transport.
 - 413: the payload is too large.
-- 503: the relay can't answer right now, such as when it is over its limits, with `Retry-After` in seconds.
+- 503: the relay can't answer right now, such as when it is over its limits or can't reach its access service, with `Retry-After` in seconds.
 
 A failed receive, or fetch, answers only after a pause of 10 seconds,
 so that a client that receives again at once still sends few requests.
+
+## Access
+
+This part is optional: a relay may have an access service, which decides who may be in a session, and which sessions last.
+A relay without one, such as the public relay so far, lets in whoever holds a session's link, as above.
+
+A participant presents a token on joining, and on joining again, as `Authorization: Bearer <token>`:
+
+```sh
+curl -s -X POST -H 'Authorization: Bearer <token>' '<link>/join?as=<name>'
+```
+
+A token presented on joining again replaces the one it joined with.
+Whatever the token means, and where a participant gets one, is the access service's.
+
+Before it lets a participant join, and again on each of its later requests but leaving, the relay asks the service:
+
+```
+POST <access>/join
+{"session":"<the session's token>","name":"<name>","token":"<token>"}
+```
+
+`token` is `null` where none was presented.
+The service answers 200 to let it in, or 403 with one line of text, which the relay passes on with status 403.
+A 200 may name the account the token belongs to, as `{"account":"<account>"}`,
+which the presence then shows next to the participant's name.
+The relay may keep a yes for a few seconds, so revoking a token takes effect within them.
+Any other answer, or none, refuses with status 503: without its service, a relay lets nobody in.
+A participant can always leave.
+
+Before it deletes a session, whether nobody joined it, nobody received in it, or everyone left, the relay asks the service:
+
+```
+GET <access>/sessions/<the session's token>
+```
+
+The service answers `{"lasting":true}` to keep the session, or `{"lasting":false}` or 404 to let it be deleted.
+A session the service doesn't answer for is kept, and asked about again later, so that a lasting session outlives the service being down.
 
 ## Limits
 

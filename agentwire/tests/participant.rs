@@ -4,13 +4,13 @@ use std::time::Duration;
 
 use agentwire::chat::Ping;
 use agentwire::{Client, JOIN, LEAVE, Receive};
-use agentwire_relay::Relay;
+use agentwire_relay::{Options, Relay};
 use tokio::net::TcpListener;
 
 async fn relay() -> String {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
-    let router = Relay::open(None, None).unwrap().router();
+    let router = Relay::open(Options::default()).unwrap().router();
     tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
     format!("http://{address}")
 }
@@ -19,12 +19,12 @@ async fn relay() -> String {
 async fn every_operation() {
     let client = Client::new();
     let link = client.create(&relay().await).await.unwrap();
-    let luis = client.join(&link, "luis").await.unwrap();
-    let claude = client.join(&link, "luis/claude").await.unwrap();
+    let luis = client.join(&link, "luis", None).await.unwrap();
+    let claude = client.join(&link, "luis/claude", None).await.unwrap();
     assert_eq!((luis.name.as_str(), luis.n, claude.n), ("luis", 1, 2));
-    let taken = client.join(&link, "luis").await.unwrap_err();
+    let taken = client.join(&link, "luis", None).await.unwrap_err();
     assert_eq!(taken.status(), Some(409));
-    assert_eq!(client.rejoin(&luis.link).await.unwrap(), luis);
+    assert_eq!(client.rejoin(&luis.link, None).await.unwrap(), luis);
 
     let kind = Ping::Only(vec!["luis/claude".into()]).on("text/markdown");
     let n = client

@@ -1,0 +1,169 @@
+//! A relay with an access service, against a stub of one: who may be in a
+//! session, revoking a token, and which sessions last.
+
+use std::collections::{HashMap, HashSet};
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
+
+use agentwire::{Client, Receive};
+use agentwire_relay::{Options, Relay};
+use axum::extract::{Path, State};
+use axum::http::StatusCode;
+use axum::routing::{get, post};
+use axum::{Json, Router};
+use serde::Deserialize;
+use tokio::net::TcpListener;
+
+/// The stub's state: which person each token is, and which sessions last.
+#[derive(Default)]
+struct Stub {
+    tokens: Mutex<HashMap<String, String>>,
+    lasting: Mutex<HashSet<String>>,
+}
+
+#[derive(Deserialize)]
+struct Join {
+    session: String,
+    name: String,
+    token: Option<String>,
+}
+
+async fn join(State(stub): State<Arc<Stub>>, Json(join): Json<Join>) -> (StatusCode, String) {
+    assert!(!join.session.is_empty());
+    let person = join
+        .token
+        .and_then(|token| stub.tokens.lock().unwrap().get(&token).cloned());
+    match person {
+        Some(person) if join.name.split('/').next() == Some(person.as_str()) => {
+            (StatusCode::OK, format!(r#"{{"account":"{person}"}}"#))
+        }
+        Some(_) => (StatusCode::FORBIDDEN, "not your name\n".into()),
+        None => (StatusCode::FORBIDDEN, "sign in first\n".into()),
+    }
+}
+
+async fn session(State(stub): State<Arc<Stub>>, Path(id): Path<String>) -> Json<serde_json::Value> {
+    let lasting = stub.lasting.lock().unwrap().contains(&id);
+    Json(serde_json::json!({ "lasting": lasting }))
+}
+
+async fn serve(router: Router) -> String {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
+    format!("http://{address}")
+}
+
+async fn world() -> (Arc<Stub>, String) {
+    let stub = Arc::new(Stub::default());
+    stub.tokens
+        .lock()
+        .unwrap()
+        .insert("t-luis".into(), "luis".into());
+    let service = Router::new()
+        .route("/agentwire/join", post(join))
+        .route("/agentwire/sessions/{id}", get(session))
+        .with_state(stub.clone());
+    let access = serve(service).await;
+    let relay = Relay::open(Options {
+        access: Some(format!("{access}/agentwire")),
+        ..Options::default()
+    })
+    .unwrap();
+    (stub, serve(relay.router()).await)
+}
+
+#[tokio::test]
+async fn only_whom_the_service_lets_in_takes_part() {
+    let (stub, relay) = world().await;
+    let client = Client::new();
+    let link = client.create(&relay).await.unwrap();
+
+    let refused = client.join(&link, "luis", None).await.unwrap_err();
+    assert_eq!(refused.status(), Some(403));
+    assert!(refused.to_string().contains("sign in first"), "{refused}");
+    let wrong = client
+        .join(&link, "ben/claude", Some("t-luis"))
+        .await
+        .unwrap_err();
+    assert!(wrong.to_string().contains("not your name"), "{wrong}");
+
+    let claude = client
+        .join(&link, "luis/claude", Some("t-luis"))
+        .await
+        .unwrap();
+    client
+        .send(&claude.link, "text/plain", None, "Hello.")
+        .await
+        .unwrap();
+    let now = Receive {
+        wait: Some(Duration::ZERO),
+        ..Receive::default()
+    };
+    let presence = client.receive(&claude.link, &now).await.unwrap().presence;
+    assert_eq!(presence["luis/claude"].account.as_deref(), Some("luis"));
+
+    // Revoking cuts the participant once the relay's yes runs out.
+    stub.tokens.lock().unwrap().remove("t-luis");
+    tokio::time::sleep(Duration::from_secs(6)).await;
+    let cut = client
+        .send(&claude.link, "text/plain", None, "Still here?")
+        .await
+        .unwrap_err();
+    assert_eq!(cut.status(), Some(403));
+
+    // A new token, presented on joining again, lets it back in.
+    stub.tokens
+        .lock()
+        .unwrap()
+        .insert("t-new".into(), "luis".into());
+    client.rejoin(&claude.link, Some("t-new")).await.unwrap();
+    client
+        .send(&claude.link, "text/plain", None, "Back.")
+        .await
+        .unwrap();
+
+    // Leaving is never refused.
+    stub.tokens.lock().unwrap().remove("t-new");
+    tokio::time::sleep(Duration::from_secs(6)).await;
+    client.leave(&claude.link).await.unwrap();
+}
+
+#[tokio::test]
+async fn a_lasting_session_outlives_everyone_leaving() {
+    let (stub, relay) = world().await;
+    let client = Client::new();
+    let lasting = client.create(&relay).await.unwrap();
+    let id = lasting.rsplit('/').next().unwrap().to_owned();
+    stub.lasting.lock().unwrap().insert(id);
+    let passing = client.create(&relay).await.unwrap();
+
+    for link in [&lasting, &passing] {
+        let luis = client.join(link, "luis", Some("t-luis")).await.unwrap();
+        client.leave(&luis.link).await.unwrap();
+    }
+    let back = client.join(&lasting, "luis/claude", Some("t-luis")).await;
+    assert!(back.is_ok(), "{back:?}");
+    let gone = client
+        .join(&passing, "luis/claude", Some("t-luis"))
+        .await
+        .unwrap_err();
+    assert_eq!(gone.status(), Some(404));
+}
+
+#[tokio::test]
+async fn without_the_service_nobody_joins() {
+    let relay = Relay::open(Options {
+        access: Some("http://127.0.0.1:9/agentwire".into()),
+        ..Options::default()
+    })
+    .unwrap();
+    let relay = serve(relay.router()).await;
+    let client = Client::new();
+    let link = client.create(&relay).await.unwrap();
+    let error = client
+        .join(&link, "luis", Some("t-luis"))
+        .await
+        .unwrap_err();
+    assert_eq!(error.status(), Some(503));
+}

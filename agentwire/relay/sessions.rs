@@ -71,6 +71,8 @@ const SCHEMA: &str = "
         entry INTEGER NOT NULL,
         read INTEGER NOT NULL,
         since TEXT NOT NULL,
+        token TEXT,
+        account TEXT,
         PRIMARY KEY (session, name),
         UNIQUE (session, secret)
     );
@@ -204,6 +206,19 @@ impl Sessions {
                  UPDATE sessions SET received = created;",
             )?;
         }
+        // A database from before participants joined with tokens.
+        if !db
+            .prepare("SELECT 1 FROM pragma_table_info('participants') WHERE name = 'token'")?
+            .exists([])?
+        {
+            db.execute("ALTER TABLE participants ADD COLUMN token TEXT", [])?;
+        }
+        if !db
+            .prepare("SELECT 1 FROM pragma_table_info('participants') WHERE name = 'account'")?
+            .exists([])?
+        {
+            db.execute("ALTER TABLE participants ADD COLUMN account TEXT", [])?;
+        }
         Ok(Self {
             db,
             waiting: HashMap::new(),
@@ -232,32 +247,34 @@ impl Sessions {
         Ok(())
     }
 
-    /// Ends every session that nobody joined within `UNJOINED` of its
-    /// creation, and every one that nobody received in for `UNRECEIVED`.
-    /// Otherwise a session lives until the last one in it leaves.
-    pub fn expire(&mut self) -> Result<(), Fail> {
-        self.expire_after(UNJOINED, UNRECEIVED)
+    /// The sessions due to end: every one that nobody joined within
+    /// `UNJOINED` of its creation, every one that nobody received in for
+    /// `UNRECEIVED`, and every one that everyone left.
+    pub fn expiring(&mut self) -> Result<Vec<String>, Fail> {
+        self.expiring_after(UNJOINED, UNRECEIVED)
     }
 
-    fn expire_after(&mut self, unjoined: i64, unreceived: i64) -> Result<(), Fail> {
-        let expired = self
+    fn expiring_after(&mut self, unjoined: i64, unreceived: i64) -> Result<Vec<String>, Fail> {
+        let due = self
             .db
             .prepare(
                 "SELECT id FROM sessions WHERE received <= unixepoch() - ?2
-                 OR (created <= unixepoch() - ?1
-                     AND NOT EXISTS (SELECT 1 FROM participants WHERE session = id))",
+                 OR (NOT EXISTS (SELECT 1 FROM participants WHERE session = id AND inside)
+                     AND (created <= unixepoch() - ?1
+                          OR EXISTS (SELECT 1 FROM participants WHERE session = id)))",
             )?
             .query_map([unjoined, unreceived], |row| row.get::<_, String>(0))?
             .collect::<rusqlite::Result<Vec<_>>>()?;
-        for session in expired {
+        let mut expiring = Vec::new();
+        for session in due {
             // A receive still waiting is someone receiving now.
             if self.waiting.contains_key(&session) {
                 self.received(&session)?;
             } else {
-                self.end(&session)?;
+                expiring.push(session);
             }
         }
-        Ok(())
+        Ok(expiring)
     }
 
     /// Marks that someone received in the session, which keeps it for
@@ -270,7 +287,7 @@ impl Sessions {
     }
 
     /// Deletes the session, payloads and all. Receives still waiting return.
-    fn end(&mut self, session: &str) -> Result<(), Fail> {
+    pub fn end(&mut self, session: &str) -> Result<(), Fail> {
         self.db
             .execute("DELETE FROM sessions WHERE id = ?", [session])?;
         for name in self.names_waiting(session) {
@@ -285,6 +302,41 @@ impl Sessions {
             .query_row([session, secret], participant)
             .optional()?
             .ok_or_else(|| fail(403, "this link is no participant's"))
+    }
+
+    /// The caller's name, the token it joined with, and the account vouched for.
+    pub fn credentials(
+        &self,
+        session: &str,
+        secret: &str,
+    ) -> Result<(String, Option<String>, Option<String>), Fail> {
+        self.db
+            .prepare_cached(
+                "SELECT name, token, account FROM participants WHERE session = ? AND secret = ?",
+            )?
+            .query_row([session, secret], |row| {
+                Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+            })
+            .optional()?
+            .ok_or_else(|| fail(403, "this link is no participant's"))
+    }
+
+    /// Keeps `token` as the one the caller presents from now on, and `account`
+    /// as the one the access service vouches for.
+    pub fn vouch(
+        &self,
+        session: &str,
+        secret: &str,
+        token: Option<&str>,
+        account: Option<&str>,
+    ) -> Result<(), Fail> {
+        self.db
+            .prepare_cached(
+                "UPDATE participants SET token = coalesce(?, token), account = ?
+                 WHERE session = ? AND secret = ?",
+            )?
+            .execute(params![token, account, session, secret])?;
+        Ok(())
     }
 
     /// The caller, if it is in the session.
@@ -310,7 +362,14 @@ impl Sessions {
 
     /// Takes `name` for the caller, who gets a link of its own: a name is
     /// bound to whoever joined with it, for the whole session.
-    pub fn join(&mut self, session: &str, name: Option<&str>, link: &str) -> Result<Joined, Fail> {
+    pub fn join(
+        &mut self,
+        session: &str,
+        name: Option<&str>,
+        link: &str,
+        presented: Option<&str>,
+        account: Option<&str>,
+    ) -> Result<Joined, Fail> {
         let name = name
             .filter(|name| !name.is_empty())
             .ok_or_else(|| fail(400, "name yourself with ?as=<name>"))?;
@@ -330,9 +389,9 @@ impl Sessions {
         }
         let n = self.append(session, name, JOIN, &[], None)?;
         transaction.execute(
-            "INSERT INTO participants (session, name, secret, inside, entry, read, since)
-             VALUES (?, ?, ?, TRUE, ?, 0, strftime('%Y-%m-%dT%H:%M:%SZ'))",
-            params![session, name, secret, n],
+            "INSERT INTO participants (session, name, secret, inside, entry, read, since, token, account)
+             VALUES (?, ?, ?, TRUE, ?, 0, strftime('%Y-%m-%dT%H:%M:%SZ'), ?, ?)",
+            params![session, name, secret, n, presented, account],
         )?;
         transaction.commit()?;
         self.look(session)?;
@@ -367,11 +426,12 @@ impl Sessions {
         })
     }
 
-    /// The last to leave ends the session.
-    pub fn leave(&mut self, session: &str, secret: &str) -> Result<i64, Fail> {
+    /// Leaves, and says whether anyone is still in: the caller ends a
+    /// session that nobody is in any more, or keeps a lasting one.
+    pub fn leave(&mut self, session: &str, secret: &str) -> Result<(i64, bool), Fail> {
         let caller = self.caller(session, secret)?;
         if !caller.inside {
-            return Ok(caller.entry);
+            return Ok((caller.entry, true));
         }
         let transaction = self.db.unchecked_transaction()?;
         let n = self.append(session, &caller.name, LEAVE, &[], None)?;
@@ -385,10 +445,7 @@ impl Sessions {
             .db
             .prepare_cached("SELECT 1 FROM participants WHERE session = ? AND inside")?
             .exists([session])?;
-        if !anyone {
-            self.end(session)?;
-        }
-        Ok(n)
+        Ok((n, anyone))
     }
 
     pub fn send(
@@ -697,7 +754,7 @@ impl Sessions {
         let waiting = self.waiting.get(session);
         self.db
             .prepare_cached(
-                "SELECT name, read, since FROM participants WHERE session = ? AND inside",
+                "SELECT name, read, since, account FROM participants WHERE session = ? AND inside",
             )?
             .query_map([session], |row| {
                 let name: String = row.get(0)?;
@@ -706,6 +763,7 @@ impl Sessions {
                     read: row.get(1)?,
                     receiving,
                     since: if receiving { None } else { row.get(2)? },
+                    account: row.get(3)?,
                 };
                 Ok((name, presence))
             })?
@@ -717,12 +775,25 @@ impl Sessions {
 mod tests {
     use super::*;
 
+    impl Sessions {
+        fn expire_after(&mut self, unjoined: i64, unreceived: i64) -> Result<(), Fail> {
+            for session in self.expiring_after(unjoined, unreceived)? {
+                self.end(&session)?;
+            }
+            Ok(())
+        }
+    }
+
     #[test]
     fn only_a_session_nobody_joined_expires() {
         let mut sessions = Sessions::open(None).unwrap();
         let unjoined = sessions.create().ok().unwrap();
         let joined = sessions.create().ok().unwrap();
-        assert!(sessions.join(&joined, Some("luis"), "link").is_ok());
+        assert!(
+            sessions
+                .join(&joined, Some("luis"), "link", None, None)
+                .is_ok()
+        );
         assert!(sessions.expire_after(0, 60).is_ok());
         assert!(sessions.enter(&unjoined).is_err());
         assert!(sessions.enter(&joined).is_ok());
@@ -732,7 +803,11 @@ mod tests {
     fn a_session_nobody_received_in_expires() {
         let mut sessions = Sessions::open(None).unwrap();
         let session = sessions.create().ok().unwrap();
-        assert!(sessions.join(&session, Some("luis"), "link").is_ok());
+        assert!(
+            sessions
+                .join(&session, Some("luis"), "link", None, None)
+                .is_ok()
+        );
         assert!(sessions.expire_after(60, 60).is_ok());
         assert!(sessions.enter(&session).is_ok());
         assert!(sessions.expire_after(60, 0).is_ok());
@@ -743,7 +818,11 @@ mod tests {
     fn a_waiting_receive_keeps_its_session() {
         let mut sessions = Sessions::open(None).unwrap();
         let session = sessions.create().ok().unwrap();
-        assert!(sessions.join(&session, Some("luis"), "link").is_ok());
+        assert!(
+            sessions
+                .join(&session, Some("luis"), "link", None, None)
+                .is_ok()
+        );
         let secret: String = sessions
             .db
             .query_row("SELECT secret FROM participants", [], |row| row.get(0))
@@ -775,7 +854,7 @@ mod tests {
             )
             .unwrap();
         let mut sessions = Sessions::open(Some(&path)).unwrap();
-        assert!(sessions.expire().is_ok());
+        assert!(sessions.expire_after(UNJOINED, UNRECEIVED).is_ok());
         assert!(sessions.enter("old").is_err());
         drop(sessions);
         std::fs::remove_file(&path).unwrap();

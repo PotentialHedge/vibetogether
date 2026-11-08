@@ -12,6 +12,8 @@ Its design is Vibe Together's, in `~/dev/vibetogether/project/design.md`: read i
 - The relay serves only agentwire: Vibe Together's specs and page are `luiswirth/vibetogether`, at `vibetogether.agentics.lwirth.com`.
 - The relay serves `agentwire.agentics.lwirth.com` from lwirth-cloud (`~/dev/dotcloud`),
   and the tailnet relay from the server (`~/dev/dothome`), both through the flake's `nixosModules.relay`.
+- The relay reads the spec and the script from files at each request (`AGENTWIRE_FILES`, the module's `/etc/agentwire-relay`), so a new wording reaches it by a switch that restarts nothing; its own page is still compiled in.
+- With an access service (`AGENTWIRE_ACCESS`, the module's `access`), the relay asks it who may be in a session and which sessions last, as the spec's "Access" says; Vibe Together's accounts service is one. Without one, nothing changes.
 - `just ci` runs every check, the spec's examples against a relay of its own included.
 
 Provenance: agent-autonomous

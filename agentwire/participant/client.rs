@@ -131,17 +131,22 @@ impl Client {
         Ok(text(self.post(url)).await?.trim().to_owned())
     }
 
-    /// Joins the session at `link` as `name`.
-    pub async fn join(&self, link: &str, name: &str) -> Result<Joined> {
+    /// Joins the session at `link` as `name`, with a token where the relay's
+    /// access service asks for one.
+    pub async fn join(&self, link: &str, name: &str, token: Option<&str>) -> Result<Joined> {
         let link = link.trim_end_matches('/');
-        let request = self.post(format!("{link}/join")).query(&[("as", name)]);
+        let request = bearer(
+            self.post(format!("{link}/join")).query(&[("as", name)]),
+            token,
+        );
         Ok(serde_json::from_str(&text(request).await?)?)
     }
 
     /// Joins again with the participant's own link, after leaving;
     /// while in, it does nothing, and so tells whose the link is.
-    pub async fn rejoin(&self, me: &str) -> Result<Joined> {
-        let request = self.post(format!("{me}/join"));
+    /// A token given replaces the one it joined with.
+    pub async fn rejoin(&self, me: &str, token: Option<&str>) -> Result<Joined> {
+        let request = bearer(self.post(format!("{me}/join")), token);
         Ok(serde_json::from_str(&text(request).await?)?)
     }
 
@@ -221,6 +226,13 @@ impl Client {
     pub async fn leave(&self, me: &str) -> Result<u64> {
         let request = self.post(format!("{me}/leave"));
         Ok(serde_json::from_str::<Appended>(&text(request).await?)?.n)
+    }
+}
+
+fn bearer(request: RequestBuilder, token: Option<&str>) -> RequestBuilder {
+    match token {
+        Some(token) => request.bearer_auth(token),
+        None => request,
     }
 }
 
