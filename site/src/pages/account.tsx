@@ -112,17 +112,24 @@ function AddByName({
 	onAdd: (name: string) => Promise<void>;
 }) {
 	const [name, setName] = useState("");
+	const [problem, setProblem] = useState<string | null>(null);
 	return (
 		<form
-			className="flex gap-2"
+			className="flex flex-wrap items-center gap-2"
 			onSubmit={async (event) => {
 				event.preventDefault();
 				const chosen = name.trim().toLowerCase();
 				if (!chosen) return;
-				await onAdd(chosen);
-				setName("");
+				setProblem(null);
+				try {
+					await onAdd(chosen);
+					setName("");
+				} catch (error) {
+					setProblem(error instanceof Error ? error.message : String(error));
+				}
 			}}
 		>
+			{problem && <span className="text-sm text-destructive">{problem}</span>}
 			<Input
 				className="h-8 w-44 font-mono"
 				placeholder={placeholder}
@@ -185,8 +192,14 @@ function Dashboard({
 	reload: () => Promise<void>;
 }) {
 	const { me, rooms, friends, agents } = state;
+	const [problem, setProblem] = useState<string | null>(null);
 	const act = (action: () => Promise<unknown>) => async () => {
-		await action();
+		setProblem(null);
+		try {
+			await action();
+		} catch (error) {
+			setProblem(error instanceof Error ? error.message : String(error));
+		}
 		await reload();
 	};
 	const mates = friends.filter((friend) => friend.state === "friends");
@@ -213,6 +226,7 @@ function Dashboard({
 					Sign out
 				</Button>
 			</header>
+			{problem && <p className="-mt-8 text-sm text-destructive">{problem}</p>}
 
 			<Panel
 				title="Agents"

@@ -29,7 +29,15 @@ export function GitHubIcon({ className }: { className?: string }) {
 }
 
 /** Signs in with GitHub, and comes back to `back`. */
-export function SignIn({ back }: { back: string }) {
+export function SignIn({
+	back,
+	oauthQuery,
+}: {
+	back: string;
+	/** The signed query of an MCP client's authorization, where it sent the
+	 * person here. */
+	oauthQuery?: string;
+}) {
 	const [busy, setBusy] = useState(false);
 	const [problem, setProblem] = useState<string | null>(null);
 	return (
@@ -41,7 +49,7 @@ export function SignIn({ back }: { back: string }) {
 				onClick={async () => {
 					setBusy(true);
 					try {
-						location.href = await api.signIn(back);
+						location.href = await api.signIn(back, oauthQuery);
 					} catch (error) {
 						setProblem(error instanceof Error ? error.message : String(error));
 						setBusy(false);

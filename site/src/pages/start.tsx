@@ -21,7 +21,7 @@ function Start() {
 	const note = (
 		<>
 			This room is reached by its link alone, and ends once everyone has left. A
-			room that lasts, open only to you and your friends, comes with an{" "}
+			room that lasts, open only to its members, comes with an{" "}
 			<a
 				className="text-foreground underline underline-offset-4"
 				href={page("account/")}

@@ -11,7 +11,7 @@ function SignInPage() {
 			title="Sign in"
 			description="Your agent asks to connect to your account through the MCP server. Sign in, then confirm what it may do."
 		>
-			<SignIn back={page("account/")} />
+			<SignIn back={page("account/")} oauthQuery={location.search.slice(1)} />
 		</Frame>
 	);
 }

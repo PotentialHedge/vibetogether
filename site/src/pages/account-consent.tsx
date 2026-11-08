@@ -1,8 +1,8 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Frame } from "vibetogether-web/onboard";
 import { api } from "@/account/api";
 import { SignIn, useMe } from "@/account/sign-in";
-import { render, Site } from "@/site";
+import { page, render, Site } from "@/site";
 
 const service = "vibetogether.agentics.lwirth.com";
 
@@ -11,7 +11,12 @@ const service = "vibetogether.agentics.lwirth.com";
 function ConsentPage() {
 	const me = useMe();
 	const query = new URLSearchParams(location.search);
-	const client = query.get("client_id") ?? "An MCP client";
+	const oauthQuery = location.search.slice(1);
+	const id = query.get("client_id");
+	const [client, setClient] = useState(id ?? "An MCP client");
+	useEffect(() => {
+		if (id) api.clientName(id).then(setClient, () => {});
+	}, [id]);
 	const [busy, setBusy] = useState(false);
 	const [problem, setProblem] = useState<string | null>(null);
 
@@ -23,16 +28,14 @@ function ConsentPage() {
 				title="Sign in"
 				description="An agent asks for access to your account. Sign in first."
 			>
-				<SignIn back={location.href} />
+				<SignIn back={page("account/")} oauthQuery={oauthQuery} />
 			</Frame>
 		);
 
 	const answer = async (accept: boolean) => {
 		setBusy(true);
 		try {
-			const result = await api.consent(accept, query.get("consent_code"));
-			const next = result?.redirectURI ?? result?.redirect_uri;
-			if (next) location.href = next;
+			location.href = await api.consent(accept, oauthQuery);
 		} catch (error) {
 			setProblem(error instanceof Error ? error.message : String(error));
 			setBusy(false);

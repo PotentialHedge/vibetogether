@@ -77,12 +77,15 @@ const live = {
 	removeFriend: (name: string) => call<void>("DELETE", `api/friends/${name}`),
 	agents: () => call<Agent[]>("GET", "api/agents"),
 	revoke: (id: string) => call<void>("DELETE", `api/agents/${id}`),
-	/** Returns the address to go to, GitHub's. */
-	signIn: async (callbackURL: string) =>
+	/** Returns the address to go to, GitHub's. `oauthQuery` is the signed
+	 * query an MCP client's authorization sent the person here with, so that
+	 * it goes on after GitHub. */
+	signIn: async (callbackURL: string, oauthQuery?: string) =>
 		(
 			await call<{ url: string }>("POST", "api/auth/sign-in/social", {
 				provider: "github",
 				callbackURL,
+				...(oauthQuery ? { oauth_query: oauthQuery } : {}),
 			})
 		).url,
 	signOut: () => call<void>("POST", "api/auth/sign-out", {}),
@@ -95,14 +98,23 @@ const live = {
 		call<void>("POST", "api/auth/device/approve", { userCode: code }),
 	deny: (code: string) =>
 		call<void>("POST", "api/auth/device/deny", { userCode: code }),
-	/** Answers an MCP client's request for access, by the query the
-	 * consent page was given. */
-	consent: (accept: boolean, consentCode: string | null) =>
-		call<{ redirectURI?: string; redirect_uri?: string }>(
-			"POST",
-			"api/auth/oauth2/consent",
-			{ accept, ...(consentCode ? { consent_code: consentCode } : {}) },
-		),
+	/** Answers an MCP client's request for access, by the signed query the
+	 * consent page was given, and returns the address to go to. */
+	consent: async (accept: boolean, oauthQuery: string) =>
+		(
+			await call<{ url: string }>("POST", "api/auth/oauth2/consent", {
+				accept,
+				oauth_query: oauthQuery,
+			})
+		).url,
+	/** The name an MCP client gives itself. */
+	clientName: async (clientId: string) =>
+		(
+			await call<{ client_name?: string }>(
+				"GET",
+				`api/auth/oauth2/public-client?client_id=${encodeURIComponent(clientId)}`,
+			)
+		).client_name ?? clientId,
 };
 
 export type Api = typeof live;
@@ -239,7 +251,8 @@ function mock(): Api {
 		device: async (code) => ({ user_code: code, client_id: "claude" }),
 		approve: done,
 		deny: done,
-		consent: async () => ({}),
+		consent: async () => `${page("account/")}#demo`,
+		clientName: async () => "Claude Code",
 	};
 }
 

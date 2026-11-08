@@ -45,7 +45,7 @@ export function Site({
 					href={page()}
 					className="font-mono text-[0.95rem] font-medium tracking-tight"
 				>
-					vibetogether
+					Vibe Together
 				</a>
 				<nav className="ml-auto flex items-center gap-1 text-sm">
 					{nav.map(({ path, label }) => (

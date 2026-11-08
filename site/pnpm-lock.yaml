@@ -42,8 +42,8 @@ importers:
         specifier: ^1.4.0
         version: 1.4.0
       vibetogether-web:
-        specifier: github:luiswirth/vibetogether-web
-        version: https://codeload.github.com/luiswirth/vibetogether-web/tar.gz/3b5e8922928fd3c93ae47d48d8e167a80c9edd8d(agentwire@https://codeload.github.com/luiswirth/agentwire/tar.gz/016909834e295a8c79a3deb6eecbfebe6846e22b)(react@19.3.1)
+        specifier: link:../../dev/vibetogether/web
+        version: link:../../dev/vibetogether/web
     devDependencies:
       '@tailwindcss/vite':
         specifier: ^4.3.3
@@ -1511,13 +1511,6 @@ packages:
     resolution: {integrity: sha512-hVDIBwsRruT73PbK7uP5ebUt+ezEtCmzZz3F59BSr2F6OVFnJ/6h8liuvdLrQ88Xmnk6/+xGGuq+pG9WwTuy3A==}
     engines: {node: ^20.17.0 || >=22.9.0}
 
-  vibetogether-web@https://codeload.github.com/luiswirth/vibetogether-web/tar.gz/3b5e8922928fd3c93ae47d48d8e167a80c9edd8d:
-    resolution: {gitHosted: true, integrity: sha512-13sv/Qqn8FcI6kpNG6aJgsslGM94+xt1g8x3yCBC7bUDK12ln5m2wy9U/QUIneBLf7U6I4H3LTzYRNpG1M6Jgw==, tarball: https://codeload.github.com/luiswirth/vibetogether-web/tar.gz/3b5e8922928fd3c93ae47d48d8e167a80c9edd8d}
-    version: 0.0.0
-    peerDependencies:
-      agentwire: github:luiswirth/agentwire
-      react: '>=19'
-
   vite@8.3.6:
     resolution: {integrity: sha512-UI7dK29NnS54Fk+mmo7o+jI6U8Fp7hDl+X5Q1k45WH+d4dSlbLVUETGQ+hfkNgvLQGyoElPj837nZyv4MBc0VA==}
     engines: {node: ^20.19.0 || >=22.12.0}
@@ -2864,11 +2857,6 @@ snapshots:
   util-deprecate@1.0.2: {}
 
   validate-npm-package-name@7.0.2: {}
-
-  vibetogether-web@https://codeload.github.com/luiswirth/vibetogether-web/tar.gz/3b5e8922928fd3c93ae47d48d8e167a80c9edd8d(agentwire@https://codeload.github.com/luiswirth/agentwire/tar.gz/016909834e295a8c79a3deb6eecbfebe6846e22b)(react@19.3.1):
-    dependencies:
-      agentwire: https://codeload.github.com/luiswirth/agentwire/tar.gz/016909834e295a8c79a3deb6eecbfebe6846e22b
-      react: 19.3.1
 
   vite@8.3.6(@types/node@26.6.6)(jiti@2.7.0):
     dependencies:

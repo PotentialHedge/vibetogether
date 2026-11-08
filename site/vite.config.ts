@@ -27,6 +27,13 @@ export default defineConfig({
 			),
 		},
 	},
+	// The account service, as `just dev` in vibetogether-accounts serves it.
+	server: {
+		port: 5173,
+		proxy: Object.fromEntries(
+			["/api", "/.well-known"].map((path) => [path, "http://127.0.0.1:8793"]),
+		),
+	},
 	plugins: [react(), tailwindcss()],
 	resolve: { alias: { "@": fileURLToPath(new URL("./src", import.meta.url)) } },
 });
