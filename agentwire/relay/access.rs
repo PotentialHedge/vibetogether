@@ -33,6 +33,15 @@ struct Join<'a> {
     session: &'a str,
     name: &'a str,
     token: Option<&'a str>,
+    guarded: bool,
+}
+
+/// What the service said to a participant.
+pub enum Verdict {
+    /// It may be in, with the account the service vouches for, if any.
+    Admitted(Option<String>),
+    /// The service gave no answer.
+    Silent,
 }
 
 #[derive(Deserialize, Default)]
@@ -56,15 +65,15 @@ impl Access {
         }
     }
 
-    /// Lets `name` be in `session` with `token`, with the account the service
-    /// vouches for, or refuses with the service's line why; fails closed when
-    /// the service doesn't answer.
-    pub async fn admit(
+    /// Asks whether `name` may be in `session` with `token`: refuses with the
+    /// service's line why, or answers what the service said, if anything.
+    pub async fn ask(
         &self,
         session: &str,
         name: &str,
         token: Option<&str>,
-    ) -> Result<Option<String>, Fail> {
+        guarded: bool,
+    ) -> Result<Verdict, Fail> {
         let key = (
             session.to_owned(),
             name.to_owned(),
@@ -75,10 +84,9 @@ impl Access {
             let mut admitted = self.admitted.lock().unwrap_or_else(|e| e.into_inner());
             admitted.retain(|_, (at, _)| now.duration_since(*at) < ADMITTED);
             if let Some((_, account)) = admitted.get(&key) {
-                return Ok(account.clone());
+                return Ok(Verdict::Admitted(account.clone()));
             }
         }
-        let unavailable = || fail(503, "the relay can't reach its access service");
         let response = self
             .http
             .post(format!("{}/join", self.url))
@@ -87,20 +95,25 @@ impl Access {
                 session,
                 name,
                 token,
+                guarded,
             })
             .send()
-            .await
-            .map_err(|_| unavailable())?;
+            .await;
+        let Ok(response) = response else {
+            return Ok(Verdict::Silent);
+        };
         match response.status().as_u16() {
             200 => {
-                let body = response.bytes().await.map_err(|_| unavailable())?;
+                let Ok(body) = response.bytes().await else {
+                    return Ok(Verdict::Silent);
+                };
                 let account = serde_json::from_slice::<Admitted>(&body)
                     .unwrap_or_default()
                     .account
                     .filter(|account| !account.is_empty());
                 let mut admitted = self.admitted.lock().unwrap_or_else(|e| e.into_inner());
                 admitted.insert(key, (Instant::now(), account.clone()));
-                Ok(account)
+                Ok(Verdict::Admitted(account))
             }
             403 => {
                 let why = response.text().await.unwrap_or_default();
@@ -114,7 +127,7 @@ impl Access {
                     },
                 ))
             }
-            _ => Err(unavailable()),
+            _ => Ok(Verdict::Silent),
         }
     }
 

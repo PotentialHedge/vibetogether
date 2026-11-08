@@ -22,7 +22,7 @@ use http_body_util::BodyExt;
 use serde::Serialize;
 use tokio::time::{sleep, timeout};
 
-use access::Access;
+use access::{Access, Verdict};
 use sessions::{Answer, MAX_NAME, Receive, Sessions, Ticket, is_name, is_token};
 
 /// The transport's version, the first part of every session's path: a
@@ -145,11 +145,37 @@ impl Relay {
         }
     }
 
-    /// Whether a session due to end ends: always, unless an access service keeps it.
+    /// Whether a session due to end ends: always, unless it is guarded and the
+    /// access service keeps it.
     async fn ends(&self, session: &str) -> bool {
         match &self.access {
-            None => true,
-            Some(access) => access.ends(session).await,
+            Some(access) if self.sessions().guarded(session).unwrap_or(false) => {
+                access.ends(session).await
+            }
+            _ => true,
+        }
+    }
+
+    /// What the access service says to `name` being in `session` with `token`:
+    /// nothing where it isn't asked, in a session that isn't guarded and without
+    /// a token. A guarded session fails closed without an answer; any other goes
+    /// on without one.
+    async fn verdict(
+        &self,
+        access: &Access,
+        session: &str,
+        name: &str,
+        token: Option<&str>,
+    ) -> Result<Option<Verdict>, Fail> {
+        let guarded = self.sessions().guarded(session)?;
+        if !guarded && token.is_none() {
+            return Ok(None);
+        }
+        match access.ask(session, name, token, guarded).await? {
+            Verdict::Silent if guarded => {
+                Err(fail(503, "the relay can't reach its access service"))
+            }
+            verdict => Ok(Some(verdict)),
         }
     }
 
@@ -164,9 +190,13 @@ impl Relay {
         let Ok((name, kept, vouched)) = self.sessions().credentials(session, secret) else {
             return Ok(());
         };
-        let account = access
-            .admit(session, &name, token.or(kept.as_deref()))
+        let verdict = self
+            .verdict(access, session, &name, token.or(kept.as_deref()))
             .await?;
+        // Without an answer, it goes on as it was.
+        let Some(Verdict::Admitted(account)) = verdict else {
+            return Ok(());
+        };
         let token = token.filter(|token| Some(*token) != kept.as_deref());
         if token.is_some() || account != vouched {
             self.sessions()
@@ -315,8 +345,9 @@ async fn route(relay: &Relay, request: Request) -> Result<Response, Fail> {
         ["s", ..] => Err(gone(&origin)),
         [version, ..] if is_version(version) && *version != VERSION => Err(gone(&origin)),
         [VERSION, "s"] if parts.method == Method::POST => {
-            takes(query, "creating a session", &[])?;
-            let id = relay.sessions().create()?;
+            takes(query, "creating a session", &["guarded"])?;
+            let guarded = param(query, "guarded").is_some();
+            let id = relay.sessions().create(guarded)?;
             Ok(text(format!("{origin}/{VERSION}/s/{id}\n"), PLAIN))
         }
         [VERSION, "s", id, rest @ ..] => {
@@ -372,8 +403,10 @@ async fn session(
             if let (Some(access), Some(name)) = (&relay.access, name.as_deref())
                 && is_name(name)
                 && name.len() <= MAX_NAME
+                && let Some(Verdict::Admitted(vouched)) =
+                    relay.verdict(access, id, name, token.as_deref()).await?
             {
-                account = access.admit(id, name, token.as_deref()).await?;
+                account = vouched;
             }
             let joined = relay.sessions().join(
                 id,

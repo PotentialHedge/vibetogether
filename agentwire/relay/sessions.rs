@@ -49,7 +49,8 @@ const SCHEMA: &str = "
     CREATE TABLE IF NOT EXISTS sessions (
         id TEXT PRIMARY KEY,
         created INTEGER NOT NULL,
-        received INTEGER NOT NULL
+        received INTEGER NOT NULL,
+        guarded INTEGER NOT NULL DEFAULT 0
     );
     CREATE TABLE IF NOT EXISTS entries (
         session TEXT NOT NULL REFERENCES sessions ON DELETE CASCADE,
@@ -219,6 +220,16 @@ impl Sessions {
         {
             db.execute("ALTER TABLE participants ADD COLUMN account TEXT", [])?;
         }
+        // A database from before guarded sessions.
+        if !db
+            .prepare("SELECT 1 FROM pragma_table_info('sessions') WHERE name = 'guarded'")?
+            .exists([])?
+        {
+            db.execute(
+                "ALTER TABLE sessions ADD COLUMN guarded INTEGER NOT NULL DEFAULT 0",
+                [],
+            )?;
+        }
         Ok(Self {
             db,
             waiting: HashMap::new(),
@@ -226,13 +237,25 @@ impl Sessions {
         })
     }
 
-    pub fn create(&mut self) -> Result<String, Fail> {
+    /// A new session, guarded or not: only a guarded one depends on the access service.
+    pub fn create(&mut self, guarded: bool) -> Result<String, Fail> {
         let id = token();
         self.db.execute(
-            "INSERT INTO sessions (id, created, received) VALUES (?, unixepoch(), unixepoch())",
-            [&id],
+            "INSERT INTO sessions (id, created, received, guarded)
+             VALUES (?, unixepoch(), unixepoch(), ?)",
+            params![id, guarded],
         )?;
         Ok(id)
+    }
+
+    /// Whether the session was created guarded; no for one that doesn't exist.
+    pub fn guarded(&self, session: &str) -> Result<bool, Fail> {
+        let guarded = self
+            .db
+            .prepare_cached("SELECT guarded FROM sessions WHERE id = ?")?
+            .query_row([session], |row| row.get(0))
+            .optional()?;
+        Ok(guarded.unwrap_or(false))
     }
 
     /// Fails unless the session exists.
@@ -787,8 +810,8 @@ mod tests {
     #[test]
     fn only_a_session_nobody_joined_expires() {
         let mut sessions = Sessions::open(None).unwrap();
-        let unjoined = sessions.create().ok().unwrap();
-        let joined = sessions.create().ok().unwrap();
+        let unjoined = sessions.create(false).ok().unwrap();
+        let joined = sessions.create(false).ok().unwrap();
         assert!(
             sessions
                 .join(&joined, Some("luis"), "link", None, None)
@@ -802,7 +825,7 @@ mod tests {
     #[test]
     fn a_session_nobody_received_in_expires() {
         let mut sessions = Sessions::open(None).unwrap();
-        let session = sessions.create().ok().unwrap();
+        let session = sessions.create(false).ok().unwrap();
         assert!(
             sessions
                 .join(&session, Some("luis"), "link", None, None)
@@ -817,7 +840,7 @@ mod tests {
     #[test]
     fn a_waiting_receive_keeps_its_session() {
         let mut sessions = Sessions::open(None).unwrap();
-        let session = sessions.create().ok().unwrap();
+        let session = sessions.create(false).ok().unwrap();
         assert!(
             sessions
                 .join(&session, Some("luis"), "link", None, None)

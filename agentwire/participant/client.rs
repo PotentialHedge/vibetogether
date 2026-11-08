@@ -131,6 +131,12 @@ impl Client {
         Ok(text(self.post(url)).await?.trim().to_owned())
     }
 
+    /// Creates a guarded session, which the relay's access service decides on alone.
+    pub async fn create_guarded(&self, relay: &str) -> Result<String> {
+        let url = format!("{}/v2/s?guarded", relay.trim_end_matches('/'));
+        Ok(text(self.post(url)).await?.trim().to_owned())
+    }
+
     /// Joins the session at `link` as `name`, with a token where the relay's
     /// access service asks for one.
     pub async fn join(&self, link: &str, name: &str, token: Option<&str>) -> Result<Joined> {
