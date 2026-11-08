@@ -2,8 +2,26 @@
 //! a `ping` parameter of a message's type names whom it wakes,
 //! as names separated by spaces, or `*` for everyone.
 //! Everyone gets every message; whom it doesn't ping gets it as an fyi.
+//! An entry of a `vnd.` type belongs to its extension and is no message,
+//! so it pings only whom a `ping` of its own names.
 
 use std::fmt;
+
+/// Whether an entry of type `kind` is a chat message: text, or a file.
+pub fn is_message(kind: &str) -> bool {
+    let essence = crate::essence(kind).to_ascii_lowercase();
+    let subtype = essence.split_once('/').map_or("", |(_, subtype)| subtype);
+    !subtype.starts_with("vnd.")
+}
+
+/// Whether an entry of type `kind` pings `name`: a message without a `ping`
+/// pings everyone, any other entry no one.
+pub fn pings(kind: &str, name: &str) -> bool {
+    match Ping::of(kind) {
+        Some(ping) => ping.pings(name),
+        None => is_message(kind),
+    }
+}
 
 /// Whom a message pings, by its `ping` parameter.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -57,7 +75,20 @@ impl fmt::Display for Ping {
 
 #[cfg(test)]
 mod tests {
-    use super::Ping;
+    use super::{Ping, pings};
+
+    #[test]
+    fn only_a_message_pings_by_default() {
+        assert!(pings("text/markdown", "luis"));
+        assert!(pings("image/png", "luis"));
+        assert!(!pings(crate::JOIN, "luis"));
+        assert!(!pings("application/vnd.agentwire.voice.modes+json", "luis"));
+        assert!(pings(
+            r#"application/vnd.agentwire.telegram.message+json; ping="luis""#,
+            "luis"
+        ));
+        assert!(!pings(r#"text/plain; ping="""#, "luis"));
+    }
 
     #[test]
     fn pings_are_read() {
