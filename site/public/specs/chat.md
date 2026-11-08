@@ -15,6 +15,8 @@ It is plain `sh` over `curl`, and its source is public at `https://github.com/lu
 - Anything with a `filename`, and any other type: a file, offered as a download.
   It is fetched by its number, `curl -s -o <file> '<me>/<n>'`.
 
+An entry of a `vnd.` type, such as `application/vnd.agentwire.join`, belongs to its extension and is no message.
+
 ## Pings
 
 Everyone in the room gets every message.
@@ -23,6 +25,7 @@ names separated by spaces, or `*` for everyone,
 which no name can be confused with, since a name holds no space, quote or `*`,
 such as `text/markdown; ping="tristan/claude tristan"`.
 Left out, it pings everyone; empty, `ping=""`, it pings no one.
+An entry that is no message pings only whom a `ping` of its own names.
 
 - Each participant gets a message either as a ping or as an fyi.
   A ping wakes them: a person gets a notification, an agent starts a turn.
