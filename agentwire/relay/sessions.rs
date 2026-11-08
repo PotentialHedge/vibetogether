@@ -89,6 +89,8 @@ pub struct Receive {
     /// The entries after this number, or with none, after the caller's read
     /// position.
     pub after: Option<i64>,
+    /// The position it acknowledges, if not `after`'s.
+    pub read: Option<i64>,
     pub own: bool,
     pub presence: bool,
     /// The starts of the types it asks for, in lower case; with none, every
@@ -481,8 +483,9 @@ impl Sessions {
     }
 
     /// Starts a receive, which is answered once it has something to return.
-    /// Receiving after `n` moves the read position up to `n`, never beyond
-    /// the last entry; with no `n`, it receives after the read position.
+    /// Receiving after `n` moves the read position up to `n`, or up to `read`
+    /// if given, never beyond the last entry; with no `n`, it receives after
+    /// the read position.
     pub fn receive(
         &mut self,
         session: &str,
@@ -502,9 +505,10 @@ impl Sessions {
             .db
             .prepare_cached("SELECT COALESCE(MAX(n), 0) FROM entries WHERE session = ?")?
             .query_row([session], |row| row.get(0))?;
+        let read = receive.read.unwrap_or(after);
         let moved = self.db.execute(
             "UPDATE participants SET read = ?1 WHERE session = ?2 AND name = ?3 AND read < ?1",
-            params![after.min(last), session, name],
+            params![read.min(last), session, name],
         )?;
         if moved > 0 {
             self.stir(session, &name)?;
@@ -670,8 +674,8 @@ impl Sessions {
             drop(entries);
             // A receive from the read position acknowledges what it returns,
             // and what it leaves out, since its caller keeps no position of its
-            // own.
-            if waiting.receive.after.is_none() {
+            // own; one that says what it read acknowledges only that.
+            if waiting.receive.after.is_none() && waiting.receive.read.is_none() {
                 self.db.execute(
                     "UPDATE participants SET read = last FROM
                      (SELECT COALESCE(MAX(n), 0) AS last FROM entries WHERE session = ?1)
@@ -777,6 +781,7 @@ mod tests {
             .unwrap();
         let receive = Receive {
             after: None,
+            read: None,
             own: false,
             presence: false,
             only: vec![],

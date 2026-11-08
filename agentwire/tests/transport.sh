@@ -160,6 +160,25 @@ curl -s "$claude?wait=0" >/dev/null
 wait "$waiting"
 check "the presence a receive stirs shows what it read" "$(tail -1 "$work/acknowledged" | jq '.presence["luis/claude"].read')" 19
 
+# read acknowledges a position of its own, apart from where the receive waits from.
+curl -s --data-binary 'One.' "$luis" >/dev/null
+curl -s --data-binary 'Two.' "$luis" >/dev/null
+read_of() { curl -s "$luis?after=0&own=1&wait=0" | tail -1 | jq ".presence[\"$1\"].read"; }
+check "read apart from after" "$(curl -s "$claude?after=21&read=20&wait=0" | jq -c 'keys')" '["presence"]'
+check "read acknowledges only itself" "$(read_of luis/claude)" 20
+check "read from the read position" "$(curl -s "$claude?read=20&wait=0" | head -n -1 | jq -r .n | xargs)" 21
+check "what it returned stays unread" "$(read_of luis/claude)" 20
+curl -s "$claude?after=21&read=21" >"$work/read" &
+waiting=$!
+until_receiving "$luis?after=0&own=1&wait=0" luis/claude
+curl -s --data-binary 'Three.' "$luis" >/dev/null
+wait "$waiting"
+check "waiting past what it read" "$(head -n -1 "$work/read" | jq -r .n | xargs)" 22
+check "what it waited for stays unread" "$(read_of luis/claude)" 21
+check "read never moves back" "$(curl -s "$claude?after=22&read=1&wait=0" | tail -1 | jq '.presence["luis/claude"].read')" 21
+curl -s "$claude?wait=0" >/dev/null
+check "plain receive still acknowledges all" "$(read_of luis/claude)" 22
+
 check "join with no name" "$(status -X POST "$link/join")" 400
 for name in 'Luis' 'luis%20wirth' 'a/b/c' '%2A' 'luis%22' '-luis' 'luis/' '/claude' 'luis_wirth' 'luis%0A'; do
   check "no name: $name" "$(status -X POST "$link/join?as=$name")" 400
@@ -172,6 +191,7 @@ check "an unknown parameter to a send" "$(status --data-binary 'Hi.' "$luis?to=x
 check "an unknown parameter to a join" "$(status -X POST "$link/join?as=probe&role=x")" 400
 check "an unknown parameter to a leave" "$(status -X POST "$luis/leave?now=1")" 400
 check "bad after" "$(status "$luis?after=x")" 400
+check "bad read" "$(status "$luis?read=x")" 400
 check "no session" "$(status "$relay/v2/s/AAAAAAAAAAAAAAAAAAAAAA/join?as=luis" -X POST)" 404
 check "older version" "$(status "$relay/s/AAAAAAAAAAAAAAAAAAAAAA/join?as=luis" -X POST)" 410
 check "other version" "$(status "$relay/v0/s" -X POST)" 410

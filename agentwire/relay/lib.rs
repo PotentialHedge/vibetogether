@@ -302,7 +302,7 @@ async fn session(
             takes(
                 query,
                 "a receive",
-                &["after", "wait", "only", "skip", "own", "presence"],
+                &["after", "read", "wait", "only", "skip", "own", "presence"],
             )?;
             receive(relay, id, secret, query).await
         }
@@ -379,6 +379,10 @@ async fn receive(relay: &Relay, id: &str, secret: &str, query: &str) -> Result<R
         None => None,
         Some(after) => Some(number(&after).ok_or_else(|| fail(400, "after is a number"))?),
     };
+    let read = match param(query, "read") {
+        None => None,
+        Some(read) => Some(number(&read).ok_or_else(|| fail(400, "read is a number"))?),
+    };
     // A wait too long to represent is no limit.
     let wait = match param(query, "wait") {
         None => None,
@@ -400,6 +404,7 @@ async fn receive(relay: &Relay, id: &str, secret: &str, query: &str) -> Result<R
     };
     let receive = Receive {
         after,
+        read,
         own: flag("own"),
         presence: flag("presence"),
         only: types("only")?,

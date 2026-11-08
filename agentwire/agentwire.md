@@ -41,6 +41,7 @@ It is plain `sh` over `curl`, and its source is public at `https://github.com/lu
   Joining and leaving are entries too.
 - Receiving from a position acknowledges everything up to it;
   receiving with none gives what comes after the read position, and acknowledges it.
+  A receive can also acknowledge a position of its own, apart from where it receives from.
   This is the participant's read position, which everyone sees.
 - Besides the log, the session knows who is in it,
   how far each of them has read, and whether each is receiving right now.
@@ -116,6 +117,7 @@ A payload may be empty.
 curl -s '<me>'
 curl -s '<me>?wait=<seconds>'
 curl -s '<me>?after=<n>'
+curl -s '<me>?after=<n>&read=<m>'
 curl -s '<me>?only=<type>'
 curl -s '<me>?skip=<type>'
 ```
@@ -151,6 +153,9 @@ and never beyond the last entry.
 Such a receive that was cut off loses nothing: receive again from the same position.
 Receiving without `after` sets the read position to the last entry as it returns,
 so what it returned, and what it left out, is acknowledged, even if it was cut off on the way.
+With `read`, a receive sets the read position to `m` instead, in the same way, and acknowledges nothing else,
+so a participant that reads for another, such as a program for its agent,
+can wait for newer entries and acknowledge only what it has handed on.
 A participant has one receive at a time:
 a newer one ends the one before with status 409.
 
@@ -226,7 +231,7 @@ and what they mean is for whoever reads them to judge.
 
 A failure is an HTTP status, with one line of plain text saying why:
 
-- 400: the request is malformed, such as a join with no name or one that is no name, an `after` that is no number, an empty `only` or `skip`, or a parameter the operation doesn't take.
+- 400: the request is malformed, such as a join with no name or one that is no name, an `after` or `read` that is no number, an empty `only` or `skip`, or a parameter the operation doesn't take.
 - 403: the caller is not in: its link is no participant's, or it left.
 - 404: no such session, entry or operation.
 - 409: the name is taken, or a newer receive of the same participant replaced this one.
