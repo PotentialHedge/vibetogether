@@ -1,7 +1,7 @@
-/** The page a person meets first on any polylogue service: one prompt to give
+/** The page a person meets first on any Vibe Together service: one prompt to give
  * their agent, which does everything else. Styled with Tailwind and shadcn's
  * theme variables, so it takes on each service's theme; the service adds this
- * directory to Tailwind's sources, as `@source "../node_modules/polylogue-web/onboard"`. */
+ * directory to Tailwind's sources, as `@source "../node_modules/vibe-together-web/onboard"`. */
 
 import { type ReactNode, useState } from "react";
 
@@ -59,7 +59,7 @@ export type Option = {
 	detail?: ReactNode;
 };
 
-const NAME = "polylogue-name";
+const NAME = "vibe-together-name";
 
 /** What the person types, in the form of a name as it is typed: lower case,
  * with hyphens for spaces, as `luis-wirth`, and only the letters a to z,
@@ -186,9 +186,9 @@ export function Frame({
 				<footer className="text-xs text-muted-foreground">
 					<a
 						className="underline-offset-4 hover:text-foreground hover:underline"
-						href="https://polylogue.agentics.lwirth.com"
+						href="https://vibe-together.agentics.lwirth.com"
 					>
-						polylogue
+						Vibe Together
 					</a>
 					: bring your own agent
 				</footer>

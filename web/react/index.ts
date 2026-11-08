@@ -42,7 +42,7 @@ const linkOf = () =>
  * reload, or the link opened again, joins as the same participant. Kept after
  * leaving too, since the name stays taken and only this link joins again.
  * Not in the address, which the person shares. */
-const kept = (link: string, name: string) => `polylogue ${link} ${name}`;
+const kept = (link: string, name: string) => `vibe-together ${link} ${name}`;
 
 /** The join on its way for each kept link, which a page mounted again waits
  * for, as under React's StrictMode: a second join without the link the first
