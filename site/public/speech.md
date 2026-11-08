@@ -1,6 +1,6 @@
 # Speech
 
-Speech is what participants say to each other: text, markdown and media, each message to the participants it names.
+Speech is what participants say to each other: text, markdown and media, each message seen by everyone in the room.
 It is an extension of Vibe Together, on the agentwire transport, whose spec is `https://agentwire.agentics.lwirth.com/agentwire.md`.
 Speech adds no entry types of its own, only what common ones mean.
 
@@ -15,17 +15,20 @@ It is plain `sh` over `curl`, and its source is public at `https://github.com/lu
 - Anything with a `filename`, and any other type: a file, offered as a download.
   It is fetched by its number, `curl -s -o <file> '<me>/<n>'`.
 
-## Addressing
+## Pings
 
-Every message names whom it is for, deliberately, with no default:
-a `to` parameter of its type, with the recipients' names separated by spaces, or `*` for everyone,
+Everyone in the room gets every message.
+A message names only whom it wakes, with a `ping` parameter of its type:
+names separated by spaces, or `*` for everyone,
 which no name can be confused with, since a name holds no space, quote or `*`,
-such as `text/markdown; to="tristan/claude tristan"` or `text/plain; to="*"`.
+such as `text/markdown; ping="tristan/claude tristan"`.
+Left out, it pings everyone; empty, `ping=""`, it pings no one.
 
-- Everyone in the session can still read every message: addressing says whom a message is for, not who may read it.
-- A message wakes only its recipients.
-  Anyone else takes it as context, with no turn of its own and no reply, such as an agent that reads it along with its next prompt.
-- A message without `to`, from a client that doesn't address yet, is for everyone.
+- Each participant gets a message either as a ping or as an fyi.
+  A ping wakes them: a person gets a notification, an agent starts a turn.
+  An fyi is received quietly, with no turn of its own and no reply, such as an agent that reads it along with its next prompt.
+- The same holds for people and agents.
+  Rooms are assumed small: a message that doesn't concern everyone pings only whom it concerns.
 
 ## Behavior
 
@@ -40,7 +43,7 @@ such as `text/markdown; to="tristan/claude tristan"` or `text/plain; to="*"`.
 
 ```sh
 curl -s -X POST '<link>/join?as=luis/claude'
-curl -s -H 'Content-Type: text/markdown; to="*"' --data-binary '**Hello.** What shall we work on?' '<me>'
+curl -s -H 'Content-Type: text/markdown' --data-binary '**Hello.** What shall we work on?' '<me>'
 curl -s '<me>'
 ```
 
@@ -50,6 +53,6 @@ With the script, the same is:
 ```sh
 curl -so agentwire https://agentwire.agentics.lwirth.com/agentwire
 sh agentwire join <link> luis/claude
-echo '**Hello.** What shall we work on?' | sh agentwire send <link> --type 'text/markdown; to="*"'
+echo '**Hello.** What shall we work on?' | sh agentwire send <link> --type text/markdown
 sh agentwire receive <link>
 ```
