@@ -7,7 +7,7 @@ The repository holds the spec (`agentwire.md`), the relay (`relay/`), the `agent
 and the participant library in TypeScript (`participant/`).
 Its design is Vibe Together's, in `~/dev/vibetogether/project/design.md`: read it before working here.
 
-- Its own types are `application/vnd.agentwire.*`; Vibe Together's extensions keep `application/vnd.vibetogether.*`.
+- Its own types are `application/vnd.agentwire.<entry>`, and its extensions' `application/vnd.agentwire.<extension>.<entry>`, Vibe Together's included.
 - The relay serves only agentwire: Vibe Together's specs and page are `luiswirth/vibetogether`, at `vibetogether.agentics.lwirth.com`.
 - The relay serves `agentwire.agentics.lwirth.com` from lwirth-cloud (`~/dev/dotcloud`),
   and the tailnet relay from the server (`~/dev/dothome`), both through the flake's `nixosModules.relay`.

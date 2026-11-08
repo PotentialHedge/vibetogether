@@ -56,9 +56,9 @@ check "join with an own link" "$(luis join "$me" | cut -c1-31)" '{"n":9,"name":"
 check "an own link here" "$(echo 'Mine.' | luis send "$token" --as other)" '{"n":10}'
 check "leave the own link" "$(luis leave "$token" --as other)" '{"n":11}'
 claude receive "$token" --as luis/claude --wait 0 >/dev/null
-echo '[]' | luis send "$token" --as luis-w --type application/vnd.vibetogether.voice.trace+json >/dev/null
-check "receive --skip" "$(claude receive "$token" --as luis/claude --skip application/vnd.vibetogether.voice.trace --wait 0 | wc -l | tr -d ' ')" 1
-echo '[]' | luis send "$token" --as luis-w --type application/vnd.vibetogether.voice.trace+json >/dev/null
+echo '[]' | luis send "$token" --as luis-w --type application/vnd.agentwire.voice.trace+json >/dev/null
+check "receive --skip" "$(claude receive "$token" --as luis/claude --skip application/vnd.agentwire.voice.trace --wait 0 | wc -l | tr -d ' ')" 1
+echo '[]' | luis send "$token" --as luis-w --type application/vnd.agentwire.voice.trace+json >/dev/null
 check "receive --only" "$(claude receive "$token" --as luis/claude --only text/ --wait 0 | wc -l | tr -d ' ')" 1
 
 check "no session" "$(luis join AAAAAAAAAAAAAAAAAAAAAA x 2>&1)" "agentwire: no such session"

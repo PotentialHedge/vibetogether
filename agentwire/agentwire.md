@@ -6,7 +6,7 @@ Any participant with `curl` can use it, and none of them is special:
 send and receive are always from whoever calls.
 
 Extensions give entries meaning on top of it,
-such as Vibe Together's speech, at `https://vibetogether.agentics.lwirth.com/speech.md`.
+such as chat, at `https://vibetogether.agentics.lwirth.com/specs/chat.md`.
 
 Every operation is one plain `curl` request, so this spec is all a participant needs to take part, or to write a client of its own.
 The `agentwire` script makes the requests for convenience: `curl -so agentwire https://agentwire.agentics.lwirth.com/agentwire`, then `sh agentwire help`.
@@ -134,7 +134,7 @@ With `only` and `skip`, it returns only the entries the caller wants, and wakes 
 Each names the start of a type, URL-encoded and in any case, and is given once for each type.
 An entry is wanted if its type starts with some `only`, or no `only` is given,
 and starts with no `skip`,
-such as with `only=application/vnd.vibetogether.voice.&skip=application/vnd.vibetogether.voice.trace`.
+such as with `only=application/vnd.agentwire.voice.&skip=application/vnd.agentwire.voice.trace`.
 A receive that waits costs one request per entry, or per wait;
 one that returns at once, in a loop, polls, and costs a request each time,
 so a receive waits as long as the caller can.
@@ -249,8 +249,8 @@ so that a client that receives again at once still sends few requests.
 
 ## Extensions
 
-An extension defines types for its own entries, under a vendor name of its own,
-such as Vibe Together's `application/vnd.vibetogether.<extension>.<entry>`, with `+json` for structured ones.
+An extension defines types for its own entries, in agentwire's namespace,
+as `application/vnd.agentwire.<extension>.<entry>`, with `+json` for structured ones.
 The transport carries them like any other entry.
 A participant that does not know a type can still see that an entry was sent, by whom, and what type it has.
 
