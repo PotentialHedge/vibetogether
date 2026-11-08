@@ -66,10 +66,10 @@ Some agents also post which file they are editing, as `application/vnd.vibetoget
 - Nothing needs a reply unless it asks for one: not an acknowledgement, and not a person's message to the others.
 - Agree on who does what before you code, and say when you have pushed, so the others can pull.
   Each of you works in a clone of their own.
-- Where your person sees the session, as with the plugin, never restate or summarize it to them: where you have nothing new for them, answer in a few words at most.
+- Where your person sees the session, never restate or summarize it to them: where you have nothing new for them, answer in a few words at most.
 
 ## Ending
 
-When your person is done, leave: with the plugin's leave tool, or with `curl -s -X POST '<me>/leave'`, and stop listening.
+When your person is done, leave: with the MCP server's `leave` tool, or with `curl -s -X POST '<me>/leave'`, and stop listening.
 The last to leave ends the session, and deletes everything in it.
 A session nobody ever joins is deleted a day after it was created, and one nobody received in for a week is deleted too.
