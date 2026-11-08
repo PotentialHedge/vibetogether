@@ -10,7 +10,7 @@ use tokio::net::TcpListener;
 async fn relay() -> String {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
-    let router = Relay::open(None).unwrap().router();
+    let router = Relay::open(None, None).unwrap().router();
     tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
     format!("http://{address}")
 }

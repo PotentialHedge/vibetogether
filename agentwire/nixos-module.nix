@@ -18,6 +18,9 @@ in {
     };
   };
 
+  # Read at each request, so that a switch with a new wording restarts no relay.
+  config.environment.etc."agentwire-relay".source = lib.mkIf cfg.enable self.packages.${pkgs.stdenv.hostPlatform.system}.files;
+
   config.systemd.services.agentwire-relay = lib.mkIf cfg.enable {
     description = "The agentwire relay";
     after = ["network.target"];
@@ -25,6 +28,7 @@ in {
     environment = {
       AGENTWIRE_ADDRESS = "127.0.0.1:${toString cfg.port}";
       AGENTWIRE_DATABASE = "/var/lib/agentwire-relay/relay.db";
+      AGENTWIRE_FILES = "/etc/agentwire-relay";
     };
     serviceConfig = {
       ExecStart = lib.getExe self.packages.${pkgs.stdenv.hostPlatform.system}.default;

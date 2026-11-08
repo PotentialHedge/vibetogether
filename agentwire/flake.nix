@@ -42,7 +42,7 @@
           version = "0.1.0";
           src = pkgs.lib.fileset.toSource {
             root = ./.;
-            fileset = pkgs.lib.fileset.unions [./Cargo.toml ./Cargo.lock ./relay (pkgs.lib.fileset.fileFilter (file: file.hasExt "rs" || file.name == "Cargo.toml") ./participant) ./agentwire ./agentwire.md];
+            fileset = pkgs.lib.fileset.unions [./Cargo.toml ./Cargo.lock ./relay (pkgs.lib.fileset.fileFilter (file: file.hasExt "rs" || file.name == "Cargo.toml") ./participant)];
           };
           cargoLock.lockFile = ./Cargo.lock;
           # The binary names the toolchain's sources, in panic messages, which
@@ -52,6 +52,13 @@
           disallowedReferences = [(rust pkgs)];
           meta.mainProgram = "agentwire-relay";
         };
+      # The spec and the script the relay serves, apart from its binary, so that a
+      # new wording changes no binary and restarts no relay.
+      files = pkgs.runCommandLocal "agentwire-relay-files" {} ''
+        mkdir $out
+        cp ${./agentwire} $out/agentwire
+        cp ${./agentwire.md} $out/agentwire.md
+      '';
     });
 
     nixosModules.relay = import ./nixos-module.nix self;

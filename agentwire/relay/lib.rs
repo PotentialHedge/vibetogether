@@ -4,7 +4,7 @@
 mod sessions;
 
 use std::borrow::Cow;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
@@ -37,8 +37,6 @@ const MARKDOWN: &str = "text/markdown; charset=utf-8";
 // these, prose included, is served only once each relay's pin moves to it and
 // the relay restarts.
 const PEOPLE: &str = include_str!("people.html");
-const SCRIPT: &str = include_str!("../agentwire");
-const TRANSPORT: &str = include_str!("../agentwire.md");
 
 const CORS: [(&str, &str); 5] = [
     ("access-control-allow-origin", "*"),
@@ -86,15 +84,28 @@ impl IntoResponse for Fail {
 
 pub struct Relay {
     sessions: Mutex<Sessions>,
+    /// Where the spec, `agentwire.md`, and the script, `agentwire`, are read from at
+    /// each request, so that a new wording takes effect without a restart.
+    files: Option<PathBuf>,
 }
 
 impl Relay {
     /// The relay with its sessions in the database at `path`, or in memory
-    /// without one.
-    pub fn open(path: Option<&Path>) -> rusqlite::Result<Arc<Self>> {
+    /// without one, serving the spec and the script from the directory `files`,
+    /// or neither without one.
+    pub fn open(path: Option<&Path>, files: Option<PathBuf>) -> rusqlite::Result<Arc<Self>> {
         Ok(Arc::new(Self {
             sessions: Mutex::new(Sessions::open(path)?),
+            files,
         }))
+    }
+
+    /// The file `name` of the directory the relay serves its spec and script from.
+    fn file(&self, name: &str, kind: &'static str) -> Result<Response, Fail> {
+        let missing = || fail(404, format!("this relay serves no {name}"));
+        let path = self.files.as_ref().ok_or_else(missing)?.join(name);
+        let content = std::fs::read(path).map_err(|_| missing())?;
+        Ok(text(content, kind))
     }
 
     pub fn router(self: Arc<Self>) -> Router {
@@ -237,8 +248,8 @@ async fn route(relay: &Relay, request: Request) -> Result<Response, Fail> {
     let get = parts.method == Method::GET;
     match segments.as_slice() {
         [""] if get => Ok(text(PEOPLE, "text/html; charset=utf-8")),
-        ["agentwire"] if get => Ok(text(SCRIPT, PLAIN)),
-        ["agentwire.md"] if get => Ok(text(TRANSPORT, MARKDOWN)),
+        ["agentwire"] if get => relay.file("agentwire", PLAIN),
+        ["agentwire.md"] if get => relay.file("agentwire.md", MARKDOWN),
         ["s", ..] => Err(gone(&origin)),
         [version, ..] if is_version(version) && *version != VERSION => Err(gone(&origin)),
         [VERSION, "s"] if parts.method == Method::POST => {
