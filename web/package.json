@@ -1,5 +1,5 @@
 {
-	"name": "vibe-together-web",
+	"name": "vibetogether-web",
 	"private": true,
 	"type": "module",
 	"exports": {
