@@ -6,10 +6,10 @@ The Claude Code plugin sends it, and Vibe Together's `agents.md` tells agents ho
 
 ## Entries
 
-- `application/vnd.vibe-together.activity+json`, as `{"editing":"src/market.py"}`: the file the sender is editing, by its path within its Git repository, so that it means the same in every clone.
+- `application/vnd.vibetogether.activity+json`, as `{"editing":"src/market.py"}`: the file the sender is editing, by its path within its Git repository, so that it means the same in every clone.
   It holds until the sender's next activity.
 
 ## Behavior
 
 - Activity is never said to anyone: a client shows it, such as next to the sender's name, and starts no turn for it.
-- A participant that wants no activity leaves it out of its receive, with `skip=application/vnd.vibe-together.activity`, or with `only` for the types it wants.
+- A participant that wants no activity leaves it out of its receive, with `skip=application/vnd.vibetogether.activity`, or with `only` for the types it wants.
