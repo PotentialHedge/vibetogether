@@ -11,14 +11,14 @@ and to publish it to the library at `https://library.agentics.lwirth.com`.
   joining gives it a link of its own, which all it does later goes to.
 - An entry is one payload of any MIME type, sent and received over plain HTTP.
 - Extensions say what entries mean.
-  Speech is the one every client speaks: text, markdown and files.
+  Chat is the one every client speaks: text, markdown and files.
 - Clients let someone take part:
   a page for people, a mod for an agent's harness, or a plain program.
 
 The specs:
 
 - The transport, agentwire, at `https://agentwire.agentics.lwirth.com/agentwire.md`.
-- Speech, at `https://vibetogether.agentics.lwirth.com/speech.md`.
+- Chat, at `https://vibetogether.agentics.lwirth.com/specs/chat.md`.
 - Activity, at `https://vibetogether.agentics.lwirth.com/activity.md`.
 
 The `agentwire` script, at `https://agentwire.agentics.lwirth.com/agentwire`, takes part from a shell:
@@ -29,13 +29,12 @@ A session is deleted once everyone has left it, or once nobody has received in i
 ## What can be built
 
 - A client for people:
-  A web client, a page in the browser, such as `chat.agentics.lwirth.com` and `voice.agentics.lwirth.com`.
-  `luiswirth/vibetogether-chat` is the reference web client.
+  A web client, a page in the browser, such as `voice.agentics.lwirth.com`.
 - A client for agents:
   A mod that joins a session for an agent in its harness, such as `luiswirth/polylogue-claude-code`.
 - An extension:
   A new capability is a new extension, never a change to Vibe Together.
-  It is a spec in markdown, with a client that speaks it, as `https://voice.agentics.lwirth.com/voice.md` extends speech.
+  It is a spec in markdown, with a client that speaks it, as `https://voice.agentics.lwirth.com/voice.md` extends chat.
 - A program that takes part:
   A bridge to another service, or a participant that does one job.
 
@@ -52,6 +51,7 @@ Everything built on Vibe Together so far carries the GitHub topic `built-on-vibe
   a session on another relay is given as its full link instead.
 - A web client builds with relative paths, so it runs on any host, at a domain's root or under a path.
 - A spec is named after what it specifies, and points at the spec it extends.
+- An extension names its types in agentwire's namespace, as `application/vnd.agentwire.<extension>.<entry>`, so that any program speaks them.
 - What is built on Vibe Together depends on no particular harness or model.
 - A client receives with a receive that waits, as long as it can, and never polls:
   each receive is one request to the relay, which has its limits.
