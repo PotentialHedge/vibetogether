@@ -1,10 +1,10 @@
-# Build on polylogue
+# Build on Vibe Together
 
-What to know to build something on polylogue, an extension, a client,
-or anything else that takes part in a polylogue session,
+What to know to build something on Vibe Together, an extension, a client,
+or anything else that takes part in a Vibe Together session,
 and to publish it to the library at `https://library.agentics.lwirth.com`.
 
-## polylogue in short
+## Vibe Together in short
 
 - A session is one log, shared by people, agents and programs alike.
   Each participant is a name in it, bound to whoever joined under it:
@@ -18,8 +18,8 @@ and to publish it to the library at `https://library.agentics.lwirth.com`.
 The specs:
 
 - The transport, agentwire, at `https://agentwire.agentics.lwirth.com/agentwire.md`.
-- Speech, at `https://polylogue.agentics.lwirth.com/speech.md`.
-- Activity, at `https://polylogue.agentics.lwirth.com/activity.md`.
+- Speech, at `https://vibe-together.agentics.lwirth.com/speech.md`.
+- Activity, at `https://vibe-together.agentics.lwirth.com/activity.md`.
 
 The `agentwire` script, at `https://agentwire.agentics.lwirth.com/agentwire`, takes part from a shell:
 `sh agentwire help` lists its commands, and `sh agentwire new <name>` starts a session with you in it.
@@ -30,16 +30,16 @@ A session is deleted once everyone has left it, or once nobody has received in i
 
 - A client for people:
   A web client, a page in the browser, such as `chat.agentics.lwirth.com` and `voice.agentics.lwirth.com`.
-  `luiswirth/polylogue-chat` is the reference web client.
+  `luiswirth/vibe-together-chat` is the reference web client.
 - A client for agents:
   A mod that joins a session for an agent in its harness, such as `luiswirth/polylogue-claude-code`.
 - An extension:
-  A new capability is a new extension, never a change to polylogue.
+  A new capability is a new extension, never a change to Vibe Together.
   It is a spec in markdown, with a client that speaks it, as `https://voice.agentics.lwirth.com/voice.md` extends speech.
 - A program that takes part:
   A bridge to another service, or a participant that does one job.
 
-Everything built on polylogue so far carries the GitHub topic `built-on-polylogue`, listed at `https://github.com/topics/built-on-polylogue`.
+Everything built on Vibe Together so far carries the GitHub topic `built-on-vibe-together`, listed at `https://github.com/topics/built-on-vibe-together`.
 
 ## Conventions
 
@@ -52,14 +52,14 @@ Everything built on polylogue so far carries the GitHub topic `built-on-polylogu
   a session on another relay is given as its full link instead.
 - A web client builds with relative paths, so it runs on any host, at a domain's root or under a path.
 - A spec is named after what it specifies, and points at the spec it extends.
-- What is built on polylogue depends on no particular harness or model.
+- What is built on Vibe Together depends on no particular harness or model.
 - A client receives with a receive that waits, as long as it can, and never polls:
   each receive is one request to the relay, which has its limits.
   After a failure it waits longer each time before it tries again.
 - An agent is named under the person it takes part for, such as `luis/claude`, as the transport's spec says.
 - In TypeScript, `luiswirth/agentwire` exports a participant library as `agentwire/participant`.
-- In React, `luiswirth/polylogue-web` exports what every web client shares:
-  the welcome page as `polylogue-web/onboard`, and the session as a hook as `polylogue-web/react`.
+- In React, `luiswirth/vibe-together-web` exports what every web client shares:
+  the welcome page as `vibe-together-web/onboard`, and the session as a hook as `vibe-together-web/react`.
 - A session's link is a secret:
   whoever holds it can join the session, under any name nobody has taken in it.
   So whoever starts a session joins it before handing out its link.
@@ -68,7 +68,7 @@ Everything built on polylogue so far carries the GitHub topic `built-on-polylogu
 
 ## The library
 
-It lists every public GitHub repository with the topic `built-on-polylogue`, within a few minutes of a push,
+It lists every public GitHub repository with the topic `built-on-vibe-together`, within a few minutes of a push,
 and links each entry to the repository's homepage, or to the repository if it has none.
 
 To publish there:
@@ -95,5 +95,5 @@ To publish there:
    so that the library links the entry to it from the start:
 
    ```sh
-   gh repo edit --add-topic built-on-polylogue --homepage https://<owner>.github.io/<name>/
+   gh repo edit --add-topic built-on-vibe-together --homepage https://<owner>.github.io/<name>/
    ```

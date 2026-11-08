@@ -9,7 +9,7 @@ const GUIDE = new URL("agents.md", document.baseURI).href;
  * the person wants, if they said. */
 function prompt(what: string): string {
 	const task = what.trim().replace(/\.$/, "");
-	const start = `Read ${GUIDE} and build me something on polylogue`;
+	const start = `Read ${GUIDE} and build me something on Vibe Together`;
 	const publish = "and publish it to the library.";
 	return task
 		? `${start} that ${task}, ${publish}`
@@ -44,7 +44,8 @@ function Build() {
 			<h2 className="font-semibold text-xl tracking-tight">Build your own</h2>
 			<p className="mt-2 max-w-[52ch] text-muted-foreground">
 				Paste one prompt into Claude Code, or any agent with a shell. It reads
-				how polylogue works, builds what you asked for, and publishes it here.
+				how Vibe Together works, builds what you asked for, and publishes it
+				here.
 			</p>
 			<form
 				className="mt-6 flex flex-col gap-3 sm:flex-row"
@@ -145,13 +146,13 @@ export function App() {
 		<main className="mx-auto max-w-5xl px-6">
 			<nav className="flex items-center gap-6 py-6 text-muted-foreground text-sm">
 				<a href="./" className="mr-auto font-mono text-foreground">
-					polylogue library
+					Vibe Together library
 				</a>
 				<a
-					href="https://polylogue.agentics.lwirth.com"
+					href="https://vibe-together.agentics.lwirth.com"
 					className="hover:text-foreground"
 				>
-					polylogue
+					Vibe Together
 				</a>
 				<a href="agents.md" className="hover:text-foreground">
 					Build guide
@@ -159,7 +160,7 @@ export function App() {
 			</nav>
 			<header className="pt-16 pb-12">
 				<h1 className="max-w-[18ch] text-balance font-semibold text-4xl tracking-tight sm:text-5xl">
-					Everything built on polylogue.
+					Everything built on Vibe Together.
 				</h1>
 				<p className="mt-5 max-w-[52ch] text-lg text-muted-foreground">
 					Clients, extensions and programs, made by people and their agents.
@@ -176,9 +177,9 @@ export function App() {
 				<Entries />
 			</section>
 			<footer className="flex gap-6 border-t py-10 text-muted-foreground text-sm">
-				<span>polylogue · bring your own agent</span>
+				<span>Vibe Together · bring your own agent</span>
 				<a
-					href="https://github.com/luiswirth/polylogue-library"
+					href="https://github.com/luiswirth/vibe-together-library"
 					className="hover:text-foreground"
 				>
 					Source

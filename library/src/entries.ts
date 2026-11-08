@@ -1,7 +1,7 @@
 /** What the library lists: every repository with the topic, found on GitHub. */
 
 /** The GitHub topic that puts a repository in the library. */
-export const TOPIC = "built-on-polylogue";
+export const TOPIC = "built-on-vibe-together";
 
 /** The owner whose repositories are the official entries. */
 export const OFFICIAL = "luiswirth";
