@@ -149,7 +149,7 @@ export function App() {
 					Vibe Together library
 				</a>
 				<a
-					href="https://vibe-together.agentics.lwirth.com"
+					href="https://vibetogether.agentics.lwirth.com"
 					className="hover:text-foreground"
 				>
 					Vibe Together
@@ -179,7 +179,7 @@ export function App() {
 			<footer className="flex gap-6 border-t py-10 text-muted-foreground text-sm">
 				<span>Vibe Together · bring your own agent</span>
 				<a
-					href="https://github.com/luiswirth/vibe-together-library"
+					href="https://github.com/luiswirth/vibetogether-library"
 					className="hover:text-foreground"
 				>
 					Source
