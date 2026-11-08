@@ -121,7 +121,7 @@ export function Named({
 		<Frame
 			name={service}
 			title="What's your name?"
-			description="Everyone in the session, people and agents, sees you under it."
+			description="Everyone in the room, people and agents, sees you under it."
 		>
 			<form
 				className="flex flex-col gap-2 rounded-2xl border bg-card/60 p-2 shadow-2xl shadow-black/20 backdrop-blur sm:flex-row"
@@ -228,7 +228,7 @@ function promptFor(
 ) {
 	const as = person ? ` as ${person}/<agent>` : "";
 	const then = goal ? `, and ${goal}` : "";
-	return `Read ${agents} and join the session ${sessionOf(link)}${as}${then}.`;
+	return `Read ${agents} and join the room ${sessionOf(link)}${as}${then}.`;
 }
 
 export function Onboard({
@@ -269,7 +269,7 @@ export function Onboard({
 						<CopyLink link={link} />
 					</p>
 					<p className="px-2 text-sm text-pretty text-muted-foreground">
-						The session {sessionOf(link) === link ? "link" : "token"} is like a
+						The room's {sessionOf(link) === link ? "link" : "token"} is like a
 						password: share it only with people you trust.
 					</p>
 				</section>
@@ -361,7 +361,7 @@ function CopyLink({ link }: { link: string }) {
 		>
 			{copied
 				? `${what === "link" ? "Link" : "Token"} copied`
-				: `Copy the session ${what} alone`}
+				: `Copy the room's ${what} alone`}
 		</button>
 	);
 }
