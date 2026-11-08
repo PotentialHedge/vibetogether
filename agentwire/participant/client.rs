@@ -6,6 +6,9 @@ use reqwest::{RequestBuilder, Response, StatusCode};
 
 use crate::{Appended, Joined, MAX_PAYLOAD, Received};
 
+/// How long a request that doesn't wait may take before it counts as lost,
+/// so that a connection that hangs without closing holds up nothing for good.
+const REQUEST: Duration = Duration::from_secs(60);
 /// How much longer than its wait a receive may take before it counts as lost.
 const SLACK: Duration = Duration::from_secs(30);
 
@@ -102,6 +105,7 @@ impl From<serde_json::Error> for Error {
 pub type Result<T> = std::result::Result<T, Error>;
 
 /// A client of any relay. Cloning it shares its connections.
+/// Every request but a receive without `wait` gives up after a while.
 #[derive(Debug, Clone, Default)]
 pub struct Client {
     http: reqwest::Client,
@@ -112,6 +116,10 @@ impl Client {
         Self::default()
     }
 
+    fn post(&self, url: impl reqwest::IntoUrl) -> RequestBuilder {
+        self.http.post(url).timeout(REQUEST)
+    }
+
     /// A client on an HTTP client of the caller's.
     pub fn with(http: reqwest::Client) -> Self {
         Self { http }
@@ -120,23 +128,20 @@ impl Client {
     /// Creates a session on the relay at `relay`, and returns its link.
     pub async fn create(&self, relay: &str) -> Result<String> {
         let url = format!("{}/v2/s", relay.trim_end_matches('/'));
-        Ok(text(self.http.post(url)).await?.trim().to_owned())
+        Ok(text(self.post(url)).await?.trim().to_owned())
     }
 
     /// Joins the session at `link` as `name`.
     pub async fn join(&self, link: &str, name: &str) -> Result<Joined> {
         let link = link.trim_end_matches('/');
-        let request = self
-            .http
-            .post(format!("{link}/join"))
-            .query(&[("as", name)]);
+        let request = self.post(format!("{link}/join")).query(&[("as", name)]);
         Ok(serde_json::from_str(&text(request).await?)?)
     }
 
     /// Joins again with the participant's own link, after leaving;
     /// while in, it does nothing, and so tells whose the link is.
     pub async fn rejoin(&self, me: &str) -> Result<Joined> {
-        let request = self.http.post(format!("{me}/join"));
+        let request = self.post(format!("{me}/join"));
         Ok(serde_json::from_str(&text(request).await?)?)
     }
 
@@ -149,7 +154,7 @@ impl Client {
         filename: Option<&str>,
         body: impl Into<reqwest::Body>,
     ) -> Result<u64> {
-        let mut request = self.http.post(me).header("content-type", kind).body(body);
+        let mut request = self.post(me).header("content-type", kind).body(body);
         if let Some(filename) = filename {
             request = request.query(&[("filename", filename)]);
         }
@@ -185,7 +190,8 @@ impl Client {
 
     /// The payload of entry `n`, with its type and, where it has one, its file name.
     pub async fn fetch(&self, me: &str, n: u64) -> Result<Payload> {
-        let mut response = checked(self.http.get(format!("{me}/{n}")).send().await?).await?;
+        let request = self.http.get(format!("{me}/{n}")).timeout(REQUEST);
+        let mut response = checked(request.send().await?).await?;
         let header = |name: &str| {
             response
                 .headers()
@@ -213,7 +219,7 @@ impl Client {
 
     /// Leaves, and returns the leave entry's number.
     pub async fn leave(&self, me: &str) -> Result<u64> {
-        let request = self.http.post(format!("{me}/leave"));
+        let request = self.post(format!("{me}/leave"));
         Ok(serde_json::from_str::<Appended>(&text(request).await?)?.n)
     }
 }
