@@ -208,7 +208,9 @@ receive)
   else
     participant
   fi
+  # $filter is what the entries are filtered by, $query that and how long to wait.
   query=
+  filter=
   while [ $# -gt 0 ]; do
     case $1 in
     --wait)
@@ -222,7 +224,7 @@ receive)
       ;;
     --only | --skip)
       [ -n "${2:-}" ] || fail "$1 needs a type"
-      query="$query&${1#--}=$(encode "$2")"
+      filter="$filter&${1#--}=$(encode "$2")"
       shift 2
       ;;
     *) fail "unknown option: $1" ;;
@@ -230,13 +232,28 @@ receive)
   done
   # A failed receive returns only after a pause, as from the relay, also where
   # the relay can't answer, so that a loop of receives sends few requests.
-  if ! out=$(curl -s --fail-with-body "$me?after=$read$query"); then
+  if ! out=$(curl -s --fail-with-body "$me?after=$read$query$filter"); then
     sleep 10
     fail "${out:-no answer}"
   fi
-  printf '%s\n' "$out"
-  last=$(printf '%s\n' "$out" | sed -n 's/^{"n":\([0-9][0-9]*\),.*/\1/p' | tail -n 1)
-  [ -z "$last" ] || [ "$last" -le "$read" ] || remember "$last"
+  # Receiving after a position acknowledges only that position, so what this
+  # receive printed is acknowledged at once by receiving after it, rather than
+  # by the next receive: the read position, which the others see as seen,
+  # then covers everything printed. What that returns is printed too.
+  entries=$(printf '%s\n' "$out" | sed '$d')
+  presence=$(printf '%s\n' "$out" | tail -n 1)
+  last=$(printf '%s\n' "$entries" | sed -n 's/^{"n":\([0-9][0-9]*\),.*/\1/p' | tail -n 1)
+  while [ -n "$last" ] && [ "$last" -gt "$read" ]; do
+    remember "$last"
+    read=$last
+    out=$(curl -s --fail-with-body "$me?after=$read&wait=0$filter") || break
+    more=$(printf '%s\n' "$out" | sed '$d')
+    presence=$(printf '%s\n' "$out" | tail -n 1)
+    [ -z "$more" ] || entries=$(printf '%s\n%s' "$entries" "$more")
+    last=$(printf '%s\n' "$more" | sed -n 's/^{"n":\([0-9][0-9]*\),.*/\1/p' | tail -n 1)
+  done
+  [ -z "$entries" ] || printf '%s\n' "$entries"
+  printf '%s\n' "$presence"
   ;;
 fetch)
   session "${1:-}"

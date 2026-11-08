@@ -37,6 +37,8 @@ out=$(claude receive "$token")
 check "receive" "$(printf '%s\n' "$out" | sed -n 2p | grep -o '"from":"luis-w".*"text":"Hello.\\n"')" '"from":"luis-w","type":"text/plain; charset=utf-8","size":7,"text":"Hello.\n"'
 check "receive a file" "$(printf '%s\n' "$out" | sed -n 4p | grep -o '"filename":"data.csv"')" '"filename":"data.csv"'
 check "presence last" "$(printf '%s\n' "$out" | tail -n 1 | cut -c1-12)" '{"presence":'
+check "one presence" "$(printf '%s\n' "$out" | grep -c '^{"presence":')" 1
+check "what a receive printed is acknowledged at once" "$(luis receive "$token" --wait 0 | tail -n 1 | grep -o '"luis/claude":{"read":[0-9]*')" '"luis/claude":{"read":5'
 check "receive goes on" "$(claude receive "$token" --wait 0 | wc -l | tr -d ' ')" 1
 check "fetch" "$(claude fetch "$token" 5)" "$(cat "$work/data.csv")"
 claude fetch "$token" 5 "$work/got.csv"
