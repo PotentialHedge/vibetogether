@@ -109,11 +109,11 @@ check "a name stays taken" "$(status -X POST "$link/join?as=luis/claude")" 409
 check "rejoin" "$(curl -s -X POST "$claude/join" | jq -c '[.n, .read, .link == "'"$claude"'"]')" '[8,6,true]'
 check "read position kept" "$(curl -s "$claude?after=0&wait=0" | tail -1 | jq '.presence["luis/claude"].read')" 6
 
-trace='application/vnd.vibe-together.voice.trace+json'
+trace='application/vnd.vibetogether.voice.trace+json'
 curl -s -H "Content-Type: $trace" --data-binary '[]' "$luis" >/dev/null
-check "a skipped entry neither returns nor wakes" "$(curl -s "$claude?skip=application/vnd.vibe-together.voice.trace&wait=1" | jq -c 'keys')" '["presence"]'
+check "a skipped entry neither returns nor wakes" "$(curl -s "$claude?skip=application/vnd.vibetogether.voice.trace&wait=1" | jq -c 'keys')" '["presence"]'
 check "a skipped entry is acknowledged" "$(curl -s "$luis?wait=0" | tail -1 | jq '.presence["luis/claude"].read')" 9
-curl -s "$claude?skip=audio/&skip=Application/VND.vibe-together.voice.trace" >"$work/skipped" &
+curl -s "$claude?skip=audio/&skip=Application/VND.vibetogether.voice.trace" >"$work/skipped" &
 waiting=$!
 until_receiving "$luis?after=0&wait=0" luis/claude
 curl -s -H 'Content-Type: audio/wav' --data-binary 'RIFF' "$luis?filename=heard.wav" >/dev/null
@@ -125,14 +125,14 @@ check "skip several, in any case" "$(head -n -1 "$work/skipped" | jq -r .n | xar
 check "skip from a position" "$(curl -s "$claude?after=9&skip=audio/&wait=0" | head -n -1 | jq -r .n | xargs)" "11 12"
 check "skip nothing" "$(status "$claude?skip=&wait=0")" 400
 
-voice='only=application/vnd.vibe-together.voice.&skip=application/vnd.vibe-together.voice.trace'
+voice='only=application/vnd.vibetogether.voice.&skip=application/vnd.vibetogether.voice.trace'
 curl -s "$claude?$voice" >"$work/only" &
 waiting=$!
 until_receiving "$luis?after=0&wait=0" luis/claude
 curl -s -H "Content-Type: $trace" --data-binary '[]' "$luis" >/dev/null
 curl -s --data-binary 'Later.' "$luis" >/dev/null
 check "what only leaves out doesn't wake" "$(curl -s "$luis?wait=0" | tail -1 | jq '.presence["luis/claude"].receiving')" true
-curl -s -H 'Content-Type: application/vnd.vibe-together.voice.tier+json' --data-binary '{}' "$luis" >/dev/null
+curl -s -H 'Content-Type: application/vnd.vibetogether.voice.tier+json' --data-binary '{}' "$luis" >/dev/null
 wait "$waiting"
 check "only and skip combine" "$(head -n -1 "$work/only" | jq -r .n | xargs)" 15
 check "only several, in any case" "$(curl -s "$claude?after=9&only=audio/&only=TEXT/&wait=0" | head -n -1 | jq -r .n | xargs)" "10 12 14"
