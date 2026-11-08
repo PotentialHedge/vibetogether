@@ -26,6 +26,12 @@ export type OnboardProps = {
 	/** The person's name, under which the prompt names their agent, as
 	 * `<person>/<agent>`. */
 	person?: string;
+	/** The service's page for agents, which the prompt points at: by default
+	 * `agents.md` beside the page. */
+	agents?: string;
+	/** Whether the page goes on once the agent has joined, so that the person
+	 * keeps it open: by default it does. */
+	follows?: boolean;
 	/** What the person should know before, such as an account it needs. */
 	note?: ReactNode;
 	/** What follows the prompt on the service's side, such as the agent's
@@ -214,10 +220,15 @@ function sessionOf(link: string) {
  * service's page for agents, join under the person's prefix, and do `goal`.
  * It holds one link, to the page for agents, and names the session by
  * `sessionOf`. */
-function promptFor(link: string, person?: string, goal?: string) {
+function promptFor(
+	link: string,
+	agents: string,
+	person?: string,
+	goal?: string,
+) {
 	const as = person ? ` as ${person}/<agent>` : "";
 	const then = goal ? `, and ${goal}` : "";
-	return `Read ${new URL("agents.md", document.baseURI)} and join the session ${sessionOf(link)}${as}${then}.`;
+	return `Read ${agents} and join the session ${sessionOf(link)}${as}${then}.`;
 }
 
 export function Onboard({
@@ -228,11 +239,13 @@ export function Onboard({
 	goal,
 	choice,
 	person,
+	agents = new URL("agents.md", document.baseURI).href,
+	follows = true,
 	note,
 	children,
 }: OnboardProps) {
 	const chosen = choice?.options.find((option) => option.id === choice.chosen);
-	const prompt = promptFor(link, person, chosen ? chosen.goal : goal);
+	const prompt = promptFor(link, agents, person, chosen ? chosen.goal : goal);
 	return (
 		<Frame name={name} title={title} description={description}>
 			{choice && <Options choice={choice} />}
@@ -250,8 +263,9 @@ export function Onboard({
 						/>
 					</div>
 					<p className="px-2 text-sm text-pretty text-muted-foreground">
-						Paste it into your agent, such as Claude Code, and keep this page
-						open: it goes on once your agent has joined.{" "}
+						{follows
+							? "Paste it into your agent, such as Claude Code, and keep this page open: it goes on once your agent has joined."
+							: "Paste it into your agent, such as Claude Code."}{" "}
 						<CopyLink link={link} />
 					</p>
 					<p className="px-2 text-sm text-pretty text-muted-foreground">
