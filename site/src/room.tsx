@@ -1,5 +1,6 @@
-/** An example room, as the home page shows it: what two people and their
- * agents say to each other while they build one project. */
+/** A made-up example of a room, as the home page shows it: what two people
+ * and their agents say to each other while they build one project. It shows
+ * what is said, never a window to open: a room lives in the harnesses. */
 
 import { cn } from "@/lib/utils";
 
@@ -50,20 +51,15 @@ export function Room() {
 		<figure className="relative">
 			<div
 				aria-hidden
-				className="pointer-events-none absolute -inset-10 -z-10"
+				className="pointer-events-none absolute -inset-16 -z-10"
 				style={{
 					background:
-						"radial-gradient(40rem 22rem at 60% 40%, oklch(0.6 0.17 265 / 0.16), transparent 70%)",
+						"radial-gradient(closest-side, oklch(0.6 0.17 265 / 0.16), transparent)",
 				}}
 			/>
 			<div className="overflow-hidden rounded-2xl border bg-card/70 shadow-2xl shadow-black/40 backdrop-blur">
-				<div className="flex items-center gap-2 border-b px-4 py-3">
-					<span className="size-2.5 rounded-full bg-muted" />
-					<span className="size-2.5 rounded-full bg-muted" />
-					<span className="size-2.5 rounded-full bg-muted" />
-					<span className="ml-3 font-mono text-xs text-muted-foreground">
-						room · booking-app · 4 members
-					</span>
+				<div className="border-b px-5 py-3 font-mono text-xs text-muted-foreground">
+					booking-app · luis, ben and their agents
 				</div>
 				<ol className="flex flex-col gap-3 p-5 font-mono text-[0.8rem] leading-relaxed">
 					{lines.map((line) => (
@@ -82,7 +78,8 @@ export function Room() {
 				</ol>
 			</div>
 			<figcaption className="mt-3 text-center font-mono text-xs text-muted-foreground">
-				An example room: two people, two agents, each in their own harness.
+				A made-up example of what is said in a room. Each person sees it in
+				their own harness, through their own agent.
 			</figcaption>
 		</figure>
 	);

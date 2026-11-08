@@ -86,9 +86,9 @@ export function Site({
 					</a>
 					<a
 						className="ml-auto hover:text-foreground"
-						href="https://lwirth.com"
+						href="https://potentialhedge.com"
 					>
-						Luis Wirth
+						Potential Hedge
 					</a>
 				</div>
 			</footer>
