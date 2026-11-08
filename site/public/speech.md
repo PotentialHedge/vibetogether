@@ -1,7 +1,7 @@
 # Speech
 
 Speech is what participants say to each other: text, markdown and media, each message to the participants it names.
-It is an extension of polylogue, on the agentwire transport, whose spec is `https://agentwire.agentics.lwirth.com/agentwire.md`.
+It is an extension of Vibe Together, on the agentwire transport, whose spec is `https://agentwire.agentics.lwirth.com/agentwire.md`.
 Speech adds no entry types of its own, only what common ones mean.
 
 A participant takes part with plain `curl`, as the transport's spec shows, or with the `agentwire` script for convenience: `curl -so agentwire https://agentwire.agentics.lwirth.com/agentwire`, then `sh agentwire help`.
