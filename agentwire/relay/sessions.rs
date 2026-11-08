@@ -7,8 +7,9 @@ use std::path::Path;
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use rusqlite::{Connection, OptionalExtension, Row, params};
-use serde::Serialize;
 use tokio::sync::oneshot;
+
+use agentwire::{Entry, JOIN, Joined, LEAVE, Presence, Received};
 
 use crate::{Fail, fail};
 
@@ -40,8 +41,6 @@ const MAX_INLINE: usize = 64 * 1024;
 const UNJOINED: i64 = 24 * 60 * 60;
 /// How long a session lasts once nobody receives in it, in seconds.
 const UNRECEIVED: i64 = 7 * 24 * 60 * 60;
-const JOIN: &str = "application/vnd.agentwire.join";
-const LEAVE: &str = "application/vnd.agentwire.leave";
 
 const SCHEMA: &str = "
     PRAGMA journal_mode = WAL;
@@ -136,36 +135,6 @@ struct Participant {
     inside: bool,
     entry: i64,
     read: i64,
-}
-
-#[derive(Serialize)]
-pub struct Joined {
-    n: i64,
-    name: String,
-    read: i64,
-    link: String,
-}
-
-#[derive(Serialize)]
-struct Entry {
-    n: i64,
-    time: String,
-    from: String,
-    #[serde(rename = "type")]
-    kind: String,
-    size: i64,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    filename: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    text: Option<String>,
-}
-
-#[derive(Serialize)]
-struct Presence {
-    read: i64,
-    receiving: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    since: Option<String>,
 }
 
 pub struct Payload {
@@ -368,7 +337,7 @@ impl Sessions {
         transaction.commit()?;
         self.look(session)?;
         Ok(Joined {
-            n,
+            n: n as u64,
             name: name.to_owned(),
             read: 0,
             link: format!("{link}/{secret}"),
@@ -391,9 +360,9 @@ impl Sessions {
             self.look(session)?;
         }
         Ok(Joined {
-            n,
+            n: n as u64,
             name: caller.name,
-            read: caller.read,
+            read: caller.read as u64,
             link: me.to_owned(),
         })
     }
@@ -624,10 +593,10 @@ impl Sessions {
                 answers.push((name, lines));
             }
         }
-        let presence = serde_json::json!({ "presence": self.presence(session)? });
+        let presence = Received::presence_line(&self.presence(session)?);
         let mut taken = Vec::new();
         for (name, mut lines) in answers {
-            lines += &presence.to_string();
+            lines += &presence;
             lines.push('\n');
             if let Some(waiting) = self.take(session, name) {
                 _ = waiting.answer.send(Answer::Lines(lines));

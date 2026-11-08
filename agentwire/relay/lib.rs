@@ -26,7 +26,7 @@ use sessions::{Answer, MAX_NAME, Receive, Sessions, Ticket, is_token};
 /// The transport's version, the first part of every session's path: a
 /// breaking change bumps it, and the relay serves only the current one.
 const VERSION: &str = "v2";
-const MAX_PAYLOAD: usize = 10 * 1024 * 1024;
+const MAX_PAYLOAD: usize = agentwire::MAX_PAYLOAD as usize;
 /// How long a failed receive or fetch takes to answer, so that a client that
 /// receives again at once, in a loop, still sends few requests.
 const FAILED_RECEIVE: Duration = Duration::from_secs(10);
@@ -216,7 +216,7 @@ fn json(value: &impl Serialize) -> Response {
 }
 
 fn numbered(n: i64) -> Response {
-    json(&serde_json::json!({ "n": n }))
+    json(&agentwire::Appended { n: n as u64 })
 }
 
 fn gone(origin: &str) -> Fail {

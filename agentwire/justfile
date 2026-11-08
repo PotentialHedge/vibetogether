@@ -4,7 +4,7 @@ ci:
     pnpm install --frozen-lockfile
     biome check
     pnpm exec tsc -p participant
-    cargo clippy --all-targets -- -D warnings
+    cargo clippy --workspace --all-targets -- -D warnings
     just test
     # The package the relays deploy, whose sources differ from cargo's.
     nix build --no-link .#default
@@ -17,7 +17,7 @@ dev:
 test:
     #!/usr/bin/env bash
     set -euo pipefail
-    cargo test --quiet
+    cargo test --workspace --quiet
     cargo build --quiet
     AGENTWIRE_ADDRESS=127.0.0.1:8791 "${CARGO_TARGET_DIR:-target}/debug/agentwire-relay" &
     trap 'kill $!' EXIT
