@@ -4,7 +4,7 @@
 import { type ReactNode, StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { Person } from "@/account/parts";
-import { useMe } from "@/account/sign-in";
+import { GitHubIcon, useMe } from "@/account/sign-in";
 import { cn } from "@/lib/utils";
 import "./index.css";
 
@@ -73,6 +73,14 @@ export function Site({
 					Vibe Together
 				</a>
 				<nav className="ml-auto flex items-center gap-1 text-sm">
+					<a
+						href={github}
+						title="Source on GitHub"
+						aria-label="Source on GitHub"
+						className="rounded-md p-2 text-muted-foreground transition-colors hover:text-foreground"
+					>
+						<GitHubIcon className="size-5" />
+					</a>
 					<Who current={current} />
 				</nav>
 			</header>
