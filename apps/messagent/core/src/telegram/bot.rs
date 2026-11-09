@@ -27,6 +27,7 @@ pub const POLL_SECONDS: u64 = 50;
 /// Telegram's Bot API, where none other is set up.
 pub const API: &str = "https://api.telegram.org";
 
+#[derive(Clone)]
 pub struct Bot {
     agent: ureq::Agent,
     api: String,
@@ -117,6 +118,22 @@ pub struct Upload<'a> {
 pub struct Update {
     pub update_id: i64,
     pub message: Option<Message>,
+    /// The bot's own membership in a chat changed, such as the user blocking it.
+    pub my_chat_member: Option<ChatMember>,
+}
+
+/// A change of the bot's membership in a chat.
+#[derive(Deserialize, Debug)]
+pub struct ChatMember {
+    pub chat: Chat,
+    pub from: User,
+    pub new_chat_member: Member,
+}
+
+#[derive(Deserialize, Debug)]
+pub struct Member {
+    /// Such as `member`, or `kicked` where the user blocked the bot.
+    pub status: String,
 }
 
 impl Bot {
@@ -169,12 +186,17 @@ impl Bot {
     /// Waits up to `POLL_SECONDS` for updates from `offset` on,
     /// and confirms those before it, which Telegram then forgets.
     pub fn get_updates(&self, offset: i64) -> Result<Vec<Update>> {
+        self.get_updates_of(offset, &["message"])
+    }
+
+    /// `get_updates` for the kinds of update in `allowed`.
+    pub fn get_updates_of(&self, offset: i64, allowed: &[&str]) -> Result<Vec<Update>> {
         self.call(
             "getUpdates",
             json!({
                 "offset": offset,
                 "timeout": POLL_SECONDS,
-                "allowed_updates": ["message"],
+                "allowed_updates": allowed,
             }),
         )
     }

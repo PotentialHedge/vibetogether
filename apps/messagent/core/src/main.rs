@@ -3,7 +3,7 @@ use std::{fs, io::Read, path::PathBuf};
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use messagent::{
-    Config, Paths, bridge,
+    Config, Paths, bridge, serve,
     bridge::Session,
     messenger::Settings,
     telegram::{self, Telegram},
@@ -49,6 +49,23 @@ enum Action {
     /// Print the link of the room's agentwire session, which the agent joins with,
     /// once the user is connected.
     Session,
+    /// The shared bot, for everyone: each person links their private chat with it to their
+    /// Vibe Together account, and the bot carries the chat into a session of theirs, as them.
+    /// It keeps its files in the state directory.
+    Serve {
+        /// A file holding the bot's token, from BotFather.
+        #[arg(long, value_name = "FILE")]
+        bot_token: PathBuf,
+        /// A file holding messagent's secret at the account service.
+        #[arg(long, value_name = "FILE")]
+        app_secret: PathBuf,
+        /// The account service.
+        #[arg(long, default_value = "https://vibetogether.agentics.lwirth.com")]
+        accounts: String,
+        /// The Bot API, if not Telegram's own, such as a fake one for tests.
+        #[arg(long)]
+        telegram_api: Option<String>,
+    },
 }
 
 /// The messenger to connect, one of them.
@@ -77,6 +94,19 @@ fn main() -> Result<()> {
                 .context("no session yet: it starts once the user is connected")?;
             println!("{}", session.link);
         }
+        Action::Serve {
+            bot_token,
+            app_secret,
+            accounts,
+            telegram_api,
+        } => serve::serve(serve::Settings {
+            bot: telegram::Bot::new(
+                telegram_api.as_deref().unwrap_or(telegram::API),
+                &read_secret(&bot_token)?,
+            ),
+            accounts: serve::Accounts::new(&accounts, &read_secret(&app_secret)?),
+            state: paths.state.clone(),
+        })?,
     }
     Ok(())
 }
@@ -123,6 +153,14 @@ fn setup(
     .save(paths)?;
     println!("{next}");
     Ok(())
+}
+
+/// A secret from its file.
+fn read_secret(file: &PathBuf) -> Result<String> {
+    Ok(fs::read_to_string(file)
+        .with_context(|| format!("can't read {}", file.display()))?
+        .trim()
+        .to_string())
 }
 
 /// A code no one can guess, for the start link.

@@ -6,8 +6,9 @@
 //! What the user writes becomes their chat messages, and what the others say goes out to the user.
 //! messagent's own notices come from a second participant, `<user>/messagent`,
 //! so that no one takes them for the user's words.
-//! The agent is the participant the config names: how far it has read marks the user's
-//! messages seen, and the bridge wakes it when an entry for it arrives while it is not receiving.
+//! The agent is the participant the config names, or with a shared bot any of the user's agents:
+//! how far it has read marks the user's messages seen, and with the user's own bot the bridge
+//! wakes it when an entry for it arrives while it is not receiving.
 //! Others may take part for the user too, such as through a page, and count for neither.
 
 use std::{
@@ -16,7 +17,11 @@ use std::{
     io::{ErrorKind, Write},
     os::unix::fs::OpenOptionsExt,
     process::Command,
-    sync::{Arc, Mutex, mpsc},
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicBool, Ordering},
+        mpsc,
+    },
     thread,
     time::Duration,
 };
@@ -102,9 +107,48 @@ impl Session {
 }
 
 /// The name of messagent's participant for a user's name.
-fn notices_name(user: &str) -> String {
+pub fn notices_name(user: &str) -> String {
     format!("{user}/messagent")
 }
+
+/// Whose reading marks the user's messages seen, and whose messages reach them without a name.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Agents {
+    /// The one agent the user's own bot was set up for, such as `luis/claude`.
+    One(String),
+    /// Any of the user's agents, `<user>/<agent>`, but messagent's own participant.
+    Any,
+}
+
+/// Who the bridge is in its room.
+pub struct Room {
+    /// The user's name, such as `luis`.
+    pub name: String,
+    pub agents: Agents,
+    /// The token the bridge joins with, where the session asks for one.
+    pub token: Option<String>,
+}
+
+impl Room {
+    /// Whether `name` is one of the agents.
+    pub fn is_agent(&self, name: &str) -> bool {
+        match &self.agents {
+            Agents::One(agent) => name == agent,
+            Agents::Any => {
+                name != notices_name(&self.name)
+                    && name
+                        .strip_prefix(&self.name)
+                        .and_then(|rest| rest.strip_prefix('/'))
+                        .is_some_and(|agent| !agent.is_empty() && !agent.contains('/'))
+            }
+        }
+    }
+}
+
+/// Starts a new session for the chat, and returns its link.
+pub type Start = Box<dyn Fn() -> Result<String> + Send + Sync>;
+/// Opens the messenger, for one of the bridge's loops.
+pub type Open = Box<dyn Fn() -> Result<Box<dyn Messenger>> + Send + Sync>;
 
 /// Runs the wake command, one run at a time:
 /// wakes asked for during a run become one more run after it.
@@ -153,12 +197,29 @@ impl Waker {
 }
 
 /// The bridge while it runs: what both of its loops share.
-struct Bridge {
+pub struct Bridge {
     paths: Paths,
-    config: Config,
+    room: Room,
     relay: Relay,
+    start: Start,
+    open: Open,
     session: Mutex<Option<Session>>,
+    /// Set once the bridge is to stop, such as when its user unlinked the chat.
+    stopped: AtomicBool,
 }
+
+/// The account's token no longer lets the bridge in, such as once its person revoked it:
+/// a failure that doesn't pass, which ends the bridge.
+#[derive(Debug)]
+pub struct Revoked;
+
+impl std::fmt::Display for Revoked {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "the account's token no longer lets the bridge in")
+    }
+}
+
+impl std::error::Error for Revoked {}
 
 /// A pause after a failure that may pass, growing up to a minute.
 struct Backoff(Duration);
@@ -178,17 +239,49 @@ impl Backoff {
 }
 
 impl Bridge {
-    fn relay_url(&self) -> &str {
-        self.config.relay.as_deref().unwrap_or(agentwire::RELAY)
+    /// A bridge of `room`, keeping its files in `paths`, whose session `start` starts.
+    pub fn new(paths: Paths, room: Room, start: Start, open: Open) -> Result<Self> {
+        Ok(Self {
+            session: Mutex::new(Session::load(&paths)?),
+            paths,
+            room,
+            relay: Relay::new(),
+            start,
+            open,
+            stopped: AtomicBool::new(false),
+        })
     }
 
-    /// Starts the chat's room, a session on the relay, with the user and messagent's notices in it.
+    fn token(&self) -> Option<&str> {
+        self.room.token.as_deref()
+    }
+
+    /// Whether a failure ends the bridge rather than passes: the token no longer lets it in.
+    /// Without a token, a refusal is the relay's own, which passes.
+    fn ended(&self, error: &anyhow::Error) -> bool {
+        error.downcast_ref::<Revoked>().is_some()
+            || (self.token().is_some() && agentwire::status(error) == Some(403))
+    }
+
+    /// Joins again with the link `me` after a refusal, or waits;
+    /// an error where the bridge has ended.
+    fn rejoin(&self, me: &str, backoff: &mut Backoff) -> Result<()> {
+        if let Err(error) = self.relay.rejoin(me, self.token()) {
+            if self.ended(&error) {
+                return Err(error.context(Revoked));
+            }
+            backoff.wait(&error);
+        }
+        Ok(())
+    }
+
+    /// Starts the chat's room, a session, with the user and messagent's notices in it.
     fn create(&self) -> Result<Session> {
-        let link = self.relay.create(self.relay_url())?;
-        let me = self.relay.join(&link, &self.config.name)?.link;
+        let link = (self.start)()?;
+        let me = self.relay.join(&link, &self.room.name, self.token())?.link;
         let notices = self
             .relay
-            .join(&link, &notices_name(&self.config.name))?
+            .join(&link, &notices_name(&self.room.name), self.token())?
             .link;
         let session = Session {
             link,
@@ -206,7 +299,7 @@ impl Bridge {
 
     /// The session, started if there is none yet, waiting for the relay as long as it takes;
     /// true if it is new.
-    fn ensure(&self) -> Result<(Session, bool)> {
+    pub fn ensure(&self) -> Result<(Session, bool)> {
         let mut current = self.session.lock().expect("no holder panics");
         if let Some(session) = &*current {
             return Ok((session.clone(), false));
@@ -216,6 +309,7 @@ impl Bridge {
         let session = loop {
             match self.create() {
                 Ok(session) => break session,
+                Err(error) if self.ended(&error) => return Err(error.context(Revoked)),
                 Err(error) => backoff.wait(&error),
             }
         };
@@ -262,11 +356,7 @@ impl Bridge {
                 Ok(n) => return Ok(n),
                 Err(error) => match agentwire::status(&error) {
                     Some(404) => self.forget(&session.link),
-                    Some(403) => {
-                        if let Err(error) = self.relay.rejoin(me) {
-                            backoff.wait(&error);
-                        }
-                    }
+                    Some(403) => self.rejoin(me, &mut backoff)?,
                     Some(400 | 413) => return Err(error),
                     _ => backoff.wait(&error),
                 },
@@ -274,7 +364,8 @@ impl Bridge {
         }
     }
 
-    fn notice(&self, text: &str) -> Result<u64> {
+    /// Says something of messagent's own in the room, such as a notice about the chat.
+    pub fn notice(&self, text: &str) -> Result<u64> {
         self.send(true, SPEECH, None, text.as_bytes())
     }
 
@@ -303,7 +394,7 @@ impl Bridge {
 
     /// Takes in what arrived from the messenger.
     /// An image comes first, and its caption after it, as the user's chat message.
-    fn arrived(&self, messenger: &dyn Messenger, arrived: Arrived) -> Result<()> {
+    pub fn arrived(&self, messenger: &dyn Messenger, arrived: Arrived) -> Result<()> {
         match arrived {
             Arrived::Message { id, image, text } => {
                 if let Some(file) = &image {
@@ -358,7 +449,7 @@ pub fn sort(entry: &Entry, user: &str) -> Seen {
 
 /// An entry of someone else, as the plain text the user reads,
 /// named after its sender unless it is the agent's.
-pub fn plain(entry: &Entry, agent: &str) -> String {
+pub fn plain(entry: &Entry, is_agent: impl Fn(&str) -> bool) -> String {
     let text = match &entry.text {
         Some(text) => text.clone(),
         None => {
@@ -373,7 +464,7 @@ pub fn plain(entry: &Entry, agent: &str) -> String {
             )
         }
     };
-    if entry.from == agent {
+    if is_agent(&entry.from) {
         text
     } else {
         format!("{}: {text}", entry.from)
@@ -383,10 +474,15 @@ pub fn plain(entry: &Entry, agent: &str) -> String {
 /// Whether an entry pings `name`, by chat's rule, under which an entry of a `vnd.` type
 /// is no message; a message in the messenger's own format pings as a message does.
 fn pings(entry: &Entry, name: &str, native: &str) -> bool {
-    if entry.is(native) {
-        Ping::of(&entry.kind).is_none_or(|ping| ping.pings(name))
-    } else {
-        chat::pings(&entry.kind, name)
+    pings_any(entry, native, |pinged| pinged == name)
+}
+
+/// Whether an entry pings anyone `matches` holds, as `pings` does for one.
+fn pings_any(entry: &Entry, native: &str, matches: impl Fn(&str) -> bool) -> bool {
+    match Ping::of(&entry.kind) {
+        Some(Ping::Everyone) => true,
+        Some(Ping::Only(names)) => names.iter().any(|name| matches(name)),
+        None => entry.is(native) || chat::is_message(&entry.kind),
     }
 }
 
@@ -421,7 +517,7 @@ impl Bridge {
             })
         };
         // What doesn't ping the user reaches them as an fyi, without a notification.
-        let quiet = !pings(entry, &self.config.name, messenger.native());
+        let quiet = !pings(entry, &self.room.name, messenger.native());
         if entry.is(messenger.native()) {
             let body = match &entry.text {
                 Some(text) => text.clone().into_bytes(),
@@ -438,7 +534,7 @@ impl Bridge {
             messenger.send_image(&image(entry.n)?, quiet)?;
             return Ok(());
         }
-        for part in messenger.split(&plain(entry, &self.config.agent)) {
+        for part in messenger.split(&plain(entry, |name| self.room.is_agent(name))) {
             messenger.send(&part, quiet)?;
         }
         Ok(())
@@ -450,8 +546,7 @@ impl Bridge {
         let Some(session) = self.current() else {
             return Ok(());
         };
-        let user = &self.config.name;
-        let agent = &self.config.agent;
+        let user = &self.room.name;
         let mut latest = session.latest;
         let mut fresh = false;
         for entry in &received.entries {
@@ -459,8 +554,9 @@ impl Bridge {
                 continue;
             }
             let seen = sort(entry, user);
-            let for_agents = pings(entry, agent, messenger.native());
-            if seen != Seen::Nothing && entry.from != *agent && for_agents {
+            let for_agents =
+                pings_any(entry, messenger.native(), |name| self.room.is_agent(name));
+            if seen != Seen::Nothing && !self.room.is_agent(&entry.from) && for_agents {
                 latest = entry.n;
                 fresh = true;
             }
@@ -476,8 +572,19 @@ impl Bridge {
             }
             self.update(|session| session.after = entry.n)?;
         }
-        let presence = received.presence.get(agent);
-        let read = presence.map_or(session.read, |presence| presence.read);
+        let agents = || {
+            received
+                .presence
+                .iter()
+                .filter(|(name, _)| self.room.is_agent(name))
+                .map(|(_, presence)| presence)
+        };
+        let read = agents()
+            .map(|presence| presence.read)
+            .max()
+            .unwrap_or(session.read)
+            .max(session.read);
+        let receiving = agents().any(|presence| presence.receiving);
         let current = self.current().unwrap_or_else(|| session.clone());
         for n in current.unseen.range(..=read) {
             if let (Some(reactions), Some(message)) =
@@ -494,7 +601,7 @@ impl Bridge {
             session.latest = latest;
             session.read = read;
         })?;
-        if fresh && !presence.is_some_and(|presence| presence.receiving) {
+        if fresh && !receiving {
             waker.wake();
         }
         Ok(())
@@ -521,9 +628,9 @@ impl Bridge {
     /// A change of presence while it is between two receives, such as the agent reading,
     /// returns no receive: it is seen at the next one that returns, so a 👀 may come late.
     fn listen(self: Arc<Self>, waker: Waker) -> Result<()> {
-        let messenger = messenger::open(&self.config.messenger, &self.paths)?;
+        let messenger = (self.open)()?;
         let mut backoff = Backoff::new();
-        loop {
+        while !self.stopped.load(Ordering::Relaxed) {
             let (session, _) = self.ensure()?;
             match self.relay.receive(&session.me, session.after) {
                 Ok(received) => {
@@ -532,13 +639,33 @@ impl Bridge {
                 }
                 Err(error) => match agentwire::status(&error) {
                     Some(404) => self.forget(&session.link),
-                    Some(403) => {
-                        if let Err(error) = self.relay.rejoin(&session.me) {
-                            backoff.wait(&error);
-                        }
-                    }
+                    Some(403) => self.rejoin(&session.me, &mut backoff)?,
                     _ => backoff.wait(&error),
                 },
+            }
+        }
+        Ok(())
+    }
+
+    /// Listens to the session in a thread of its own, until it is stopped;
+    /// `ended` runs where listening ends with an error.
+    pub fn spawn(self: &Arc<Self>, waker: Waker, ended: impl FnOnce(anyhow::Error) + Send + 'static) {
+        let listener = self.clone();
+        thread::spawn(move || {
+            if let Err(error) = listener.listen(waker) {
+                ended(error);
+            }
+        });
+    }
+
+    /// Stops listening, and leaves the session, for good.
+    pub fn stop(&self) {
+        self.stopped.store(true, Ordering::Relaxed);
+        if let Some(session) = self.current() {
+            for me in [&session.me, &session.notices] {
+                if let Err(error) = self.relay.leave(me) {
+                    eprintln!("messagent: can't leave the session: {error:#}");
+                }
             }
         }
     }
@@ -555,12 +682,26 @@ pub fn watch(paths: &Paths) -> Result<()> {
         lock.lock()?;
     }
     let mut messenger = messenger::open(&config.messenger, paths)?;
-    let bridge = Arc::new(Bridge {
-        paths: paths.clone(),
-        relay: Relay::new(),
-        session: Mutex::new(Session::load(paths)?),
-        config,
-    });
+    let relay_url = config
+        .relay
+        .clone()
+        .unwrap_or_else(|| agentwire::RELAY.to_string());
+    let relay = Relay::new();
+    let settings = config.messenger.clone();
+    let opened = paths.clone();
+    let wake = config.wake.clone();
+    let bridge = Arc::new(Bridge::new(
+        paths.clone(),
+        Room {
+            name: config.name.clone(),
+            agents: Agents::One(config.agent.clone()),
+            token: None,
+        },
+        Box::new(move || relay.create(&relay_url)),
+        Box::new(move || {
+            messenger::open(&settings, &opened).map(|inbox| inbox as Box<dyn Messenger>)
+        }),
+    )?);
     let mut listening = false;
     loop {
         // The session starts once the user is connected, and the listening with it.
@@ -576,13 +717,10 @@ pub fn watch(paths: &Paths) -> Result<()> {
                     }
                 }
             };
-            let waker = Waker::spawn(bridge.config.wake.clone(), failed);
-            let listener = bridge.clone();
-            thread::spawn(move || {
-                if let Err(error) = listener.listen(waker) {
-                    eprintln!("messagent watch: listening to the session ended: {error:#}");
-                    std::process::exit(1);
-                }
+            let waker = Waker::spawn(wake.clone(), failed);
+            bridge.spawn(waker, |error| {
+                eprintln!("messagent watch: listening to the session ended: {error:#}");
+                std::process::exit(1);
             });
             listening = true;
         }
@@ -594,7 +732,7 @@ pub fn watch(paths: &Paths) -> Result<()> {
 
 /// Tells the user, since no agent is there to, and the agent, for once it is woken.
 fn wake_failed(bridge: &Bridge) -> Result<()> {
-    messenger::open(&bridge.config.messenger, &bridge.paths)?.send(WAKE_FAILED, false)?;
+    (bridge.open)()?.send(WAKE_FAILED, false)?;
     bridge.notice(WAKE_FAILED)?;
     Ok(())
 }

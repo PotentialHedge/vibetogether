@@ -4,7 +4,7 @@ mod bot;
 
 use std::{fs, io::ErrorKind, path::PathBuf, thread, time::Duration};
 
-pub use bot::{API, Bot, MESSAGE_LIMIT, Message, Refusal, Update, Upload, User};
+pub use bot::{API, Bot, ChatMember, MESSAGE_LIMIT, Message, Refusal, Update, Upload, User};
 
 use anyhow::{Context, Result};
 use jiff::{SignedDuration, Timestamp};
@@ -14,7 +14,9 @@ use serde_json::{Map, Value};
 use crate::{
     Paths,
     config::write_private,
-    messenger::{Arrived, CONNECTED, File, Image, Messages, Messenger, Reactions, Stranger, split},
+    messenger::{
+        Arrived, CONNECTED, File, Image, Inbox, Messages, Messenger, Reactions, Stranger, split,
+    },
 };
 
 /// The type of a message in Telegram's own format: the body of the Bot API's `sendMessage`,
@@ -96,7 +98,28 @@ impl Telegram {
     }
 }
 
-impl Messages for Telegram {
+/// One user's private chat with a bot, which is the conversation.
+#[derive(Clone)]
+pub struct UserChat {
+    pub bot: Bot,
+    /// The user's id, which is also the id of their private chat with the bot.
+    pub user: i64,
+}
+
+impl Reactions for UserChat {
+    fn react(&self, message: &str, emoji: &str) -> Result<()> {
+        let message = message.parse().context("not a Telegram message id")?;
+        self.bot.react(self.user, message, emoji)
+    }
+}
+
+impl Messenger for UserChat {
+    fn reactions(&self) -> Option<&dyn Reactions> {
+        Some(self)
+    }
+}
+
+impl Messages for UserChat {
     fn split(&self, text: &str) -> Vec<String> {
         split(text, MESSAGE_LIMIT)
     }
@@ -104,7 +127,7 @@ impl Messages for Telegram {
     fn send(&self, message: &str, quiet: bool) -> Result<String> {
         let mut body = Map::from_iter([("text".into(), message.into())]);
         silence(&mut body, quiet);
-        let sent = self.bot.send_raw(self.user()?, body)?;
+        let sent = self.bot.send_raw(self.user, body)?;
         Ok(sent.message_id.to_string())
     }
 
@@ -113,7 +136,7 @@ impl Messages for Telegram {
     }
 
     fn send_image(&self, image: &Image, quiet: bool) -> Result<String> {
-        let user = self.user()?;
+        let user = self.user;
         let upload = upload(image);
         let mut body = Map::new();
         silence(&mut body, quiet);
@@ -149,7 +172,7 @@ impl Messages for Telegram {
         if !body.contains_key("disable_notification") {
             silence(&mut body, quiet);
         }
-        let user = self.user()?;
+        let user = self.user;
         for (method, field) in [("sendPhoto", "photo"), ("sendDocument", "document")] {
             let Some(value) = body.get(field) else {
                 continue;
@@ -166,7 +189,50 @@ impl Messages for Telegram {
         let sent = self.bot.send_raw(user, body)?;
         Ok(sent.message_id.to_string())
     }
+}
 
+/// The user's own bot, whose chat is theirs once they connected.
+impl Telegram {
+    fn chat(&self) -> Result<UserChat> {
+        Ok(UserChat {
+            bot: self.bot.clone(),
+            user: self.user()?,
+        })
+    }
+}
+
+impl Messages for Telegram {
+    fn split(&self, text: &str) -> Vec<String> {
+        split(text, MESSAGE_LIMIT)
+    }
+
+    fn send(&self, message: &str, quiet: bool) -> Result<String> {
+        self.chat()?.send(message, quiet)
+    }
+
+    fn native(&self) -> &'static str {
+        NATIVE
+    }
+
+    fn send_image(&self, image: &Image, quiet: bool) -> Result<String> {
+        self.chat()?.send_image(image, quiet)
+    }
+
+    fn download(&self, file: &File) -> Result<Vec<u8>> {
+        self.bot.download(&file.id)
+    }
+
+    fn send_native(
+        &self,
+        message: &[u8],
+        entry: &dyn Fn(u64) -> Result<Image>,
+        quiet: bool,
+    ) -> Result<String> {
+        self.chat()?.send_native(message, entry, quiet)
+    }
+}
+
+impl Inbox for Telegram {
     fn connected(&self) -> bool {
         self.state.user.is_some()
     }
@@ -205,8 +271,7 @@ impl Messages for Telegram {
 
 impl Reactions for Telegram {
     fn react(&self, message: &str, emoji: &str) -> Result<()> {
-        let message = message.parse().context("not a Telegram message id")?;
-        self.bot.react(self.user()?, message, emoji)
+        self.chat()?.react(message, emoji)
     }
 }
 
@@ -255,16 +320,7 @@ pub fn take(state: &mut State, now: Timestamp, updates: Vec<Update>) -> Fetched 
         match state.user {
             Some(user) if user == sender.id => {
                 if private {
-                    let image = image_of(&message);
-                    let text = match image {
-                        Some(_) => message.caption.clone(),
-                        None => Some(text_of(&message)),
-                    };
-                    fetched.arrived.push(Arrived::Message {
-                        id: message.message_id.to_string(),
-                        image,
-                        text,
-                    });
+                    fetched.arrived.push(message_of(&message));
                 }
             }
             None if private && opens_with(&message, state.code.as_deref()) => {
@@ -285,6 +341,20 @@ pub fn take(state: &mut State, now: Timestamp, updates: Vec<Update>) -> Fetched 
         }
     }
     fetched
+}
+
+/// A message of the user, as it goes into the room: an image, a text, or an image with a caption.
+pub fn message_of(message: &Message) -> Arrived {
+    let image = image_of(message);
+    let text = match image {
+        Some(_) => message.caption.clone(),
+        None => Some(text_of(message)),
+    };
+    Arrived::Message {
+        id: message.message_id.to_string(),
+        image,
+        text,
+    }
 }
 
 /// A time as the user reads it, in the machine's time zone.

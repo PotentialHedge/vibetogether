@@ -4,6 +4,7 @@ pub mod config;
 pub mod messenger;
 pub mod paths;
 pub mod reactions;
+pub mod serve;
 pub mod telegram;
 
 pub use config::Config;

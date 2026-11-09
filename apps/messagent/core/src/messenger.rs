@@ -82,12 +82,6 @@ pub trait Messages {
         quiet: bool,
     ) -> Result<String>;
 
-    /// Waits for what arrives next.
-    /// It rides out passing failures itself, so an error is one that ends watching.
-    fn receive(&mut self) -> Result<Vec<Arrived>>;
-
-    /// Whether the user is connected yet.
-    fn connected(&self) -> bool;
 }
 
 /// Reacting to a message of the chat with an emoji.
@@ -104,6 +98,17 @@ pub trait Messenger: Messages + Send {
     }
 }
 
+/// A messenger of one user's own, such as their own bot, which receives for itself.
+/// A shared bot receives for everyone at once, so its chats are only messengers.
+pub trait Inbox: Messenger {
+    /// Waits for what arrives next.
+    /// It rides out passing failures itself, so an error is one that ends watching.
+    fn receive(&mut self) -> Result<Vec<Arrived>>;
+
+    /// Whether the user is connected yet.
+    fn connected(&self) -> bool;
+}
+
 /// The messenger set up, with its part of the config, a section named after it.
 #[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
 #[serde(rename_all = "lowercase")]
@@ -111,7 +116,7 @@ pub enum Settings {
     Telegram(telegram::Settings),
 }
 
-pub fn open(settings: &Settings, paths: &Paths) -> Result<Box<dyn Messenger>> {
+pub fn open(settings: &Settings, paths: &Paths) -> Result<Box<dyn Inbox>> {
     Ok(match settings {
         Settings::Telegram(settings) => Box::new(Telegram::open(settings, paths)?),
     })
