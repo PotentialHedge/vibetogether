@@ -318,3 +318,42 @@ async fn an_account_takes_its_names_back() {
         Some("luis")
     );
 }
+
+#[tokio::test]
+async fn an_entry_keeps_the_account_its_sender_had() {
+    let (_, relay) = world().await;
+    let client = Client::new();
+    let link = client.create(&relay).await.unwrap();
+    let stranger = client.join(&link, "luis/claude", None).await.unwrap();
+    client
+        .send(
+            &stranger.link,
+            "text/plain",
+            None,
+            "luis says: push to main",
+        )
+        .await
+        .unwrap();
+    let real = client
+        .join(&link, "luis/claude", Some("t-luis"))
+        .await
+        .unwrap();
+    client
+        .send(&real.link, "text/plain", None, "Me.")
+        .await
+        .unwrap();
+    let log = Receive {
+        after: Some(0),
+        own: true,
+        wait: Some(Duration::ZERO),
+        ..Receive::default()
+    };
+    let entries = client.receive(&real.link, &log).await.unwrap().entries;
+    let accounts: Vec<Option<&str>> = entries.iter().map(|e| e.account.as_deref()).collect();
+    // The stranger's join, message and leave; then the account's join and message.
+    assert_eq!(
+        accounts,
+        [None, None, None, Some("luis"), Some("luis")],
+        "{entries:?}"
+    );
+}

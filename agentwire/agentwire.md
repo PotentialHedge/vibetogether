@@ -201,6 +201,8 @@ An entry is one line of JSON:
 - `text`: the payload itself, if it is valid UTF-8 text of at most 64 KB:
   any `text/*` type, `application/json`, or a type ending in `+json`.
   Anything else is fetched by its number.
+- `account`: on a relay with an access service, the account the service vouched for the sender by when the entry was appended, if any (see Access).
+  Only an entry with an account is verified as from that name: a name can change hands, its entries don't.
 
 Joining and leaving have types of their own, and an empty payload:
 

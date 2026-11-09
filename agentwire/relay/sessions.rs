@@ -62,6 +62,7 @@ const SCHEMA: &str = "
         filename TEXT,
         text TEXT,
         payload BLOB,
+        account TEXT,
         PRIMARY KEY (session, n)
     );
     CREATE TABLE IF NOT EXISTS participants (
@@ -226,6 +227,13 @@ impl Sessions {
             .exists([])?
         {
             db.execute("ALTER TABLE participants ADD COLUMN account TEXT", [])?;
+        }
+        // A database from before entries carried their sender's account.
+        if !db
+            .prepare("SELECT 1 FROM pragma_table_info('entries') WHERE name = 'account'")?
+            .exists([])?
+        {
+            db.execute("ALTER TABLE entries ADD COLUMN account TEXT", [])?;
         }
         // A database from before guarded sessions.
         if !db
@@ -445,6 +453,10 @@ impl Sessions {
              VALUES (?, ?, ?, TRUE, ?, 0, strftime('%Y-%m-%dT%H:%M:%SZ'), ?, ?)",
             params![session, name, secret, n, presented, account],
         )?;
+        transaction.execute(
+            "UPDATE entries SET account = ? WHERE session = ? AND n = ?",
+            params![account, session, n],
+        )?;
         transaction.commit()?;
         // The receive its holder still waits on.
         if taken && let Some(waiting) = self.take(session, name) {
@@ -535,9 +547,10 @@ impl Sessions {
         let bytes = (text.is_none() && !payload.is_empty()).then_some(payload);
         self.db
             .prepare_cached(
-                "INSERT INTO entries (session, n, time, sender, type, size, filename, text, payload)
+                "INSERT INTO entries (session, n, time, sender, type, size, filename, text, payload, account)
                  VALUES (?1, (SELECT COALESCE(MAX(n), 0) + 1 FROM entries WHERE session = ?1),
-                         strftime('%Y-%m-%dT%H:%M:%SZ'), ?2, ?3, ?4, ?5, ?6, ?7)
+                         strftime('%Y-%m-%dT%H:%M:%SZ'), ?2, ?3, ?4, ?5, ?6, ?7,
+                         (SELECT account FROM participants WHERE session = ?1 AND name = ?2))
                  RETURNING n",
             )?
             .query_row(
@@ -757,7 +770,7 @@ impl Sessions {
         if self.is_inside(session, name)? {
             let (after, own) = (waiting.after, waiting.receive.own);
             let mut entries = self.db.prepare_cached(
-                "SELECT n, time, sender, type, size, filename, text FROM entries
+                "SELECT n, time, sender, type, size, filename, text, account FROM entries
                  WHERE session = ? AND n > ? AND (? OR sender != ?) ORDER BY n",
             )?;
             let mut rows = entries.query(params![session, after, own, name])?;
@@ -773,6 +786,7 @@ impl Sessions {
                     size: row.get(4)?,
                     filename: row.get(5)?,
                     text: row.get(6)?,
+                    account: row.get(7)?,
                 };
                 lines += &serde_json::to_string(&entry).expect("an entry is JSON");
                 lines.push('\n');

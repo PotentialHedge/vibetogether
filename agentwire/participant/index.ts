@@ -10,11 +10,13 @@ export type Entry = {
 	size: number;
 	filename?: string;
 	text?: string;
+	/** The account vouched for the sender when it was appended: only then is `from` verified. */
+	account?: string;
 };
 
 export type Presence = Record<
 	string,
-	{ read: number; receiving: boolean; since?: string }
+	{ read: number; receiving: boolean; since?: string; account?: string }
 >;
 
 export type Subscriber = {

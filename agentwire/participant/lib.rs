@@ -47,6 +47,10 @@ pub struct Entry {
     /// The payload itself, where it is short text.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub text: Option<String>,
+    /// The account the access service vouched for the sender by when it was
+    /// appended, if any: only then is `from` verified, whoever holds the name later.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub account: Option<String>,
 }
 
 impl Entry {
