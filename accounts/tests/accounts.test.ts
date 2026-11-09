@@ -118,7 +118,7 @@ before(async () => {
 	({ cookie: ben, token: benToken } = await person("ben"));
 	for (const someone of [luis, ben])
 		assert.equal(
-			(await call(someone, "POST", "/api/rooms", { name: "agents" })).status,
+			(await call(someone, "POST", "/api/sessions", { name: "agents" })).status,
 			201,
 		);
 });
@@ -210,18 +210,18 @@ test("me", async () => {
 	});
 });
 
-test("an account starts with no room, and a room is open to its members by default", async () => {
+test("an account starts with no session, and a session is open to its members by default", async () => {
 	const { cookie: erin } = await person("erin");
-	assert.deepEqual((await call(erin, "GET", "/api/rooms")).json, []);
-	const rooms = (await call(luis, "GET", "/api/rooms")).json;
-	assert.equal(rooms.length, 1);
-	assert.equal(rooms[0].name, "agents");
-	assert.equal(rooms[0].owner, "luis");
-	assert.equal(rooms[0].open, "members");
-	assert.match(rooms[0].address, /\/v2\/s\/session-\d+$/);
+	assert.deepEqual((await call(erin, "GET", "/api/sessions")).json, []);
+	const sessions = (await call(luis, "GET", "/api/sessions")).json;
+	assert.equal(sessions.length, 1);
+	assert.equal(sessions[0].name, "agents");
+	assert.equal(sessions[0].owner, "luis");
+	assert.equal(sessions[0].open, "members");
+	assert.match(sessions[0].address, /\/v2\/s\/session-\d+$/);
 });
 
-test("an agent gets a token by an OTP, joins its room, and is cut off once the token is revoked", async () => {
+test("an agent gets a token by an OTP, joins its session, and is cut off once the token is revoked", async () => {
 	const token = await connect(luis, "claude");
 	assert.equal((await call(token, "GET", "/api/me")).json.name, "luis");
 	const tokens = (await call(luis, "GET", "/api/tokens")).json;
@@ -235,8 +235,8 @@ test("an agent gets a token by an OTP, joins its room, and is cut off once the t
 	assert.equal(tokens[0].name, "claude");
 	assert.equal(tokens[0].via, "otp");
 
-	const [room] = (await call(token, "GET", "/api/rooms")).json;
-	const session = room.address.split("/").pop();
+	const [owned] = (await call(token, "GET", "/api/sessions")).json;
+	const session = owned.address.split("/").pop();
 	const join = (name: string, as: string | null) =>
 		call(null, "POST", "/agentwire/join", {
 			session,
@@ -263,7 +263,7 @@ test("an agent gets a token by an OTP, joins its room, and is cut off once the t
 	assert.equal((await call(token, "GET", "/api/me")).status, 401);
 });
 
-test("a session that is no room is open to anyone, and a token verifies the name", async () => {
+test("a session no account owns is open to anyone, and a token verifies the name", async () => {
 	const join = (name: string, token: string | null) =>
 		call(null, "POST", "/agentwire/join", {
 			session: "throwaway",
@@ -282,7 +282,7 @@ test("a session that is no room is open to anyone, and a token verifies the name
 		(await call(null, "GET", "/agentwire/sessions/throwaway")).status,
 		404,
 	);
-	// An owned session the service doesn't know is a room that was deleted.
+	// An owned session the service doesn't know is one that was deleted.
 	const owned = await call(null, "POST", "/agentwire/join", {
 		session: "throwaway",
 		name: "luis/claude",
@@ -293,9 +293,9 @@ test("a session that is no room is open to anyone, and a token verifies the name
 });
 
 test("friends are mutual, and only friends become members", async () => {
-	const [room] = (await call(luis, "GET", "/api/rooms")).json;
+	const [owned] = (await call(luis, "GET", "/api/sessions")).json;
 	assert.equal(
-		(await call(luis, "PUT", `/api/rooms/${room.id}/members/ben`)).status,
+		(await call(luis, "PUT", `/api/sessions/${owned.id}/members/ben`)).status,
 		403,
 	);
 
@@ -317,9 +317,13 @@ test("friends are mutual, and only friends become members", async () => {
 		[["luis", "friends"]],
 	);
 
-	const added = await call(luis, "PUT", `/api/rooms/${room.id}/members/ben`);
+	const added = await call(
+		luis,
+		"PUT",
+		`/api/sessions/${owned.id}/members/ben`,
+	);
 	assert.deepEqual(added.json.members, ["ben"]);
-	const session = room.address.split("/").pop();
+	const session = owned.address.split("/").pop();
 	assert.deepEqual(
 		(
 			await call(null, "POST", "/agentwire/join", {
@@ -333,10 +337,10 @@ test("friends are mutual, and only friends become members", async () => {
 			account: "ben",
 		},
 	);
-	assert.equal((await call(ben, "GET", "/api/rooms")).json.length, 2);
+	assert.equal((await call(ben, "GET", "/api/sessions")).json.length, 2);
 
 	assert.equal(
-		(await call(ben, "DELETE", `/api/rooms/${room.id}/members/ben`)).status,
+		(await call(ben, "DELETE", `/api/sessions/${owned.id}/members/ben`)).status,
 		204,
 	);
 	assert.equal(
@@ -352,12 +356,14 @@ test("friends are mutual, and only friends become members", async () => {
 	);
 });
 
-test("rooms are created, renamed and deleted by their owner", async () => {
-	const created = await call(luis, "POST", "/api/rooms", { name: "formoniq" });
+test("sessions are created, renamed and deleted by their owner", async () => {
+	const created = await call(luis, "POST", "/api/sessions", {
+		name: "formoniq",
+	});
 	assert.equal(created.status, 201);
 	assert.equal(
 		(
-			await call(ben, "PATCH", `/api/rooms/${created.json.id}`, {
+			await call(ben, "PATCH", `/api/sessions/${created.json.id}`, {
 				name: "mine",
 			})
 		).status,
@@ -365,18 +371,18 @@ test("rooms are created, renamed and deleted by their owner", async () => {
 	);
 	assert.equal(
 		(
-			await call(luis, "PATCH", `/api/rooms/${created.json.id}`, {
+			await call(luis, "PATCH", `/api/sessions/${created.json.id}`, {
 				name: "feec",
 			})
 		).json.name,
 		"feec",
 	);
 	assert.equal(
-		(await call(luis, "POST", "/api/rooms", { name: " " })).status,
+		(await call(luis, "POST", "/api/sessions", { name: " " })).status,
 		400,
 	);
 	assert.equal(
-		(await call(luis, "DELETE", `/api/rooms/${created.json.id}`)).status,
+		(await call(luis, "DELETE", `/api/sessions/${created.json.id}`)).status,
 		204,
 	);
 	const session = created.json.address.split("/").pop();
@@ -397,8 +403,8 @@ test("rooms are created, renamed and deleted by their owner", async () => {
 	);
 });
 
-test("a room open by its address lets anyone in, and only the person opens it", async () => {
-	const created = await call(luis, "POST", "/api/rooms", { name: "open" });
+test("a session open by its address lets anyone in, and only the person opens it", async () => {
+	const created = await call(luis, "POST", "/api/sessions", { name: "open" });
 	const id = created.json.id;
 	const session = created.json.address.split("/").pop();
 	const join = (name: string, token: string | null) =>
@@ -412,19 +418,21 @@ test("a room open by its address lets anyone in, and only the person opens it", 
 
 	const agent = await connect(luis, "opener");
 	assert.equal(
-		(await call(agent, "PATCH", `/api/rooms/${id}`, { open: "link" })).status,
-		403,
-	);
-	assert.equal(
-		(await call(agent, "POST", "/api/rooms", { name: "x", open: "link" }))
+		(await call(agent, "PATCH", `/api/sessions/${id}`, { open: "link" }))
 			.status,
 		403,
 	);
 	assert.equal(
-		(await call(luis, "PATCH", `/api/rooms/${id}`, { open: "maybe" })).status,
+		(await call(agent, "POST", "/api/sessions", { name: "x", open: "link" }))
+			.status,
+		403,
+	);
+	assert.equal(
+		(await call(luis, "PATCH", `/api/sessions/${id}`, { open: "maybe" }))
+			.status,
 		400,
 	);
-	const opened = await call(luis, "PATCH", `/api/rooms/${id}`, {
+	const opened = await call(luis, "PATCH", `/api/sessions/${id}`, {
 		open: "link",
 	});
 	assert.equal(opened.json.open, "link");
@@ -437,12 +445,12 @@ test("a room open by its address lets anyone in, and only the person opens it", 
 	assert.equal((await join("luis", benToken)).status, 403);
 
 	assert.equal(
-		(await call(agent, "PATCH", `/api/rooms/${id}`, { open: "members" })).json
-			.open,
+		(await call(agent, "PATCH", `/api/sessions/${id}`, { open: "members" }))
+			.json.open,
 		"members",
 	);
 	assert.equal((await join("stranger", null)).status, 403);
-	await call(luis, "DELETE", `/api/rooms/${id}`);
+	await call(luis, "DELETE", `/api/sessions/${id}`);
 });
 
 test("an agent through MCP signs in by OAuth, and is cut off once revoked", async () => {
@@ -601,36 +609,40 @@ test("a token reaches none of Better Auth's endpoints for sessions, the user, co
 test("only the person adds friends and members, never an agent's token", async () => {
 	const token = await connect(ben, "helper");
 	assert.equal((await call(token, "PUT", "/api/friends/luis")).status, 403);
-	const [room] = (await call(token, "GET", "/api/rooms")).json;
+	const [owned] = (await call(token, "GET", "/api/sessions")).json;
 	assert.equal(
-		(await call(token, "PUT", `/api/rooms/${room.id}/members/luis`)).status,
+		(await call(token, "PUT", `/api/sessions/${owned.id}/members/luis`)).status,
 		403,
 	);
 });
 
-test("unfriending takes each out of the other's rooms", async () => {
+test("unfriending takes each out of the other's sessions", async () => {
 	const { cookie: carol } = await person("carol");
 	await call(luis, "PUT", "/api/friends/carol");
 	await call(carol, "PUT", "/api/friends/luis");
-	const [room] = (await call(luis, "GET", "/api/rooms")).json;
+	const [owned] = (await call(luis, "GET", "/api/sessions")).json;
 	assert.deepEqual(
-		(await call(luis, "PUT", `/api/rooms/${room.id}/members/carol`)).json
+		(await call(luis, "PUT", `/api/sessions/${owned.id}/members/carol`)).json
 			.members,
 		["carol"],
 	);
 	assert.equal((await call(carol, "DELETE", "/api/friends/luis")).status, 204);
-	assert.deepEqual((await call(luis, "GET", "/api/rooms")).json[0].members, []);
+	assert.deepEqual(
+		(await call(luis, "GET", "/api/sessions")).json[0].members,
+		[],
+	);
 });
 
-test("an account owns at most 20 rooms", async () => {
+test("an account owns at most 20 sessions", async () => {
 	const { cookie: dora } = await person("dora");
 	for (let i = 1; i <= 20; i++)
 		assert.equal(
-			(await call(dora, "POST", "/api/rooms", { name: `r${i}` })).status,
+			(await call(dora, "POST", "/api/sessions", { name: `r${i}` })).status,
 			201,
 		);
 	assert.equal(
-		(await call(dora, "POST", "/api/rooms", { name: "one too many" })).status,
+		(await call(dora, "POST", "/api/sessions", { name: "one too many" }))
+			.status,
 		403,
 	);
 });

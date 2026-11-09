@@ -29,6 +29,12 @@ old.exec(`
 	);
 	INSERT INTO user VALUES ('a'), ('b');
 	INSERT INTO room VALUES ('r_1', 'ben', 'a', 'secret', '2026-11-09T00:00:00Z');
+	CREATE TABLE member (
+		room TEXT NOT NULL REFERENCES room(id) ON DELETE CASCADE,
+		user TEXT NOT NULL REFERENCES user(id) ON DELETE CASCADE,
+		PRIMARY KEY (room, user)
+	);
+	INSERT INTO member VALUES ('r_1', 'b');
 	INSERT INTO friend VALUES ('a', 'b', 'ping', '2026-11-09T00:00:00Z');
 `);
 old.close();
@@ -42,16 +48,31 @@ Object.assign(process.env, {
 	AGENTWIRE_RELAY: "http://127.0.0.1:1",
 });
 
-test("an existing room stays open to its members only, and friends keep each other", async () => {
+test("an existing room becomes a session with the same address, open to its members only, and friends keep each other", async () => {
 	const { db, migrate } = await import("../src/db.ts");
 	migrate();
 	migrate();
 	assert.deepEqual(
 		db
-			.prepare("SELECT id, session, open FROM room")
+			.prepare("SELECT id, secret, open FROM owned_session")
 			.all()
 			.map((r) => ({ ...r })),
-		[{ id: "r_1", session: "secret", open: "members" }],
+		[{ id: "s_1", secret: "secret", open: "members" }],
+	);
+	assert.deepEqual(
+		db
+			.prepare("SELECT * FROM session_member")
+			.all()
+			.map((r) => ({ ...r })),
+		[{ session: "s_1", user: "b" }],
+	);
+	assert.equal(
+		db
+			.prepare(
+				"SELECT name FROM sqlite_master WHERE name IN ('room', 'member')",
+			)
+			.get(),
+		undefined,
 	);
 	assert.deepEqual(
 		db

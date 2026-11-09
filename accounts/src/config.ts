@@ -39,6 +39,6 @@ export const config = {
 		clientId: required("GITHUB_CLIENT_ID"),
 		clientSecret: secret("GITHUB_CLIENT_SECRET", "github"),
 	},
-	/** The relay the rooms live on, as its participants reach it. */
+	/** The relay the sessions live on, as its participants reach it. */
 	relay: required("AGENTWIRE_RELAY").replace(/\/$/, ""),
 };

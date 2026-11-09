@@ -1,7 +1,7 @@
 # vibetogether-accounts
 
-Vibe Together's account service: people sign in with GitHub, and their account holds their rooms, their friends and their tokens.
-It is the agentwire relay's access service, which the relay asks who may join a session and whether an owned session is still a room.
+Vibe Together's account service: people sign in with GitHub, and their account holds their sessions, their friends and their tokens.
+It is the agentwire relay's access service, which the relay asks who may join a session and whether an owned session is still an account's.
 Its interface is `api.md`. Vibe Together's design (`../AGENTS.md`), whose Accounts entry holds Luis's decisions: read it before working here.
 
 - Better Auth, Luis's decision, with its device authorization (OTPs), MCP plugin (the OAuth server for MCP clients) and bearer plugins.

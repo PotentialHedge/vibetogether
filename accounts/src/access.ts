@@ -5,24 +5,24 @@ import { isAgentOf } from "./names.ts";
 
 /**
  * The relay's access service: whether a name may join a session, with a token or without,
- * and whether an owned session is still a room. Reached on the loopback only.
+ * and whether an owned session is still one of the sessions accounts own. Reached on the loopback only.
  */
 export const access = new Hono();
 
-type Room = { id: string; owner: string; open: "members" | "link" };
+type Session = { id: string; owner: string; open: "members" | "link" };
 
-function roomBySession(session: string): Room | undefined {
+function sessionBySecret(secret: string): Session | undefined {
 	return db
-		.prepare("SELECT id, owner, open FROM room WHERE session = ?")
-		.get(session) as Room | undefined;
+		.prepare("SELECT id, owner, open FROM owned_session WHERE secret = ?")
+		.get(secret) as Session | undefined;
 }
 
-function isInRoom(room: Room, user: string): boolean {
+function isInSession(session: Session, user: string): boolean {
 	return (
-		room.owner === user ||
+		session.owner === user ||
 		db
-			.prepare("SELECT 1 FROM member WHERE room = ? AND user = ?")
-			.get(room.id, user) !== undefined
+			.prepare("SELECT 1 FROM session_member WHERE session = ? AND user = ?")
+			.get(session.id, user) !== undefined
 	);
 }
 
@@ -56,24 +56,24 @@ access.post("/join", async (c) => {
 			`The token is ${caller.login}'s, so it joins only as ${caller.login}/<agent>.`,
 			403,
 		);
-	const room = roomBySession(session);
-	// The service owns every owned session as a room, so one it doesn't know was deleted.
-	if (!room && body?.owned === true)
-		return c.text("This room was deleted.", 403);
-	if (room?.open === "members") {
+	const owned = sessionBySecret(session);
+	// Every owned session is an account's, so one the service doesn't know was deleted.
+	if (!owned && body?.owned === true)
+		return c.text("This session was deleted.", 403);
+	if (owned?.open === "members") {
 		if (!caller)
 			return c.text(
-				"This room is open to its members only: join with a token of your account, as Authorization: Bearer <token>.",
+				"This session is open to its members only: join with a token of your account, as Authorization: Bearer <token>.",
 				403,
 			);
-		if (!isInRoom(room, caller.id))
-			return c.text(`${caller.login} is no member of this room.`, 403);
+		if (!isInSession(owned, caller.id))
+			return c.text(`${caller.login} is no member of this session.`, 403);
 	}
 	return c.json({ account: caller?.login ?? null });
 });
 
 access.get("/sessions/:session", (c) =>
-	roomBySession(c.req.param("session"))
+	sessionBySecret(c.req.param("session"))
 		? c.json({})
-		: c.text("No such room.", 404),
+		: c.text("No such session.", 404),
 );

@@ -25,7 +25,7 @@ in {
     relay = lib.mkOption {
       type = lib.types.str;
       example = "https://agentwire.agentics.lwirth.com";
-      description = "The relay the rooms live on, as participants reach it.";
+      description = "The relay the sessions live on, as participants reach it.";
     };
     github.clientId = lib.mkOption {
       type = lib.types.str;

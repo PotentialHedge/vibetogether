@@ -1,7 +1,12 @@
 import { Hono } from "hono";
 import { type Caller, callerOf } from "./caller.ts";
 import { db } from "./db.ts";
-import { addressOf, createRoom, type RoomRow, sessionOf } from "./rooms.ts";
+import {
+	addressOf,
+	createSession,
+	type SessionRow,
+	secretOf,
+} from "./sessions.ts";
 
 type Env = { Variables: { caller: Caller } };
 
@@ -33,38 +38,38 @@ function areFriends(a: string, b: string): boolean {
 	);
 }
 
-async function roomJson(room: RoomRow) {
+async function sessionJson(session: SessionRow) {
 	const members = db
 		.prepare(
-			"SELECT u.login FROM member m JOIN user u ON u.id = m.user WHERE m.room = ? ORDER BY u.login",
+			"SELECT u.login FROM session_member m JOIN user u ON u.id = m.user WHERE m.session = ? ORDER BY u.login",
 		)
-		.all(room.id) as { login: string }[];
+		.all(session.id) as { login: string }[];
 	let address: string | null = null;
 	try {
-		address = addressOf(await sessionOf(room));
+		address = addressOf(await secretOf(session));
 	} catch (error) {
-		console.error(`room ${room.id} has no session yet:`, error);
+		console.error(`session ${session.id} has no address yet:`, error);
 	}
 	return {
-		id: room.id,
-		name: room.name,
-		owner: loginOf(room.owner),
+		id: session.id,
+		name: session.name,
+		owner: loginOf(session.owner),
 		members: members.map((m) => m.login),
-		open: room.open,
+		open: session.open,
 		address,
 	};
 }
 
-type RoomInput = { name?: string; open?: RoomRow["open"] };
+type SessionInput = { name?: string; open?: SessionRow["open"] };
 
-const roomInputHelp =
-	'The body is {"name":"…","open":"members"|"link"}, each optional where the room exists, with a name of at most 100 characters.';
+const sessionInputHelp =
+	'The body is {"name":"…","open":"members"|"link"}, each optional where the session exists, with a name of at most 100 characters.';
 
-/** A room's name and who it is open to, as a request gives them, or undefined where they are malformed. */
-function roomInput(body: unknown): RoomInput | undefined {
+/** A session's name and who it is open to, as a request gives them, or undefined where they are malformed. */
+function sessionInput(body: unknown): SessionInput | undefined {
 	if (body === null || typeof body !== "object") return undefined;
 	const { name, open } = body as { name?: unknown; open?: unknown };
-	const input: RoomInput = {};
+	const input: SessionInput = {};
 	if (name !== undefined) {
 		if (typeof name !== "string") return undefined;
 		const trimmed = name.trim();
@@ -90,13 +95,13 @@ async function bodyOf(request: Request): Promise<unknown> {
 
 export const api = new Hono<Env>();
 
-/** The most rooms one account owns, since every room it owns lasts. */
-const maxRooms = 20;
+/** The most sessions one account owns, since every session it owns lasts. */
+const maxSessions = 20;
 
 /**
  * Whether the request is the person's, signed in in the browser, rather than an agent's with a token.
- * Letting others in, as friends, members or by opening a room to its address, is the person's
- * alone, so that an agent told to by someone else can't give them a seat in its person's rooms.
+ * Letting others in, as friends, members or by opening a session to its address, is the person's
+ * alone, so that an agent told to by someone else can't give them a seat in its person's sessions.
  */
 function isPerson(request: Request): boolean {
 	return !request.headers.has("authorization");
@@ -127,101 +132,100 @@ api.get("/me", (c) => {
 	});
 });
 
-// Rooms
+// Sessions
 
-function roomOf(id: string): RoomRow | undefined {
-	return db.prepare("SELECT * FROM room WHERE id = ?").get(id) as
-		| RoomRow
+function sessionOf(id: string): SessionRow | undefined {
+	return db.prepare("SELECT * FROM owned_session WHERE id = ?").get(id) as
+		| SessionRow
 		| undefined;
 }
 
-api.get("/rooms", async (c) => {
-	const rooms = db
+api.get("/sessions", async (c) => {
+	const sessions = db
 		.prepare(
-			`SELECT * FROM room WHERE owner = ? OR id IN (SELECT room FROM member WHERE user = ?) ORDER BY created`,
+			`SELECT * FROM owned_session WHERE owner = ? OR id IN (SELECT session FROM session_member WHERE user = ?) ORDER BY created`,
 		)
-		.all(c.var.caller.id, c.var.caller.id) as RoomRow[];
-	return c.json(await Promise.all(rooms.map(roomJson)));
+		.all(c.var.caller.id, c.var.caller.id) as SessionRow[];
+	return c.json(await Promise.all(sessions.map(sessionJson)));
 });
 
-api.post("/rooms", async (c) => {
+api.post("/sessions", async (c) => {
 	const owned = (
 		db
-			.prepare("SELECT count(*) AS n FROM room WHERE owner = ?")
+			.prepare("SELECT count(*) AS n FROM owned_session WHERE owner = ?")
 			.get(c.var.caller.id) as { n: number }
 	).n;
-	if (owned >= maxRooms)
+	if (owned >= maxSessions)
 		return c.text(
-			`An account owns at most ${maxRooms} rooms: delete one first.`,
+			`An account owns at most ${maxSessions} sessions: delete one first.`,
 			403,
 		);
-	const input = roomInput(await bodyOf(c.req.raw));
-	if (!input?.name) return c.text(roomInputHelp, 400);
+	const input = sessionInput(await bodyOf(c.req.raw));
+	if (!input?.name) return c.text(sessionInputHelp, 400);
 	if (input.open === "link" && !isPerson(c.req.raw))
 		return c.text(onlyThePerson, 403);
 	return c.json(
-		await roomJson(
-			await createRoom(c.var.caller.id, input.name, input.open ?? "members"),
+		await sessionJson(
+			await createSession(c.var.caller.id, input.name, input.open ?? "members"),
 		),
 		201,
 	);
 });
 
-api.patch("/rooms/:id", async (c) => {
-	const room = roomOf(c.req.param("id"));
-	if (!room) return c.text("No such room.", 404);
-	if (room.owner !== c.var.caller.id)
-		return c.text("Only the room's owner changes it.", 403);
-	const input = roomInput(await bodyOf(c.req.raw));
-	if (!input) return c.text(roomInputHelp, 400);
+api.patch("/sessions/:id", async (c) => {
+	const session = sessionOf(c.req.param("id"));
+	if (!session) return c.text("No such session.", 404);
+	if (session.owner !== c.var.caller.id)
+		return c.text("Only the session's owner changes it.", 403);
+	const input = sessionInput(await bodyOf(c.req.raw));
+	if (!input) return c.text(sessionInputHelp, 400);
 	if (input.open === "link" && !isPerson(c.req.raw))
 		return c.text(onlyThePerson, 403);
-	const changed = { ...room, ...input };
-	db.prepare("UPDATE room SET name = ?, open = ? WHERE id = ?").run(
+	const changed = { ...session, ...input };
+	db.prepare("UPDATE owned_session SET name = ?, open = ? WHERE id = ?").run(
 		changed.name,
 		changed.open,
-		room.id,
+		session.id,
 	);
-	return c.json(await roomJson(changed));
+	return c.json(await sessionJson(changed));
 });
 
-api.delete("/rooms/:id", (c) => {
-	const room = roomOf(c.req.param("id"));
-	if (!room) return c.text("No such room.", 404);
-	if (room.owner !== c.var.caller.id)
-		return c.text("Only the room's owner deletes it.", 403);
-	db.prepare("DELETE FROM room WHERE id = ?").run(room.id);
+api.delete("/sessions/:id", (c) => {
+	const session = sessionOf(c.req.param("id"));
+	if (!session) return c.text("No such session.", 404);
+	if (session.owner !== c.var.caller.id)
+		return c.text("Only the session's owner deletes it.", 403);
+	db.prepare("DELETE FROM owned_session WHERE id = ?").run(session.id);
 	return c.body(null, 204);
 });
 
-api.put("/rooms/:id/members/:name", async (c) => {
+api.put("/sessions/:id/members/:name", async (c) => {
 	if (!isPerson(c.req.raw)) return c.text(onlyThePerson, 403);
-	const room = roomOf(c.req.param("id"));
-	if (!room) return c.text("No such room.", 404);
-	if (room.owner !== c.var.caller.id)
-		return c.text("Only the room's owner adds members.", 403);
+	const session = sessionOf(c.req.param("id"));
+	if (!session) return c.text("No such session.", 404);
+	if (session.owner !== c.var.caller.id)
+		return c.text("Only the session's owner adds members.", 403);
 	const person = personByLogin(c.req.param("name"));
 	if (!person) return c.text("No such person.", 404);
-	if (person.id === room.owner)
-		return c.text("The owner is in the room already.", 400);
-	if (!areFriends(room.owner, person.id))
+	if (person.id === session.owner)
+		return c.text("The owner is in the session already.", 400);
+	if (!areFriends(session.owner, person.id))
 		return c.text("Only friends of the owner become members.", 403);
-	db.prepare("INSERT OR IGNORE INTO member (room, user) VALUES (?, ?)").run(
-		room.id,
-		person.id,
-	);
-	return c.json(await roomJson(room));
+	db.prepare(
+		"INSERT OR IGNORE INTO session_member (session, user) VALUES (?, ?)",
+	).run(session.id, person.id);
+	return c.json(await sessionJson(session));
 });
 
-api.delete("/rooms/:id/members/:name", (c) => {
-	const room = roomOf(c.req.param("id"));
-	if (!room) return c.text("No such room.", 404);
+api.delete("/sessions/:id/members/:name", (c) => {
+	const session = sessionOf(c.req.param("id"));
+	if (!session) return c.text("No such session.", 404);
 	const person = personByLogin(c.req.param("name"));
 	if (!person) return c.text("No such person.", 404);
-	if (room.owner !== c.var.caller.id && person.id !== c.var.caller.id)
-		return c.text("Only the owner removes others from a room.", 403);
-	db.prepare("DELETE FROM member WHERE room = ? AND user = ?").run(
-		room.id,
+	if (session.owner !== c.var.caller.id && person.id !== c.var.caller.id)
+		return c.text("Only the owner removes others from a session.", 403);
+	db.prepare("DELETE FROM session_member WHERE session = ? AND user = ?").run(
+		session.id,
 		person.id,
 	);
 	return c.body(null, 204);
@@ -278,9 +282,9 @@ api.delete("/friends/:name", (c) => {
 	db.prepare(
 		`DELETE FROM friend WHERE ("from" = ? AND "to" = ?) OR ("from" = ? AND "to" = ?)`,
 	).run(me, person.id, person.id, me);
-	// Members are friends of the owner, so they leave each other's rooms too.
+	// Members are friends of the owner, so they leave each other's sessions too.
 	db.prepare(
-		"DELETE FROM member WHERE (user = ? AND room IN (SELECT id FROM room WHERE owner = ?)) OR (user = ? AND room IN (SELECT id FROM room WHERE owner = ?))",
+		"DELETE FROM session_member WHERE (user = ? AND session IN (SELECT id FROM owned_session WHERE owner = ?)) OR (user = ? AND session IN (SELECT id FROM owned_session WHERE owner = ?))",
 	).run(person.id, me, me, person.id);
 	return c.body(null, 204);
 });
