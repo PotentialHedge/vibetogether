@@ -118,11 +118,11 @@ async fn only_whom_the_service_lets_in_takes_part() {
         .unwrap()
         .insert("t-ben".into(), "ben".into());
     let ben = client.join(&link, "ben", Some("t-ben")).await.unwrap();
+    client.receive(&claude.link, &now).await.unwrap();
     let waiting = tokio::spawn({
-        let (client, me, after) = (client.clone(), claude.link.clone(), ben.n);
+        let (client, me) = (client.clone(), claude.link.clone());
         async move {
             let wait = Receive {
-                after: Some(after),
                 wait: Some(Duration::from_secs(60)),
                 ..Receive::default()
             };
@@ -140,6 +140,8 @@ async fn only_whom_the_service_lets_in_takes_part() {
     assert_eq!(woken.status(), Some(403));
     let presence = client.receive(&ben.link, &now).await.unwrap().presence;
     assert_eq!(presence["luis/claude"].account, None);
+    // What it was refused, it didn't read.
+    assert_eq!(presence["luis/claude"].read, ben.n);
     let cut = client
         .send(&claude.link, "text/plain", None, "Still here?")
         .await
@@ -258,4 +260,61 @@ async fn a_session_that_isnt_guarded_asks_only_for_a_token() {
         .await
         .unwrap_err();
     assert_eq!(cut.status(), Some(403));
+}
+
+#[tokio::test]
+async fn an_account_takes_its_names_back() {
+    let (_, relay) = world().await;
+    let client = Client::new();
+    let link = client.create(&relay).await.unwrap();
+    let old = client
+        .join(&link, "luis/claude", Some("t-luis"))
+        .await
+        .unwrap();
+    let waiting = tokio::spawn({
+        let (client, me, after) = (client.clone(), old.link.clone(), old.n);
+        async move {
+            let wait = Receive {
+                after: Some(after),
+                wait: Some(Duration::from_secs(60)),
+                ..Receive::default()
+            };
+            client.receive(&me, &wait).await
+        }
+    });
+    tokio::time::sleep(Duration::from_millis(200)).await;
+
+    // Without a token, a taken name stays taken.
+    let taken = client.join(&link, "luis/claude", None).await.unwrap_err();
+    assert_eq!(taken.status(), Some(409));
+
+    let new = client
+        .join(&link, "luis/claude", Some("t-luis"))
+        .await
+        .unwrap();
+    assert_ne!(new.link, old.link);
+    assert_eq!(waiting.await.unwrap().unwrap_err().status(), Some(403));
+    let gone = client
+        .send(&old.link, "text/plain", None, "Still me?")
+        .await
+        .unwrap_err();
+    assert_eq!(gone.status(), Some(403));
+
+    let log = Receive {
+        after: Some(0),
+        own: true,
+        wait: Some(Duration::ZERO),
+        ..Receive::default()
+    };
+    let received = client.receive(&new.link, &log).await.unwrap();
+    let kinds: Vec<&str> = received.entries.iter().map(|e| e.kind.as_str()).collect();
+    assert_eq!(
+        kinds,
+        [agentwire::JOIN, agentwire::LEAVE, agentwire::JOIN],
+        "{received:?}"
+    );
+    assert_eq!(
+        received.presence["luis/claude"].account.as_deref(),
+        Some("luis")
+    );
 }

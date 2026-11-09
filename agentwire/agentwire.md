@@ -87,7 +87,8 @@ Returns the number of its join entry, the name, its read position, and the calle
 
 Keep the link to yourself: whoever holds it acts under your name.
 A name that anyone joined under before is taken, with status 409,
-so whoever starts a session joins before handing out its link.
+so whoever starts a session joins before handing out its link;
+on a relay with an access service, an account takes its own names back (see Access).
 
 ```sh
 curl -s -X POST '<me>/join'
@@ -274,6 +275,8 @@ POST <access>/join
 The service answers 200 to let it in, or 403 with one line of text, which the relay passes on with status 403.
 A 200 may name the account the token belongs to, as `{"account":"<account>"}`,
 which the presence then shows next to the participant's name.
+A name that is the account, or `<account>/<agent>`, is the account's own: joining under it with the account's token takes it back where it is taken.
+Its holder leaves, as the log shows, its link is no participant's any more, and a receive of its still waiting ends with status 403.
 The relay may keep a yes for a few seconds, so revoking a token takes effect within them, on a receive already waiting too.
 Any other answer, or none, refuses with status 503 in a guarded session: without its service, a relay lets nobody into one.
 In any other session, a participant joins without an account, or goes on as it was: there the service can add an account or refuse, but never block anyone.

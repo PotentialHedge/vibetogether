@@ -558,10 +558,17 @@ async fn receive(relay: &Relay, id: &str, secret: &str, query: &str) -> Result<R
     let answer = answer.map_err(|_| fail(503, "the relay can't answer right now"))?;
     // A receive may wait long past the access service's yes, so it asks again
     // before it hands anything over, and a revoked token reads nothing more.
-    relay.admit(id, secret, None).await?;
+    if let Err(refused) = relay.admit(id, secret, None).await {
+        relay.sessions().settle(&waiting.ticket, None)?;
+        return Err(refused);
+    }
     match answer {
-        Answer::Lines(lines) => Ok(text(lines, "application/jsonl; charset=utf-8")),
+        Answer::Lines(lines, read) => {
+            relay.sessions().settle(&waiting.ticket, read)?;
+            Ok(text(lines, "application/jsonl; charset=utf-8"))
+        }
         Answer::Replaced => Err(fail(409, "a newer receive replaced this one")),
+        Answer::TakenBack => Err(fail(403, "this name's account took it back")),
     }
 }
 

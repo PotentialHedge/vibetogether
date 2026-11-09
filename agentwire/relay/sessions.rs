@@ -83,6 +83,9 @@ pub struct Sessions {
     db: Connection,
     /// The receives still waiting, by session and name: one per participant.
     waiting: HashMap<String, BTreeMap<String, Waiting>>,
+    /// The receives answered but not yet handed over, by session, name and
+    /// receive, with whether each waited for presence: see `settle`.
+    answered: HashMap<(String, String, u64), bool>,
     receives: u64,
 }
 
@@ -122,8 +125,12 @@ struct Waiting {
 }
 
 pub enum Answer {
-    Lines(String),
+    /// The lines, and the read position they acknowledge, which the relay sets
+    /// once the access service still lets the caller in.
+    Lines(String, Option<i64>),
     Replaced,
+    /// Its name's account took the name back.
+    TakenBack,
 }
 
 /// One waiting receive, as its caller holds it.
@@ -233,6 +240,7 @@ impl Sessions {
         Ok(Self {
             db,
             waiting: HashMap::new(),
+            answered: HashMap::new(),
             receives: 0,
         })
     }
@@ -407,8 +415,29 @@ impl Sessions {
         let taken = transaction
             .prepare_cached("SELECT 1 FROM participants WHERE session = ? AND name = ?")?
             .exists([session, name])?;
-        if taken {
+        // A name the access service vouches is the account's own, or one of
+        // its agents', the account takes back: its holder leaves, and its link
+        // is no participant's any more.
+        let own = account.is_some_and(|account| {
+            name == account
+                || name
+                    .strip_prefix(account)
+                    .is_some_and(|rest| rest.starts_with('/'))
+        });
+        if taken && !own {
             return Err(fail(409, format!("{name} is taken in this session")));
+        }
+        if taken {
+            let inside: bool = transaction
+                .prepare_cached("SELECT inside FROM participants WHERE session = ? AND name = ?")?
+                .query_row([session, name], |row| row.get(0))?;
+            if inside {
+                self.append(session, name, LEAVE, &[], None)?;
+            }
+            transaction.execute(
+                "DELETE FROM participants WHERE session = ? AND name = ?",
+                [session, name],
+            )?;
         }
         let n = self.append(session, name, JOIN, &[], None)?;
         transaction.execute(
@@ -417,6 +446,10 @@ impl Sessions {
             params![session, name, secret, n, presented, account],
         )?;
         transaction.commit()?;
+        // The receive its holder still waits on.
+        if taken && let Some(waiting) = self.take(session, name) {
+            _ = waiting.answer.send(Answer::TakenBack);
+        }
         self.look(session)?;
         Ok(Joined {
             n: n as u64,
@@ -603,14 +636,32 @@ impl Sessions {
         Ok(())
     }
 
+    /// Ends an answered receive as its answer is handed over, or isn't: sets
+    /// its caller's read position to what the answer acknowledged, if given,
+    /// and only then tells the others, so that a read position moves only for
+    /// what reached its participant.
+    pub fn settle(&mut self, ticket: &Ticket, read: Option<i64>) -> Result<(), Fail> {
+        let key = (ticket.session.clone(), ticket.name.clone(), ticket.id);
+        let Some(presence) = self.answered.remove(&key) else {
+            return Ok(());
+        };
+        if let Some(read) = read {
+            self.db.execute(
+                "UPDATE participants SET read = ?1 WHERE session = ?2 AND name = ?3 AND read < ?1",
+                params![read, ticket.session, ticket.name],
+            )?;
+        }
+        self.finish(&ticket.session, &ticket.name, presence)
+    }
+
     /// Drops a receive whose caller went away.
     pub fn abandon(&mut self, ticket: &Ticket) -> Result<(), Fail> {
         if self.holds(ticket)
             && let Some(waiting) = self.take(&ticket.session, &ticket.name)
         {
-            self.finish(&ticket.session, &ticket.name, &waiting.receive)?;
+            self.finish(&ticket.session, &ticket.name, waiting.receive.presence)?;
         }
-        Ok(())
+        self.settle(ticket, None)
     }
 
     fn holds(&self, ticket: &Ticket) -> bool {
@@ -669,33 +720,40 @@ impl Sessions {
     fn answer_all(&mut self, session: &str, names: &[String]) -> Result<(), Fail> {
         let mut answers = Vec::new();
         for name in names {
-            if let Some(lines) = self.entries_for(session, name)? {
-                answers.push((name, lines));
+            if let Some((lines, read)) = self.entries_for(session, name)? {
+                answers.push((name, lines, read));
             }
         }
-        let presence = Received::presence_line(&self.presence(session)?);
-        let mut taken = Vec::new();
-        for (name, mut lines) in answers {
-            lines += &presence;
+        let presence = self.presence(session)?;
+        for (name, mut lines, read) in answers {
+            // Its own presence shows what it acknowledges, as it will be.
+            let mut presence = presence.clone();
+            if let (Some(read), Some(own)) = (read, presence.get_mut(name.as_str())) {
+                own.read = own.read.max(read as u64);
+            }
+            lines += &Received::presence_line(&presence);
             lines.push('\n');
             if let Some(waiting) = self.take(session, name) {
-                _ = waiting.answer.send(Answer::Lines(lines));
-                taken.push((name, waiting.receive));
+                let key = (session.to_owned(), name.clone(), waiting.id);
+                self.answered.insert(key, waiting.receive.presence);
+                _ = waiting.answer.send(Answer::Lines(lines, read));
             }
-        }
-        for (name, receive) in taken {
-            self.finish(session, name, &receive)?;
         }
         Ok(())
     }
 
-    /// The entries `name`'s waiting receive asks for, one line each, and
-    /// acknowledges them; none if it isn't waiting.
-    fn entries_for(&mut self, session: &str, name: &str) -> Result<Option<String>, Fail> {
+    /// The entries `name`'s waiting receive asks for, one line each, and the
+    /// read position that acknowledges them, if it does; none if it isn't waiting.
+    fn entries_for(
+        &mut self,
+        session: &str,
+        name: &str,
+    ) -> Result<Option<(String, Option<i64>)>, Fail> {
         let Some(waiting) = self.waiting.get(session).and_then(|w| w.get(name)) else {
             return Ok(None);
         };
         let mut lines = String::new();
+        let mut read = None;
         if self.is_inside(session, name)? {
             let (after, own) = (waiting.after, waiting.receive.own);
             let mut entries = self.db.prepare_cached(
@@ -725,24 +783,25 @@ impl Sessions {
             // and what it leaves out, since its caller keeps no position of its
             // own; one that says what it read acknowledges only that.
             if waiting.receive.after.is_none() && waiting.receive.read.is_none() {
-                self.db.execute(
-                    "UPDATE participants SET read = last FROM
-                     (SELECT COALESCE(MAX(n), 0) AS last FROM entries WHERE session = ?1)
-                     WHERE session = ?1 AND name = ?2 AND read < last",
-                    params![session, name],
-                )?;
+                read = Some(
+                    self.db
+                        .prepare_cached(
+                            "SELECT COALESCE(MAX(n), 0) FROM entries WHERE session = ?",
+                        )?
+                        .query_row([session], |row| row.get(0))?,
+                );
             }
         }
-        Ok(Some(lines))
+        Ok(Some((lines, read)))
     }
 
     /// Ends a receive: its participant is no longer receiving.
-    fn finish(&mut self, session: &str, name: &str, receive: &Receive) -> Result<(), Fail> {
+    fn finish(&mut self, session: &str, name: &str, presence: bool) -> Result<(), Fail> {
         self.db.execute(
             "UPDATE participants SET since = strftime('%Y-%m-%dT%H:%M:%SZ') WHERE session = ? AND name = ?",
             [session, name],
         )?;
-        if !receive.presence {
+        if !presence {
             self.stir(session, name)?;
         }
         Ok(())
