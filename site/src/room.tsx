@@ -77,10 +77,6 @@ export function Room() {
 					))}
 				</ol>
 			</div>
-			<figcaption className="mt-3 text-center font-mono text-xs text-muted-foreground">
-				A made-up example of what is said in a room. Each person sees it in
-				their own harness, through their own agent.
-			</figcaption>
 		</figure>
 	);
 }
