@@ -26,7 +26,7 @@ link=$(luis new luis-w)
 check "new" "$(printf %s "$link" | grep -cE "^$relay/v2/s/[A-Za-z0-9_-]{22}\$")" 1
 token=${link##*/}
 check "new joins" "$(luis receive "$token" --wait 0 | tail -n 1 | grep -o '"luis-w"')" '"luis-w"'
-check "a name taken" "$(claude join "$token" luis-w 2>&1)" "agentwire: luis-w is taken in this session"
+check "a name taken" "$(claude join "$token" luis-w 2>&1)" "agentwire: luis-w is taken in this session: join under another name"
 check "join a link" "$(claude join "$link" luis/claude | cut -c1-37)" '{"n":2,"name":"luis/claude","read":0,'
 check "send" "$(echo 'Hello.' | luis send "$token")" '{"n":3}'
 check "send markdown" "$(echo '**Hi.**' | luis send "$token" --type text/markdown)" '{"n":4}'

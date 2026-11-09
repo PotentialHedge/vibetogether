@@ -41,6 +41,9 @@ const MAX_INLINE: usize = 64 * 1024;
 const UNJOINED: i64 = 24 * 60 * 60;
 /// How long a session lasts once nobody receives in it, in seconds.
 const UNRECEIVED: i64 = 7 * 24 * 60 * 60;
+/// How long a participant counts as live after its last receive ended: past
+/// it, its account may take its name back, so that a crashed one's comes free.
+const LIVE: i64 = 60 * 60;
 
 const SCHEMA: &str = "
     PRAGMA journal_mode = WAL;
@@ -139,6 +142,14 @@ pub struct Ticket {
     session: String,
     name: String,
     id: u64,
+}
+
+/// Whoever holds a name, as a join under it finds them.
+pub struct Holder {
+    pub inside: bool,
+    pub token: Option<String>,
+    pub account: Option<String>,
+    pub live: bool,
 }
 
 struct Participant {
@@ -411,6 +422,7 @@ impl Sessions {
         link: &str,
         presented: Option<&str>,
         account: Option<&str>,
+        take_back: bool,
     ) -> Result<Joined, Fail> {
         let name = name
             .filter(|name| !name.is_empty())
@@ -426,17 +438,13 @@ impl Sessions {
         let taken = transaction
             .prepare_cached("SELECT 1 FROM participants WHERE session = ? AND name = ?")?
             .exists([session, name])?;
-        // A name the access service vouches is the account's own, or one of
-        // its agents', the account takes back: its holder leaves, and its link
-        // is no participant's any more.
-        let own = account.is_some_and(|account| {
-            name == account
-                || name
-                    .strip_prefix(account)
-                    .is_some_and(|rest| rest.starts_with('/'))
-        });
-        if taken && !own {
-            return Err(fail(409, format!("{name} is taken in this session")));
+        // The relay decided whether the name is taken back: its holder
+        // leaves, and its link is no participant's any more.
+        if taken && !take_back {
+            return Err(fail(
+                409,
+                format!("{name} is taken in this session: join under another name"),
+            ));
         }
         if taken {
             let inside: bool = transaction
@@ -472,6 +480,32 @@ impl Sessions {
             read: 0,
             link: format!("{link}/{secret}"),
         })
+    }
+
+    /// Who holds `name` in `session`, if anyone: whether it is in, the token
+    /// it joined with, the account vouched for it, and whether it is live,
+    /// receiving now or within `LIVE` of its last receive.
+    pub fn holder(&self, session: &str, name: &str) -> Result<Option<Holder>, Fail> {
+        let receiving = self
+            .waiting
+            .get(session)
+            .is_some_and(|waiting| waiting.contains_key(name));
+        Ok(self
+            .db
+            .prepare_cached(
+                "SELECT inside, token, account,
+                        since > strftime('%Y-%m-%dT%H:%M:%SZ', 'now', ?3)
+                 FROM participants WHERE session = ?1 AND name = ?2",
+            )?
+            .query_row(params![session, name, format!("-{LIVE} seconds")], |row| {
+                Ok(Holder {
+                    inside: row.get(0)?,
+                    token: row.get(1)?,
+                    account: row.get(2)?,
+                    live: receiving || row.get::<_, bool>(3)?,
+                })
+            })
+            .optional()?)
     }
 
     /// Joins again, after leaving, under the name the link is bound to.
@@ -890,7 +924,7 @@ mod tests {
         let joined = sessions.create(false).ok().unwrap();
         assert!(
             sessions
-                .join(&joined, Some("luis"), "link", None, None)
+                .join(&joined, Some("luis"), "link", None, None, false)
                 .is_ok()
         );
         assert!(sessions.expire_after(0, 60).is_ok());
@@ -899,12 +933,38 @@ mod tests {
     }
 
     #[test]
+    fn a_holder_is_live_for_a_while_after_its_last_receive() {
+        let mut sessions = Sessions::open(None).unwrap();
+        let session = sessions.create(false).ok().unwrap();
+        assert!(
+            sessions
+                .join(&session, Some("luis"), "link", None, None, false)
+                .is_ok()
+        );
+        let live = |sessions: &Sessions| {
+            sessions
+                .holder(&session, "luis")
+                .ok()
+                .flatten()
+                .unwrap()
+                .live
+        };
+        assert!(live(&sessions));
+        sessions
+            .db
+            .execute("UPDATE participants SET since = '2000-01-01T00:00:00Z'", [])
+            .unwrap();
+        assert!(!live(&sessions));
+        assert!(sessions.holder(&session, "ben").ok().flatten().is_none());
+    }
+
+    #[test]
     fn a_session_nobody_received_in_expires() {
         let mut sessions = Sessions::open(None).unwrap();
         let session = sessions.create(false).ok().unwrap();
         assert!(
             sessions
-                .join(&session, Some("luis"), "link", None, None)
+                .join(&session, Some("luis"), "link", None, None, false)
                 .is_ok()
         );
         assert!(sessions.expire_after(60, 60).is_ok());
@@ -919,7 +979,7 @@ mod tests {
         let session = sessions.create(false).ok().unwrap();
         assert!(
             sessions
-                .join(&session, Some("luis"), "link", None, None)
+                .join(&session, Some("luis"), "link", None, None, false)
                 .is_ok()
         );
         let secret: String = sessions

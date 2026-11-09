@@ -277,8 +277,11 @@ POST <access>/join
 The service answers 200 to let it in, or 403 with one line of text, which the relay passes on with status 403.
 A 200 may name the account the token belongs to, as `{"account":"<account>"}`,
 which the presence then shows next to the participant's name.
-A name that is the account, or `<account>/<agent>`, is the account's own: joining under it with the account's token takes it back where it is taken.
-Its holder leaves, as the log shows, its link is no participant's any more, and a receive of its still waiting ends with status 403.
+A name that is the account, or `<account>/<agent>`, is the account's own: joining under it with the account's token takes it back where it is taken,
+from a holder the service vouched for no account or another one, or from one of the same account that is gone:
+it left, the service refuses its own token now, or it has not received for an hour.
+A holder of the same account that is still there keeps the name, such as another agent sharing the token, and the join answers 409.
+Where the name is taken back, its holder leaves, as the log shows, its link is no participant's any more, and a receive of its still waiting ends with status 403.
 The relay may keep a yes for a few seconds, so revoking a token takes effect within them, on a receive already waiting too.
 Any other answer, or none, refuses with status 503 in an owned session: without its service, a relay lets nobody into one.
 In any other session, a participant joins without an account, or goes on as it was: there the service can add an account or refuse, but never block anyone.

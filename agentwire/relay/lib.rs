@@ -177,6 +177,39 @@ impl Relay {
         }
     }
 
+    /// Whether `account`, which the access service vouched for on a join under
+    /// `name`, takes the name back from whoever holds it: where the name is the
+    /// account's, from a holder of no account or another one, or of the same
+    /// one that left, is no longer live, or whose own token is refused now.
+    /// A live holder of the same account keeps it, such as another agent on the
+    /// same machine.
+    async fn takes_back(
+        &self,
+        access: &Access,
+        session: &str,
+        name: &str,
+        account: &str,
+    ) -> Result<bool, Fail> {
+        let own = name == account
+            || name
+                .strip_prefix(account)
+                .is_some_and(|rest| rest.starts_with('/'));
+        let Some(holder) = self.sessions().holder(session, name)? else {
+            return Ok(false);
+        };
+        if !own {
+            return Ok(false);
+        }
+        if holder.account.as_deref() != Some(account) || !holder.inside || !holder.live {
+            return Ok(true);
+        }
+        let owned = self.sessions().owned(session)?;
+        Ok(matches!(
+            access.ask(session, name, holder.token.as_deref(), owned).await,
+            Err(refused) if refused.status == StatusCode::FORBIDDEN
+        ))
+    }
+
     /// Lets the caller act, if the access service lets it be in the session,
     /// with the token it presents now or else the one it joined with; a new
     /// token it is let in with is kept, and so is the account vouched for.
@@ -438,12 +471,19 @@ async fn session(
             {
                 account = vouched;
             }
+            let take_back = match (&relay.access, name.as_deref(), account.as_deref()) {
+                (Some(access), Some(name), Some(account)) => {
+                    relay.takes_back(access, id, name, account).await?
+                }
+                _ => false,
+            };
             let joined = relay.sessions().join(
                 id,
                 name.as_deref(),
                 link,
                 token.as_deref(),
                 account.as_deref(),
+                take_back,
             )?;
             Ok(json(&joined))
         }

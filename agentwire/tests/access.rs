@@ -263,11 +263,15 @@ async fn a_session_that_isnt_owned_asks_only_for_a_token() {
 
 #[tokio::test]
 async fn an_account_takes_its_names_back() {
-    let (_, relay) = world().await;
+    let (stub, relay) = world().await;
+    stub.tokens
+        .lock()
+        .unwrap()
+        .insert("t-old".into(), "luis".into());
     let client = Client::new();
     let link = client.create(&relay).await.unwrap();
     let old = client
-        .join(&link, "luis/claude", Some("t-luis"))
+        .join(&link, "luis/claude", Some("t-old"))
         .await
         .unwrap();
     let waiting = tokio::spawn({
@@ -283,9 +287,20 @@ async fn an_account_takes_its_names_back() {
     });
     tokio::time::sleep(Duration::from_millis(200)).await;
 
-    // Without a token, a taken name stays taken.
+    // Without a token, a taken name stays taken; and so it does for another
+    // agent of the same account, while its holder is live and its token holds,
+    // such as one on the same machine.
     let taken = client.join(&link, "luis/claude", None).await.unwrap_err();
     assert_eq!(taken.status(), Some(409));
+    let sibling = client
+        .join(&link, "luis/claude", Some("t-luis"))
+        .await
+        .unwrap_err();
+    assert_eq!(sibling.status(), Some(409));
+
+    // Once the holder's token is revoked, the account takes its name back.
+    stub.tokens.lock().unwrap().remove("t-old");
+    tokio::time::sleep(Duration::from_secs(6)).await;
 
     let new = client
         .join(&link, "luis/claude", Some("t-luis"))
