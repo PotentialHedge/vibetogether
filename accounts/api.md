@@ -78,7 +78,7 @@ Adding friends and members, and opening a session to its address, is the person'
 `GET /api/tokens`: the caller's tokens, oldest first.
 
 ```json
-[{"id":"s_…","name":"lwirth-server","via":"otp","created":"2026-11-09T00:10:00Z"},
+[{"id":"t_…","name":"lwirth-server","via":"otp","created":"2026-11-09T00:10:00Z"},
  {"id":"o_…","name":"Claude Code","via":"mcp","created":"2026-11-09T00:12:00Z"}]
 ```
 

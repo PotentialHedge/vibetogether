@@ -327,7 +327,7 @@ api.get("/tokens", (c) => {
 	return c.json(
 		[
 			...sessions.map((s) => ({
-				id: `s_${s.id}`,
+				id: `t_${s.id}`,
 				name: s.agent,
 				via: "otp",
 				created: iso(s.createdAt),
@@ -345,7 +345,7 @@ api.get("/tokens", (c) => {
 api.delete("/tokens/:id", (c) => {
 	const me = c.var.caller.id;
 	const id = c.req.param("id");
-	if (id.startsWith("s_")) {
+	if (id.startsWith("t_")) {
 		const result = db
 			.prepare(
 				"DELETE FROM session WHERE id = ? AND userId = ? AND agent IS NOT NULL",

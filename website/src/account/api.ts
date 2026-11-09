@@ -215,13 +215,13 @@ function mock(): Api {
 			created: "2026-11-09T00:12:00Z",
 		},
 		{
-			id: "s_1",
+			id: "t_1",
 			name: "lwirth-macbook",
 			via: "otp",
 			created: "2026-11-09T00:10:00Z",
 		},
 		{
-			id: "s_2",
+			id: "t_2",
 			name: "lwirth-server",
 			via: "otp",
 			created: "2026-11-02T14:31:00Z",
