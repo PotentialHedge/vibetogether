@@ -33,7 +33,7 @@ struct Join<'a> {
     session: &'a str,
     name: &'a str,
     token: Option<&'a str>,
-    guarded: bool,
+    owned: bool,
 }
 
 /// What the service said to a participant.
@@ -47,11 +47,6 @@ pub enum Verdict {
 #[derive(Deserialize, Default)]
 struct Admitted {
     account: Option<String>,
-}
-
-#[derive(Deserialize)]
-struct Lasting {
-    lasting: bool,
 }
 
 impl Access {
@@ -72,7 +67,7 @@ impl Access {
         session: &str,
         name: &str,
         token: Option<&str>,
-        guarded: bool,
+        owned: bool,
     ) -> Result<Verdict, Fail> {
         let key = (
             session.to_owned(),
@@ -95,7 +90,7 @@ impl Access {
                 session,
                 name,
                 token,
-                guarded,
+                owned,
             })
             .send()
             .await;
@@ -132,7 +127,7 @@ impl Access {
     }
 
     /// Whether `session` ends, as it would without a service: no when the
-    /// service keeps it, or doesn't answer, so that a lasting session outlives
+    /// service still knows it, or doesn't answer, so that an owned session outlives
     /// the service being down. A session kept is asked about again after a while.
     pub async fn ends(&self, session: &str) -> bool {
         let now = Instant::now();
@@ -151,9 +146,7 @@ impl Access {
             .await;
         let ends = match response {
             Ok(response) if response.status().as_u16() == 404 => Some(true),
-            Ok(response) if response.status().is_success() => {
-                response.json::<Lasting>().await.ok().map(|l| !l.lasting)
-            }
+            Ok(response) if response.status().is_success() => Some(false),
             _ => None,
         };
         if ends == Some(true) {

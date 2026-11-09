@@ -1,6 +1,6 @@
 //! A relay with an access service, against a stub of one: who may be in a
 //! session, revoking a token, and which sessions last; and that a session
-//! that isn't guarded depends on the service only for a token.
+//! that isn't owned depends on the service only for a token.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
@@ -16,11 +16,11 @@ use serde::Deserialize;
 use tokio::net::TcpListener;
 
 /// The stub's state: which person each token is, which sessions last, and
-/// what it was asked, as name and whether the session is guarded.
+/// what it was asked, as name and whether the session is owned.
 #[derive(Default)]
 struct Stub {
     tokens: Mutex<HashMap<String, String>>,
-    lasting: Mutex<HashSet<String>>,
+    rooms: Mutex<HashSet<String>>,
     asked: Mutex<Vec<(String, bool)>>,
 }
 
@@ -29,7 +29,7 @@ struct Join {
     session: String,
     name: String,
     token: Option<String>,
-    guarded: bool,
+    owned: bool,
 }
 
 async fn join(State(stub): State<Arc<Stub>>, Json(join): Json<Join>) -> (StatusCode, String) {
@@ -37,7 +37,7 @@ async fn join(State(stub): State<Arc<Stub>>, Json(join): Json<Join>) -> (StatusC
     stub.asked
         .lock()
         .unwrap()
-        .push((join.name.clone(), join.guarded));
+        .push((join.name.clone(), join.owned));
     let person = join
         .token
         .and_then(|token| stub.tokens.lock().unwrap().get(&token).cloned());
@@ -50,9 +50,14 @@ async fn join(State(stub): State<Arc<Stub>>, Json(join): Json<Join>) -> (StatusC
     }
 }
 
-async fn session(State(stub): State<Arc<Stub>>, Path(id): Path<String>) -> Json<serde_json::Value> {
-    let lasting = stub.lasting.lock().unwrap().contains(&id);
-    Json(serde_json::json!({ "lasting": lasting }))
+async fn session(
+    State(stub): State<Arc<Stub>>,
+    Path(id): Path<String>,
+) -> (StatusCode, &'static str) {
+    match stub.rooms.lock().unwrap().contains(&id) {
+        true => (StatusCode::OK, "{}"),
+        false => (StatusCode::NOT_FOUND, "no such room\n"),
+    }
 }
 
 async fn serve(router: Router) -> String {
@@ -85,7 +90,7 @@ async fn world() -> (Arc<Stub>, String) {
 async fn only_whom_the_service_lets_in_takes_part() {
     let (stub, relay) = world().await;
     let client = Client::new();
-    let link = client.create_guarded(&relay).await.unwrap();
+    let link = client.create_owned(&relay).await.unwrap();
 
     let refused = client.join(&link, "luis", None).await.unwrap_err();
     assert_eq!(refused.status(), Some(403));
@@ -166,19 +171,19 @@ async fn only_whom_the_service_lets_in_takes_part() {
 }
 
 #[tokio::test]
-async fn a_lasting_session_outlives_everyone_leaving() {
+async fn a_room_outlives_everyone_leaving() {
     let (stub, relay) = world().await;
     let client = Client::new();
-    let lasting = client.create_guarded(&relay).await.unwrap();
-    let id = lasting.rsplit('/').next().unwrap().to_owned();
-    stub.lasting.lock().unwrap().insert(id);
+    let room = client.create_owned(&relay).await.unwrap();
+    let id = room.rsplit('/').next().unwrap().to_owned();
+    stub.rooms.lock().unwrap().insert(id);
     let passing = client.create(&relay).await.unwrap();
 
-    for link in [&lasting, &passing] {
+    for link in [&room, &passing] {
         let luis = client.join(link, "luis", Some("t-luis")).await.unwrap();
         client.leave(&luis.link).await.unwrap();
     }
-    let back = client.join(&lasting, "luis/claude", Some("t-luis")).await;
+    let back = client.join(&room, "luis/claude", Some("t-luis")).await;
     assert!(back.is_ok(), "{back:?}");
     let gone = client
         .join(&passing, "luis/claude", Some("t-luis"))
@@ -188,7 +193,7 @@ async fn a_lasting_session_outlives_everyone_leaving() {
 }
 
 #[tokio::test]
-async fn without_the_service_nobody_joins_a_guarded_session() {
+async fn without_the_service_nobody_joins_a_owned_session() {
     let relay = Relay::open(Options {
         access: Some("http://127.0.0.1:9/agentwire".into()),
         ..Options::default()
@@ -196,11 +201,11 @@ async fn without_the_service_nobody_joins_a_guarded_session() {
     .unwrap();
     let relay = serve(relay.router()).await;
     let client = Client::new();
-    let link = client.create_guarded(&relay).await.unwrap();
+    let link = client.create_owned(&relay).await.unwrap();
     let error = client.join(&link, "luis", None).await.unwrap_err();
     assert_eq!(error.status(), Some(503));
 
-    // A session that isn't guarded goes on without it, unverified.
+    // A session that isn't owned goes on without it, unverified.
     let open = client.create(&relay).await.unwrap();
     client.join(&open, "luis", None).await.unwrap();
     let claude = client
@@ -216,7 +221,7 @@ async fn without_the_service_nobody_joins_a_guarded_session() {
 }
 
 #[tokio::test]
-async fn a_session_that_isnt_guarded_asks_only_for_a_token() {
+async fn a_session_that_isnt_owned_asks_only_for_a_token() {
     let (stub, relay) = world().await;
     let client = Client::new();
     let link = client.create(&relay).await.unwrap();
@@ -244,13 +249,7 @@ async fn a_session_that_isnt_guarded_asks_only_for_a_token() {
     let presence = client.receive(&claude.link, &now).await.unwrap().presence;
     assert_eq!(presence["luis/claude"].account.as_deref(), Some("luis"));
     assert_eq!(presence["ben"].account, None);
-    assert!(
-        stub.asked
-            .lock()
-            .unwrap()
-            .iter()
-            .all(|(_, guarded)| !guarded)
-    );
+    assert!(stub.asked.lock().unwrap().iter().all(|(_, owned)| !owned));
 
     // Revoking cuts it off here too.
     stub.tokens.lock().unwrap().remove("t-luis");

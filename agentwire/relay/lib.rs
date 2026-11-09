@@ -145,11 +145,11 @@ impl Relay {
         }
     }
 
-    /// Whether a session due to end ends: always, unless it is guarded and the
+    /// Whether a session due to end ends: always, unless it is owned and the
     /// access service keeps it.
     async fn ends(&self, session: &str) -> bool {
         match &self.access {
-            Some(access) if self.sessions().guarded(session).unwrap_or(false) => {
+            Some(access) if self.sessions().owned(session).unwrap_or(false) => {
                 access.ends(session).await
             }
             _ => true,
@@ -157,8 +157,8 @@ impl Relay {
     }
 
     /// What the access service says to `name` being in `session` with `token`:
-    /// nothing where it isn't asked, in a session that isn't guarded and without
-    /// a token. A guarded session fails closed without an answer; any other goes
+    /// nothing where it isn't asked, in a session that isn't owned and without
+    /// a token. A owned session fails closed without an answer; any other goes
     /// on without one.
     async fn verdict(
         &self,
@@ -167,14 +167,12 @@ impl Relay {
         name: &str,
         token: Option<&str>,
     ) -> Result<Option<Verdict>, Fail> {
-        let guarded = self.sessions().guarded(session)?;
-        if !guarded && token.is_none() {
+        let owned = self.sessions().owned(session)?;
+        if !owned && token.is_none() {
             return Ok(None);
         }
-        match access.ask(session, name, token, guarded).await? {
-            Verdict::Silent if guarded => {
-                Err(fail(503, "the relay can't reach its access service"))
-            }
+        match access.ask(session, name, token, owned).await? {
+            Verdict::Silent if owned => Err(fail(503, "the relay can't reach its access service")),
             verdict => Ok(Some(verdict)),
         }
     }
@@ -377,9 +375,9 @@ async fn route(relay: &Relay, request: Request) -> Result<Response, Fail> {
         ["s", ..] => Err(gone(&origin)),
         [version, ..] if is_version(version) && *version != VERSION => Err(gone(&origin)),
         [VERSION, "s"] if parts.method == Method::POST => {
-            takes(query, "creating a session", &["guarded"])?;
-            let guarded = param(query, "guarded").is_some();
-            let id = relay.sessions().create(guarded)?;
+            takes(query, "creating a session", &["owned"])?;
+            let owned = param(query, "owned").is_some();
+            let id = relay.sessions().create(owned)?;
             Ok(text(format!("{origin}/{VERSION}/s/{id}\n"), PLAIN))
         }
         [VERSION, "s", id, rest @ ..] => {
@@ -648,7 +646,7 @@ mod logged {
     #[test]
     fn the_log_keeps_no_secret() {
         let cases = [
-            ("/v2/s?guarded", "/v2/s?guarded"),
+            ("/v2/s?owned", "/v2/s?owned"),
             ("/v2/s/AAAA/join?as=luis", "/v2/s/…/join?as"),
             ("/v2/s/AAAA/BBBB?after=3&wait=540", "/v2/s/…/…?after&wait"),
             ("/v2/s/AAAA/BBBB/leave", "/v2/s/…/…/leave"),

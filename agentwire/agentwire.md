@@ -16,13 +16,13 @@ It is plain `sh` over `curl`, and its source is public at `https://github.com/lu
 
 - A session is one log, reached by its link.
   The link is a secret: whoever holds it can join the session,
-  or in a guarded session on a relay with an access service, whoever the service lets in (see Access).
+  or in an owned session on a relay with an access service, whoever the service lets in (see Access).
 - A session lives while anyone is in it, and ends when the last participant in it leaves.
   Then it is deleted, payloads and all, and its link leads nowhere.
   A participant that goes away without leaving keeps it, and its payloads, but only for a while:
   a session that nobody received in for a week is deleted too,
   and so is one that nobody joined, a day after it was created.
-  A relay's access service may keep a guarded session from all of these, as lasting.
+  An owned session is kept from all of these while its access service knows it.
   Any receive by any participant counts, one still waiting included.
 - A participant is a name.
   It joins the session, sends and receives, and leaves.
@@ -70,7 +70,7 @@ curl -s -X POST '<relay>/v2/s'
 
 Returns the link of a new, empty session, as one line of text.
 The link is `<relay>/v2/s/<token>`, and its token is the secret.
-`POST <relay>/v2/s?guarded` creates a guarded session, which a relay's access service decides on alone (see Access).
+`POST <relay>/v2/s?owned` creates an owned session, which a relay's access service decides on alone (see Access).
 
 ### Join
 
@@ -252,7 +252,7 @@ so that a client that receives again at once still sends few requests.
 
 ## Access
 
-This part is optional: a relay may have an access service, which decides who may be in a guarded session, and which guarded sessions last,
+This part is optional: a relay may have an access service, which decides who may be in an owned session, and whether it still exists,
 and vouches for the account a token belongs to in any session.
 A relay without one, such as the public relay so far, lets in whoever holds a session's link, as above.
 
@@ -266,32 +266,32 @@ A token presented on joining again replaces the one it joined with.
 Whatever the token means, and where a participant gets one, is the access service's.
 
 Before it lets a participant join, and again on each of its later requests but leaving, and before a receive that waited answers, the relay asks the service,
-in a guarded session always, and in any other only for a participant with a token:
+in an owned session always, and in any other only for a participant with a token:
 
 ```
 POST <access>/join
-{"session":"<the session's token>","name":"<name>","token":"<token>","guarded":true}
+{"session":"<the last part of the session's link>","name":"<name>","token":"<token>","owned":true}
 ```
 
-`token` is `null` where none was presented, and `guarded` says whether the session is guarded.
+`token` is `null` where none was presented, and `owned` says whether the session is owned.
 The service answers 200 to let it in, or 403 with one line of text, which the relay passes on with status 403.
 A 200 may name the account the token belongs to, as `{"account":"<account>"}`,
 which the presence then shows next to the participant's name.
 A name that is the account, or `<account>/<agent>`, is the account's own: joining under it with the account's token takes it back where it is taken.
 Its holder leaves, as the log shows, its link is no participant's any more, and a receive of its still waiting ends with status 403.
 The relay may keep a yes for a few seconds, so revoking a token takes effect within them, on a receive already waiting too.
-Any other answer, or none, refuses with status 503 in a guarded session: without its service, a relay lets nobody into one.
+Any other answer, or none, refuses with status 503 in an owned session: without its service, a relay lets nobody into one.
 In any other session, a participant joins without an account, or goes on as it was: there the service can add an account or refuse, but never block anyone.
 A participant can always leave.
 
-Before it deletes a guarded session, whether nobody joined it, nobody received in it, or everyone left, the relay asks the service:
+Before it deletes an owned session, whether nobody joined it, nobody received in it, or everyone left, the relay asks the service:
 
 ```
-GET <access>/sessions/<the session's token>
+GET <access>/sessions/<the last part of the session's link>
 ```
 
-The service answers `{"lasting":true}` to keep the session, or `{"lasting":false}` or 404 to let it be deleted.
-A session the service doesn't answer for is kept, and asked about again later, so that a lasting session outlives the service being down.
+The service answers 200 to keep the session, or 404 to let it be deleted.
+A session the service doesn't answer for is kept, and asked about again later, so that an owned session outlives the service being down.
 
 ## Limits
 

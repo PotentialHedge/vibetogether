@@ -50,7 +50,7 @@ const SCHEMA: &str = "
         id TEXT PRIMARY KEY,
         created INTEGER NOT NULL,
         received INTEGER NOT NULL,
-        guarded INTEGER NOT NULL DEFAULT 0
+        owned INTEGER NOT NULL DEFAULT 0
     );
     CREATE TABLE IF NOT EXISTS entries (
         session TEXT NOT NULL REFERENCES sessions ON DELETE CASCADE,
@@ -235,13 +235,16 @@ impl Sessions {
         {
             db.execute("ALTER TABLE entries ADD COLUMN account TEXT", [])?;
         }
-        // A database from before guarded sessions.
-        if !db
-            .prepare("SELECT 1 FROM pragma_table_info('sessions') WHERE name = 'guarded'")?
-            .exists([])?
-        {
+        // A database from before owned sessions were called owned.
+        let column = |name: &str| -> rusqlite::Result<bool> {
+            db.prepare("SELECT 1 FROM pragma_table_info('sessions') WHERE name = ?")?
+                .exists([name])
+        };
+        if column("owned")? {
+            db.execute("ALTER TABLE sessions RENAME COLUMN owned TO owned", [])?;
+        } else if !column("owned")? {
             db.execute(
-                "ALTER TABLE sessions ADD COLUMN guarded INTEGER NOT NULL DEFAULT 0",
+                "ALTER TABLE sessions ADD COLUMN owned INTEGER NOT NULL DEFAULT 0",
                 [],
             )?;
         }
@@ -253,25 +256,25 @@ impl Sessions {
         })
     }
 
-    /// A new session, guarded or not: only a guarded one depends on the access service.
-    pub fn create(&mut self, guarded: bool) -> Result<String, Fail> {
+    /// A new session, owned or not: only an owned one depends on the access service.
+    pub fn create(&mut self, owned: bool) -> Result<String, Fail> {
         let id = token();
         self.db.execute(
-            "INSERT INTO sessions (id, created, received, guarded)
+            "INSERT INTO sessions (id, created, received, owned)
              VALUES (?, unixepoch(), unixepoch(), ?)",
-            params![id, guarded],
+            params![id, owned],
         )?;
         Ok(id)
     }
 
-    /// Whether the session was created guarded; no for one that doesn't exist.
-    pub fn guarded(&self, session: &str) -> Result<bool, Fail> {
-        let guarded = self
+    /// Whether the session was created owned; no for one that doesn't exist.
+    pub fn owned(&self, session: &str) -> Result<bool, Fail> {
+        let owned = self
             .db
-            .prepare_cached("SELECT guarded FROM sessions WHERE id = ?")?
+            .prepare_cached("SELECT owned FROM sessions WHERE id = ?")?
             .query_row([session], |row| row.get(0))
             .optional()?;
-        Ok(guarded.unwrap_or(false))
+        Ok(owned.unwrap_or(false))
     }
 
     /// Fails unless the session exists.
@@ -495,7 +498,7 @@ impl Sessions {
     }
 
     /// Leaves, and says whether anyone is still in: the caller ends a
-    /// session that nobody is in any more, or keeps a lasting one.
+    /// session that nobody is in any more, or keeps an owned one its service still knows.
     pub fn leave(&mut self, session: &str, secret: &str) -> Result<(i64, bool), Fail> {
         let caller = self.caller(session, secret)?;
         if !caller.inside {

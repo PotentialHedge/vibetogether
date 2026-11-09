@@ -131,9 +131,9 @@ impl Client {
         Ok(text(self.post(url)).await?.trim().to_owned())
     }
 
-    /// Creates a guarded session, which the relay's access service decides on alone.
-    pub async fn create_guarded(&self, relay: &str) -> Result<String> {
-        let url = format!("{}/v2/s?guarded", relay.trim_end_matches('/'));
+    /// Creates a owned session, which the relay's access service decides on alone.
+    pub async fn create_owned(&self, relay: &str) -> Result<String> {
+        let url = format!("{}/v2/s?owned", relay.trim_end_matches('/'));
         Ok(text(self.post(url)).await?.trim().to_owned())
     }
 
