@@ -8,7 +8,7 @@
 //! with their link (`link.json`, holding the token) and their bridge's files.
 
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     fs::{self, File},
     io::ErrorKind,
     os::unix::fs::PermissionsExt,
@@ -36,8 +36,9 @@ pub const CLIENT_ID: &str = "messagent";
 /// The name of the session a linked chat gets.
 const SESSION_NAME: &str = "Telegram";
 
-/// The shortest time between two linkings one person starts, so that no one floods the service.
-const LINK_PAUSE: Duration = Duration::from_secs(30);
+/// The most linkings at once, each a thread asking the account service, so that no one floods it:
+/// one person has at most one at a time.
+const MAX_LINKING: usize = 50;
 
 /// What the service runs with.
 pub struct Settings {
@@ -228,8 +229,8 @@ struct Service {
     accounts: Accounts,
     state: PathBuf,
     linked: Mutex<HashMap<i64, Linked>>,
-    /// The people linking, by Telegram id, with when they started.
-    linking: Mutex<HashMap<i64, Instant>>,
+    /// The people linking, by Telegram id: one linking each at a time.
+    linking: Mutex<HashSet<i64>>,
 }
 
 /// Creates a directory readable by its owner only.
@@ -327,18 +328,23 @@ impl Service {
         }
     }
 
-    /// Starts linking a chat, unless it started just now.
+    /// Starts linking a chat, unless it is linking already.
     fn link(self: &Arc<Self>, from: &User) {
         let user = from.id;
         {
             let mut linking = self.linking.lock().expect("no holder panics");
-            if linking
-                .get(&user)
-                .is_some_and(|started| started.elapsed() < LINK_PAUSE)
-            {
+            if linking.contains(&user) {
                 return;
             }
-            linking.insert(user, Instant::now());
+            if linking.len() >= MAX_LINKING {
+                drop(linking);
+                self.tell(
+                    user,
+                    "Busy linking other chats: try again in a few minutes.",
+                );
+                return;
+            }
+            linking.insert(user);
         }
         let service = self.clone();
         let what_for = what_for(from);
@@ -350,6 +356,11 @@ impl Service {
                     "Linking failed on our side. Send /start to try again.",
                 );
             }
+            service
+                .linking
+                .lock()
+                .expect("no holder panics")
+                .remove(&user);
         });
     }
 
@@ -417,7 +428,6 @@ impl Service {
                  /stop unlinks it."
             ),
         );
-        self.linking.lock().expect("no holder panics").remove(&user);
         Ok(())
     }
 
@@ -510,7 +520,7 @@ pub fn serve(settings: Settings) -> Result<()> {
         accounts: settings.accounts,
         state: settings.state,
         linked: Mutex::new(HashMap::new()),
-        linking: Mutex::new(HashMap::new()),
+        linking: Mutex::new(HashSet::new()),
     });
     for entry in fs::read_dir(service.state.join("people"))? {
         let entry = entry?;
