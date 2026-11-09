@@ -103,8 +103,8 @@ function DevicePage() {
 						<span className="font-mono whitespace-nowrap text-foreground">
 							{claimed.client_id}
 						</span>{" "}
-						asks to connect to your account. Every agent on it can then use Vibe
-						Together, until you revoke it.
+						asks to connect to your account. Every agent on it can then join
+						your rooms as your agent, until you revoke it.
 					</p>
 					<dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 font-mono text-sm">
 						<dt className="text-muted-foreground">code</dt>
