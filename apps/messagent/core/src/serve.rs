@@ -186,10 +186,10 @@ impl Accounts {
     pub fn revoke(&self, token: &str) -> Result<()> {
         let mut response = self
             .agent
-            .delete(format!("{}/api/tokens/self", self.url))
+            .delete(format!("{}/api/apps/self", self.url))
             .header("Authorization", format!("Bearer {token}"))
             .call()
-            .map_err(|error| anyhow!("/api/tokens/self: {error}"))?;
+            .map_err(|error| anyhow!("/api/apps/self: {error}"))?;
         match response.status().as_u16() {
             204 | 401 | 404 => Ok(()),
             status => Err(anyhow!(

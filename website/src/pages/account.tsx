@@ -1,7 +1,8 @@
-import { Monitor, Plug, UserRound } from "lucide-react";
+import { AppWindow, Monitor, Plug } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { Frame } from "ui/onboard";
 import {
+	type App,
 	api,
 	demo,
 	type Friend,
@@ -31,16 +32,18 @@ type State = {
 	sessions: Session[];
 	friends: Friend[];
 	tokens: Token[];
+	apps: App[];
 };
 
 async function load(): Promise<State> {
-	const [me, sessions, friends, tokens] = await Promise.all([
+	const [me, sessions, friends, tokens, apps] = await Promise.all([
 		api.me(),
 		api.sessions(),
 		api.friends(),
 		api.tokens(),
+		api.apps(),
 	]);
-	return { me, sessions, friends, tokens };
+	return { me, sessions, friends, tokens, apps };
 }
 
 const date = new Intl.DateTimeFormat(undefined, { dateStyle: "medium" });
@@ -52,7 +55,7 @@ function Dashboard({
 	state: State;
 	reload: () => Promise<void>;
 }) {
-	const { me, sessions, friends, tokens } = state;
+	const { me, sessions, friends, tokens, apps } = state;
 	const { problem, act } = useActions(reload);
 	const [minted, setMinted] = useState<Minted | null>(null);
 
@@ -141,6 +144,43 @@ function Dashboard({
 			</Panel>
 
 			<Panel
+				title="Apps"
+				description="An app acts as you, such as in a chat it carries into a session, until you revoke it."
+			>
+				{apps.length === 0 ? (
+					<Empty>No app yet.</Empty>
+				) : (
+					apps.map((app) => (
+						<Row key={app.id}>
+							<span className="flex min-w-0 items-center gap-2">
+								<AppWindow
+									aria-hidden
+									className="size-4 shrink-0 text-muted-foreground"
+								/>
+								<span className="font-mono">{app.name}</span>
+								{app.for && (
+									<span className="truncate text-sm text-muted-foreground">
+										· {app.for}
+									</span>
+								)}
+							</span>
+							<span className="text-sm text-muted-foreground">
+								since {date.format(new Date(app.created))}
+							</span>
+							<Button
+								variant="destructive"
+								size="sm"
+								className="ml-auto"
+								onClick={act(() => api.revokeApp(app.id))}
+							>
+								Revoke
+							</Button>
+						</Row>
+					))
+				)}
+			</Panel>
+
+			<Panel
 				title="Tokens"
 				description="A token connects an agent to your account, until you revoke it."
 				action={
@@ -166,11 +206,6 @@ function Dashboard({
 										aria-label="MCP"
 										className="size-4 text-muted-foreground"
 									/>
-								) : token.kind === "app" ? (
-									<UserRound
-										aria-label="acts as you"
-										className="size-4 text-muted-foreground"
-									/>
 								) : (
 									<Monitor
 										aria-label="machine"
@@ -179,11 +214,6 @@ function Dashboard({
 								)}
 								{token.name}
 							</span>
-							{token.for && (
-								<span className="truncate text-sm text-muted-foreground">
-									{token.for}
-								</span>
-							)}
 							<span className="text-sm text-muted-foreground">
 								since {date.format(new Date(token.created))}
 							</span>

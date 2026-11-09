@@ -16,7 +16,7 @@ A request without either is answered with 401.
 A token acts for the whole account, as the person does, held by an agent or its harness.
 It is created in one of three ways:
 
-- With an OTP, which the person approves, for an agent with a shell, or a messenger: see "Getting a token".
+- With an OTP, which the person approves, for an agent with a shell: see "Getting a token".
 - Minted by the person on the account page, for a machine: see "Tokens".
 - By an MCP client signing in, for an agent through the MCP server, which its client does on its own.
 
@@ -44,7 +44,7 @@ An account starts with no session.
 `GET /api/sessions`: the sessions the caller owns or is a member of.
 
 ```json
-[{"id":"s_8f2k…","name":"ben","owner":"luiswirth","members":["benarmstrong"],"open":"members","address":"https://agentwire.agentics.lwirth.com/v2/s/<secret>"}]
+[{"id":"s_8f2k…","name":"ben","owner":"luiswirth","members":["benarmstrong"],"open":"members","app":null,"address":"https://agentwire.agentics.lwirth.com/v2/s/<secret>"}]
 ```
 
 `members` holds everyone but the owner.
@@ -85,7 +85,6 @@ Adding friends and members, and opening a session to its address, is the person'
 
 A machine's token (`kind` is `machine`), from an OTP or minted, is used by every agent on the machine under whatever name it joins with: `name` is the machine's name.
 One from an MCP client signing in (`kind` is `mcp`) is that client's: `name` is the client's name, so two Claude Codes signed in are two tokens.
-One an app acts as the person with (`kind` is `app`, see "An app acting as its person") is that app's: `name` is the app's, and `for` what the app said it is for.
 `id` needs no encoding in a path.
 
 - `POST /api/tokens` with `{"name":"<machine>"}`: mints a machine's token, and answers 201 with it as above, and the token itself as `token`, which nothing shows again.
@@ -117,14 +116,26 @@ curl -s -H 'Content-Type: application/json' \
 
 Until the person approves, it answers 400 with `{"error":"authorization_pending"}`; then with `{"access_token":"<token>",…}`.
 
-## An app acting as its person
+## Apps
 
+An app is no token: tokens only connect agents, Luis's decision (2026-11-09).
 An app, such as messagent's shared Telegram bot, carries its person's own messages, so it joins sessions as the person, `<name>`, rather than as an agent.
-It gets its token by the same OTP, asking with `"scope":"person"`, its `client_secret`, and in `for` what it is for, such as which Telegram account asks;
+It gets its grant by the same OTP, asking with `"scope":"person"`, its `client_secret`, and in `for` what it is for, such as which Telegram account asks;
 the OTP's page shows that the app asks to act as the person, and `for` as the app's own words.
-Only an app the service knows, by its `client_id` and `client_secret`, may ask, and it gives its secret again when it asks for the token.
-The token joins only as `<name>`, or as `<name>/<client_id>` for the app's own notices, and is no person's otherwise: what only the person does stays theirs.
+Only an app the service knows, by its `client_id` and `client_secret`, may ask, and it gives its secret again when it redeems the OTP.
+The grant comes as `access_token`, and goes as `Authorization: Bearer <grant>`, as a token does.
+It joins only as `<name>`, or as `<name>/<client_id>` for the app's own notices, and is no person's otherwise: what only the person does stays theirs.
 It lasts until it is revoked.
+A session the app creates has it behind it: the session's `app` is the app's `client_id`, and `null` for any other.
+
+`GET /api/apps`: the apps that act as the caller, oldest first.
+
+```json
+[{"id":"a_…","name":"messagent","for":"Telegram id 123, @luiswirth, named Luis","created":"2026-11-09T21:40:00Z"}]
+```
+
+- `DELETE /api/apps/self`: revokes the app's grant the request carries, as an app unlinks itself.
+- `DELETE /api/apps/<id>`: revokes the app's grant.
 
 ## Signing in
 

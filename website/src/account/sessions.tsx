@@ -1,3 +1,4 @@
+import { AppWindow } from "lucide-react";
 /** The account's sessions: the ones the person owns or is a member of, and
  * making new ones. */
 
@@ -116,7 +117,17 @@ export function Sessions({
 				);
 				return (
 					<Row key={session.id}>
-						<span className="font-mono">{session.name}</span>
+						<span className="flex items-center gap-2 font-mono">
+							{session.app && (
+								<AppWindow
+									aria-label={session.app}
+									className="size-4 text-muted-foreground"
+								>
+									<title>{session.app}</title>
+								</AppWindow>
+							)}
+							{session.name}
+						</span>
 						{!own && (
 							<span className="text-sm text-muted-foreground">
 								by {session.owner}

@@ -86,11 +86,12 @@ check "nothing reaches anyone before the approval" "$(as_person $accounts/api/se
 as_person -H 'content-type: application/json' -d "{\"userCode\":\"$code\"}" "$accounts/api/auth/device/approve" >/dev/null
 until_ 'said 42 | grep -q "Linked to luis"' || true
 check "approving links the chat" "$(said 42 | grep -c 'Linked to luis')" 1
-check "its token is listed as the app's" "$(as_person $accounts/api/tokens | python3 -I -c 'import json,sys; print([t["kind"] for t in json.load(sys.stdin)])')" "['app']"
+check "it is listed as an app, not a token" "$(as_person $accounts/api/apps | python3 -I -c 'import json,sys; print([a["name"] for a in json.load(sys.stdin)])') $(as_person $accounts/api/tokens)" "['messagent'] []"
 
 token=$(as_person -H 'content-type: application/json' -d '{"name":"laptop"}' "$accounts/api/tokens" | field token)
 address=$(curl -s -H "authorization: Bearer $token" "$accounts/api/sessions" | python3 -I -c 'import json,sys; print([s["address"] for s in json.load(sys.stdin) if s["name"]=="Telegram"][0])')
 check "linking created the session Telegram" "${address%/*}" "$relay/v2/s"
+check "with the app behind it" "$(curl -s -H "authorization: Bearer $token" "$accounts/api/sessions" | python3 -I -c 'import json,sys; print([s["app"] for s in json.load(sys.stdin) if s["name"]=="Telegram"][0])')" messagent
 agent=$(curl -s -X POST -H "authorization: Bearer $token" "$address/join?as=luis/claude" | field link)
 check "the person's agent joins it with its token" "${agent:0:4}" http
 
@@ -119,7 +120,7 @@ check "someone else is only asked to link their own chat" "$(curl -s "$agent?aft
 inject '{"from":42,"text":"/stop"}'
 until_ 'said 42 | grep -q "^Unlinked"' || true
 check "/stop unlinks" "$(said 42 | grep -c '^Unlinked')" 1
-check "and revokes the app's token" "$(as_person $accounts/api/tokens | python3 -I -c 'import json,sys; print([t["kind"] for t in json.load(sys.stdin)])')" "['machine']"
+check "and revokes the app" "$(as_person $accounts/api/apps)" "[]"
 check "and leaves no file of the person" "$(ls "$XDG_STATE_HOME/messagent/people")" ""
 
 # Linking again, then revoking the token on the account page.
@@ -129,8 +130,8 @@ code=$(said 42 | sed -n 's/.*shows the code \([A-Z0-9-]*\) and.*/\1/p' | tail -1
 as_person "$accounts/api/auth/device?user_code=$code" >/dev/null
 as_person -H 'content-type: application/json' -d "{\"userCode\":\"$code\"}" "$accounts/api/auth/device/approve" >/dev/null
 until_ '[ "$(said 42 | grep -c "Linked to luis")" -ge 2 ]' || true
-app=$(as_person $accounts/api/tokens | python3 -I -c 'import json,sys; print([t["id"] for t in json.load(sys.stdin) if t["kind"]=="app"][0])')
-as_person -X DELETE "$accounts/api/tokens/$app" >/dev/null
+app=$(as_person $accounts/api/apps | python3 -I -c 'import json,sys; print(json.load(sys.stdin)[0]["id"])')
+as_person -X DELETE "$accounts/api/apps/$app" >/dev/null
 # The relay keeps a yes for 5 seconds.
 sleep 6
 inject '{"from":42,"text":"still there?"}'
@@ -145,8 +146,8 @@ as_person "$accounts/api/auth/device?user_code=$code" >/dev/null
 as_person -H 'content-type: application/json' -d "{\"userCode\":\"$code\"}" "$accounts/api/auth/device/approve" >/dev/null
 until_ '[ "$(said 42 | grep -c "Linked to luis")" -ge 3 ]' || true
 inject '{"from":42,"kicked":true}'
-until_ '[ "$(as_person $accounts/api/tokens | grep -c app)" = 0 ]' || true
-check "blocking the bot unlinks the chat" "$(as_person $accounts/api/tokens | grep -c '"app"')" 0
+until_ '[ "$(as_person $accounts/api/apps)" = "[]" ]' || true
+check "blocking the bot unlinks the chat" "$(as_person $accounts/api/apps)" "[]"
 
 if grep -qF "$secret" "$work/serve.log"; then
   check "the log holds no secret" leaked clean

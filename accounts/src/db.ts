@@ -37,6 +37,9 @@ export function migrate(): void {
 		);
 	if (hasTable("friend") && hasColumn("friend", "agents"))
 		db.exec("ALTER TABLE friend DROP COLUMN agents");
+	// Databases from before a session could have an app behind it.
+	if (hasTable("owned_session") && !hasColumn("owned_session", "app"))
+		db.exec("ALTER TABLE owned_session ADD COLUMN app TEXT");
 	// Databases from before an app could act as its person.
 	if (hasTable("device_request") && !hasColumn("device_request", "person"))
 		db.exec(`
@@ -53,7 +56,9 @@ export function migrate(): void {
 			owner TEXT NOT NULL REFERENCES user(id) ON DELETE CASCADE,
 			secret TEXT UNIQUE,
 			created TEXT NOT NULL,
-			open TEXT NOT NULL DEFAULT 'members' CHECK (open IN ('members', 'link'))
+			open TEXT NOT NULL DEFAULT 'members' CHECK (open IN ('members', 'link')),
+			-- The app behind the session, which created it, such as messagent for a Telegram chat.
+			app TEXT
 		);
 		CREATE TABLE IF NOT EXISTS session_member (
 			session TEXT NOT NULL REFERENCES owned_session(id) ON DELETE CASCADE,

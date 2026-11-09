@@ -17,6 +17,8 @@ export type Session = {
 	open: Open;
 	/** Its URL on the relay, hard to guess: it identifies the session, and is its secret. */
 	address: string;
+	/** The app behind it, such as `messagent` for a Telegram chat, or none. */
+	app?: string | null;
 };
 
 export type Open = "members" | "link";
@@ -35,11 +37,18 @@ export type Token = {
 	/** The machine's name, for a machine's token, or its MCP client's. */
 	name: string;
 	/** A machine's, from an OTP or minted here, which every agent on it
-	 * shares, an MCP client's, from its signing in, or an app's that acts
-	 * as the person, from an OTP. */
-	kind: "machine" | "mcp" | "app";
-	/** For an app's, what the app said it is for. */
-	for?: string | null;
+	 * shares, or an MCP client's, from its signing in. */
+	kind: "machine" | "mcp";
+	created: string;
+};
+
+/** An app that acts as the person, such as messagent for a Telegram chat,
+ * by a grant the person approved: no token, since tokens only connect agents. */
+export type App = {
+	id: string;
+	name: string;
+	/** What the app said it is for, in its own words. */
+	for: string | null;
 	created: string;
 };
 
@@ -123,6 +132,9 @@ const live = {
 	mint: (name: string) => call<Minted>("POST", "api/tokens", { name }),
 	revoke: (id: string) =>
 		call<void>("DELETE", `api/tokens/${encodeURIComponent(id)}`),
+	apps: () => call<App[]>("GET", "api/apps"),
+	revokeApp: (id: string) =>
+		call<void>("DELETE", `api/apps/${encodeURIComponent(id)}`),
 	/** Returns the address to go to, GitHub's. `oauthQuery` is the signed
 	 * query an MCP client's authorization sent the person here with, so that
 	 * it goes on after GitHub. */
@@ -174,6 +186,15 @@ function mock(): Api {
 	};
 	let sessions: Session[] = [
 		{
+			id: "s_0",
+			name: "Telegram",
+			owner: "luiswirth",
+			members: [],
+			open: "members",
+			address: "",
+			app: "messagent",
+		},
+		{
 			id: "s_1",
 			name: "notes",
 			owner: "luiswirth",
@@ -216,6 +237,14 @@ function mock(): Api {
 			displayName: "Some One",
 			image: "",
 			state: "asking",
+		},
+	];
+	let apps: App[] = [
+		{
+			id: "a_1",
+			name: "messagent",
+			for: "Telegram id 123456789, @luiswirth, named Luis",
+			created: "2026-11-09T21:40:00Z",
 		},
 	];
 	let tokens: Token[] = [
@@ -316,6 +345,10 @@ function mock(): Api {
 		},
 		revoke: async (id) => {
 			tokens = tokens.filter((token) => token.id !== id);
+		},
+		apps: async () => apps,
+		revokeApp: async (id) => {
+			apps = apps.filter((app) => app.id !== id);
 		},
 		signIn: async () => `${page("account/")}#demo`,
 		signOut: done,

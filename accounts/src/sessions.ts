@@ -10,6 +10,8 @@ export type SessionRow = {
 	secret: string | null;
 	created: string;
 	open: "members" | "link";
+	/** The app behind the session, such as `messagent` for a Telegram chat, which created it. */
+	app: string | null;
 };
 
 export function newId(prefix: string): string {
@@ -51,6 +53,7 @@ export async function createSession(
 	owner: string,
 	name: string,
 	open: SessionRow["open"],
+	app: string | null = null,
 ): Promise<SessionRow> {
 	const session: SessionRow = {
 		id: newId("s"),
@@ -59,9 +62,10 @@ export async function createSession(
 		secret: null,
 		created: new Date().toISOString(),
 		open,
+		app,
 	};
 	db.prepare(
-		"INSERT INTO owned_session (id, name, owner, secret, created, open) VALUES (?, ?, ?, ?, ?, ?)",
+		"INSERT INTO owned_session (id, name, owner, secret, created, open, app) VALUES (?, ?, ?, ?, ?, ?, ?)",
 	).run(
 		session.id,
 		session.name,
@@ -69,6 +73,7 @@ export async function createSession(
 		session.secret,
 		session.created,
 		session.open,
+		session.app,
 	);
 	try {
 		session.secret = await secretOf(session);

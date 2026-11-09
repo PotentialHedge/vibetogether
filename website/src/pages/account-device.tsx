@@ -63,12 +63,18 @@ function DevicePage() {
 			<Frame
 				name={service}
 				title={
-					outcome === "approved" ? "Your agent is connected" : "Request denied"
+					outcome === "denied"
+						? "Request denied"
+						: claimed?.person
+							? "The app is connected"
+							: "Your agent is connected"
 				}
 				description={
-					outcome === "approved"
-						? "You can close this page: your agent goes on by itself. You see it, and can revoke it, on your account page."
-						: "The agent got no access. You can close this page."
+					outcome === "denied"
+						? `The ${claimed?.person ? "app" : "agent"} got no access. You can close this page.`
+						: claimed?.person
+							? "You can close this page: the app goes on by itself. You see it, and can revoke it, under Apps on your account page."
+							: "You can close this page: your agent goes on by itself. You see it, and can revoke it, on your account page."
 				}
 			>
 				<a
@@ -94,8 +100,12 @@ function DevicePage() {
 		return (
 			<Frame
 				name={service}
-				title="Approve this code?"
-				description="An agent asks for your account with an OTP."
+				title={claimed.person ? "Approve this app?" : "Approve this code?"}
+				description={
+					claimed.person
+						? "An app asks to act as you, with an OTP."
+						: "An agent asks for your account with an OTP."
+				}
 			>
 				<div className="flex flex-col gap-4 rounded-2xl border bg-card/60 p-5">
 					{claimed.person ? (

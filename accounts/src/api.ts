@@ -59,6 +59,7 @@ async function sessionJson(session: SessionRow) {
 		owner: loginOf(session.owner),
 		members: members.map((m) => m.login),
 		open: session.open,
+		app: session.app,
 		address,
 	};
 }
@@ -176,7 +177,12 @@ api.post("/sessions", async (c) => {
 		return c.text(onlyThePerson, 403);
 	return c.json(
 		await sessionJson(
-			await createSession(c.var.caller.id, input.name, input.open ?? "members"),
+			await createSession(
+				c.var.caller.id,
+				input.name,
+				input.open ?? "members",
+				c.var.caller.app ?? null,
+			),
 		),
 		201,
 	);
@@ -302,13 +308,7 @@ api.delete("/friends/:name", (c) => {
 // Tokens: each a machine's, a Better Auth session named after the machine, from an OTP or minted
 // on the account page, or an MCP client's, an OAuth grant named after the client.
 
-type AgentSession = {
-	id: string;
-	agent: string;
-	person: number | null;
-	claim: string | null;
-	createdAt: string | number;
-};
+type AgentSession = { id: string; agent: string; createdAt: string | number };
 /** One OAuth grant: the tokens that one authorization issued, refreshed ones included. */
 type AgentGrant = {
 	grant: string;
@@ -327,7 +327,7 @@ api.get("/tokens", (c) => {
 	const me = c.var.caller.id;
 	const sessions = db
 		.prepare(
-			"SELECT id, agent, person, claim, createdAt FROM session WHERE userId = ? AND agent IS NOT NULL AND expiresAt > ?",
+			"SELECT id, agent, createdAt FROM session WHERE userId = ? AND agent IS NOT NULL AND person IS NOT 1 AND expiresAt > ?",
 		)
 		.all(me, Date.now()) as AgentSession[];
 	const grants = db
@@ -345,9 +345,8 @@ api.get("/tokens", (c) => {
 			...sessions.map((s) => ({
 				id: `t_${s.id}`,
 				name: s.agent,
-				kind: s.person === 1 ? "app" : "machine",
+				kind: "machine",
 				created: iso(s.createdAt),
-				...(s.person === 1 && { for: s.claim }),
 			})),
 			...grants.map((o) => ({
 				id: `o_${Buffer.from(o.grant).toString("base64url")}`,
@@ -392,7 +391,7 @@ function revokeToken(me: string, id: string): boolean {
 		return (
 			db
 				.prepare(
-					"DELETE FROM session WHERE id = ? AND userId = ? AND agent IS NOT NULL",
+					"DELETE FROM session WHERE id = ? AND userId = ? AND agent IS NOT NULL AND person IS NOT 1",
 				)
 				.run(id.slice(2), me).changes > 0
 		);
@@ -425,7 +424,7 @@ function revokeToken(me: string, id: string): boolean {
 	return false;
 }
 
-// The token the request carries, such as an app's once its person unlinks it from the app's side.
+// The token the request carries.
 api.delete("/tokens/self", (c) => {
 	const { id, token } = c.var.caller;
 	if (!token) return c.text("The request carries no token.", 404);
@@ -438,4 +437,54 @@ api.delete("/tokens/:id", (c) =>
 	revokeToken(c.var.caller.id, c.req.param("id"))
 		? c.body(null, 204)
 		: c.text("No such token.", 404),
+);
+
+// Apps: each acts as its person, by a grant the person approved with an OTP, a Better Auth
+// session marked as the person's. An app's grant is no token: tokens only connect agents.
+
+type AppGrant = {
+	id: string;
+	agent: string;
+	claim: string | null;
+	createdAt: string | number;
+};
+
+api.get("/apps", (c) => {
+	const grants = db
+		.prepare(
+			"SELECT id, agent, claim, createdAt FROM session WHERE userId = ? AND person = 1 AND expiresAt > ? ORDER BY createdAt",
+		)
+		.all(c.var.caller.id, Date.now()) as AppGrant[];
+	return c.json(
+		grants.map((g) => ({
+			id: `a_${g.id}`,
+			name: g.agent,
+			for: g.claim,
+			created: iso(g.createdAt),
+		})),
+	);
+});
+
+/** Revokes `me`'s app grant `id`, as `/apps` lists it; whether there was one. */
+function revokeApp(me: string, id: string): boolean {
+	return (
+		id.startsWith("a_") &&
+		db
+			.prepare("DELETE FROM session WHERE id = ? AND userId = ? AND person = 1")
+			.run(id.slice(2), me).changes > 0
+	);
+}
+
+// The grant the request carries, as an app unlinks itself from its side.
+api.delete("/apps/self", (c) => {
+	const { id, token } = c.var.caller;
+	return token && revokeApp(id, token)
+		? c.body(null, 204)
+		: c.text("The request carries no app's grant.", 404);
+});
+
+api.delete("/apps/:id", (c) =>
+	revokeApp(c.var.caller.id, c.req.param("id"))
+		? c.body(null, 204)
+		: c.text("No such app.", 404),
 );
