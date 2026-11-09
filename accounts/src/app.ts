@@ -1,7 +1,9 @@
+import { createHash, timingSafeEqual } from "node:crypto";
 import { Hono } from "hono";
 import { access } from "./access.ts";
 import { api } from "./api.ts";
-import { auth } from "./auth.ts";
+import { auth, tokenHash } from "./auth.ts";
+import { config } from "./config.ts";
 import { db } from "./db.ts";
 
 export const app = new Hono();
@@ -33,6 +35,7 @@ app.on(["GET", "POST"], ["/api/auth/*", "/.well-known/*"], async (c) => {
 			403,
 		);
 	if (c.req.path === "/api/auth/device/code") return withRequester(c.req.raw);
+	if (c.req.path === "/api/auth/device/token") return withApp(c.req.raw);
 	if (c.req.path === "/api/auth/device" && c.req.method === "GET")
 		return withRequestOf(c.req.raw);
 	return auth.handler(c.req.raw);
@@ -46,21 +49,96 @@ function addressOf(request: Request): string {
 	);
 }
 
-/** Asks for an OTP, and keeps when and from where, which the OTP's page shows. */
+/** A request's parameters, as JSON or as a form, the two that Better Auth's device endpoints take. */
+async function paramsOf(request: Request): Promise<Record<string, unknown>> {
+	const text = await request.clone().text();
+	if (
+		request.headers
+			.get("content-type")
+			?.toLowerCase()
+			.includes("application/x-www-form-urlencoded")
+	)
+		return Object.fromEntries(new URLSearchParams(text));
+	try {
+		const json = JSON.parse(text);
+		return json && typeof json === "object" ? json : {};
+	} catch {
+		return {};
+	}
+}
+
+/**
+ * Whether `params` are from an app that may act as its person, by its `client_id` and `client_secret`.
+ * The device flow's `client_id` alone is public, so anyone could claim an app's.
+ */
+function isApp(params: Record<string, unknown>): boolean {
+	const { client_id: id, client_secret: secret } = params;
+	if (typeof id !== "string" || typeof secret !== "string") return false;
+	const expected = config.apps.get(id);
+	if (!expected) return false;
+	const given = createHash("sha256").update(secret).digest();
+	return timingSafeEqual(given, Buffer.from(expected, "hex"));
+}
+
+const notAnApp = () =>
+	Response.json(
+		{
+			error: "invalid_client",
+			error_description:
+				"Only an app known to the service, by its client_id and client_secret, may act as its person.",
+		},
+		{ status: 401 },
+	);
+
+/**
+ * Asks for an OTP, and keeps when and from where, which the OTP's page shows.
+ * The scope `person` asks to act as the person, which only an app may, saying what for in `for`.
+ */
 async function withRequester(request: Request): Promise<Response> {
 	const from = addressOf(request);
+	const params = await paramsOf(request);
+	const person =
+		typeof params.scope === "string" &&
+		params.scope.split(" ").includes("person");
+	if (person && !isApp(params)) return notAnApp();
+	const claim =
+		person && typeof params.for === "string"
+			? params.for.slice(0, 200)
+			: null;
 	const response = await auth.handler(request);
 	if (!response.ok) return response;
-	const body = (await response.clone().json()) as { user_code?: string };
-	if (body.user_code) {
+	const body = (await response.clone().json()) as {
+		user_code?: string;
+		device_code?: string;
+	};
+	if (body.user_code && body.device_code) {
 		db.prepare("DELETE FROM device_request WHERE requested < ?").run(
 			new Date(Date.now() - 86400_000).toISOString(),
 		);
 		db.prepare(
-			'INSERT OR REPLACE INTO device_request (user_code, requested, "from") VALUES (?, ?, ?)',
-		).run(body.user_code, new Date().toISOString(), from);
+			'INSERT OR REPLACE INTO device_request (user_code, requested, "from", device_code, person, claim) VALUES (?, ?, ?, ?, ?, ?)',
+		).run(
+			body.user_code,
+			new Date().toISOString(),
+			from,
+			tokenHash(body.device_code),
+			person ? 1 : 0,
+			claim,
+		);
 	}
 	return response;
+}
+
+/** Gets an OTP's token, where an OTP that acts as the person goes only to the app that asked for it. */
+async function withApp(request: Request): Promise<Response> {
+	const params = await paramsOf(request);
+	const asked = db
+		.prepare("SELECT person FROM device_request WHERE device_code = ?")
+		.get(tokenHash(String(params.device_code ?? ""))) as
+		| { person: number }
+		| undefined;
+	if (asked?.person && !isApp(params)) return notAnApp();
+	return auth.handler(request);
 }
 
 /** An OTP as Better Auth gives it, with when and from where it was asked for. */
@@ -73,11 +151,21 @@ async function withRequestOf(request: Request): Promise<Response> {
 		?.replace(/[^A-Za-z0-9]/g, "")
 		.toUpperCase();
 	const asked = db
-		.prepare('SELECT requested, "from" FROM device_request WHERE user_code = ?')
-		.get(code ?? "") as { requested: string; from: string } | undefined;
+		.prepare(
+			'SELECT requested, "from", person, claim FROM device_request WHERE user_code = ?',
+		)
+		.get(code ?? "") as
+		| { requested: string; from: string; person: number; claim: string | null }
+		| undefined;
 	const headers = new Headers(response.headers);
 	headers.delete("content-length");
-	return new Response(JSON.stringify({ ...body, ...asked }), {
+	const requestOf = asked && {
+		requested: asked.requested,
+		from: asked.from,
+		person: asked.person === 1,
+		...(asked.person === 1 && { for: asked.claim }),
+	};
+	return new Response(JSON.stringify({ ...body, ...requestOf }), {
 		status: response.status,
 		headers,
 	});

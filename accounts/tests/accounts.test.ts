@@ -31,6 +31,8 @@ Object.assign(process.env, {
 	GITHUB_CLIENT_ID: "test",
 	GITHUB_CLIENT_SECRET: "test",
 	AGENTWIRE_RELAY: relayUrl,
+	// messagent's secret is "a-secret-of-the-bot".
+	ACCOUNTS_APPS: "messagent 6ab53bae0eef33d30015a3069604e5f1ca5f9a5d71b53554cc0e2c8b164a4ce2\n",
 });
 
 const { app } = await import("../src/app.ts");
@@ -56,6 +58,9 @@ async function person(
 	return { cookie: `cookie:${cookie.split(";")[0]}`, token: session.token };
 }
 
+/** The address requests come from, which the rate limits count by: a test of its own sets one. */
+let from: string | undefined;
+
 async function call(
 	/** A bearer token, or a person's cookie as `cookie:…`. */
 	token: string | null,
@@ -64,6 +69,7 @@ async function call(
 	body?: unknown,
 ) {
 	const headers = new Headers({ origin: "http://localhost:3000" });
+	if (from) headers.set("x-forwarded-for", from);
 	if (token?.startsWith("cookie:"))
 		headers.set("cookie", token.slice("cookie:".length));
 	else if (token) headers.set("authorization", `Bearer ${token}`);
@@ -719,4 +725,94 @@ test("asking for OTPs is rate limited", async () => {
 	const statuses = [];
 	for (let i = 0; i < 12; i++) statuses.push((await ask()).status);
 	assert.ok(statuses.includes(429), statuses.join(" "));
+});
+
+test("an app acts as its person only with its secret, the person's approval, and until it is unlinked", async () => {
+	from = "192.0.2.44";
+	const ask = (body: Record<string, string>) =>
+		call(null, "POST", "/api/auth/device/code", {
+			client_id: "messagent",
+			scope: "person",
+			...body,
+		});
+	// The client_id alone is public, so it is no proof of the app.
+	assert.equal((await ask({})).status, 401);
+	assert.equal((await ask({ client_secret: "a-guess" })).status, 401);
+	assert.equal(
+		(
+			await call(null, "POST", "/api/auth/device/code", {
+				client_id: "laptop",
+				client_secret: "a-secret-of-the-bot",
+				scope: "person",
+			})
+		).status,
+		401,
+	);
+
+	const code = await ask({
+		client_secret: "a-secret-of-the-bot",
+		for: "Telegram 123 @luiswirth",
+	});
+	assert.equal(code.status, 200, code.text);
+	const page = await call(
+		luis,
+		"GET",
+		`/api/auth/device?user_code=${code.json.user_code}`,
+	);
+	assert.equal(page.status, 200, page.text);
+	assert.equal(page.json.client_id, "messagent");
+	assert.equal(page.json.person, true);
+	assert.equal(page.json.for, "Telegram 123 @luiswirth");
+	assert.equal(
+		(
+			await call(luis, "POST", "/api/auth/device/approve", {
+				userCode: code.json.user_code,
+			})
+		).status,
+		200,
+	);
+	const redeem = (secret?: string) =>
+		call(null, "POST", "/api/auth/device/token", {
+			grant_type: "urn:ietf:params:oauth:grant-type:device_code",
+			device_code: code.json.device_code,
+			client_id: "messagent",
+			...(secret && { client_secret: secret }),
+		});
+	assert.equal((await redeem()).status, 401);
+	const redeemed = await redeem("a-secret-of-the-bot");
+	assert.equal(redeemed.status, 200, redeemed.text);
+	const token = redeemed.json.access_token;
+
+	const listed = (await call(luis, "GET", "/api/tokens")).json.find(
+		(t: any) => t.kind === "app",
+	);
+	assert.equal(listed.name, "messagent");
+	assert.equal(listed.for, "Telegram 123 @luiswirth");
+
+	const [owned] = (await call(token, "GET", "/api/sessions")).json;
+	const session = owned.address.split("/").pop();
+	const join = (name: string, as: string) =>
+		call(null, "POST", "/agentwire/join", {
+			session,
+			name,
+			token: as,
+			owned: true,
+		});
+	assert.deepEqual((await join("luis", token)).json, { account: "luis" });
+	assert.equal((await join("luis/claude", token)).status, 403);
+	assert.equal((await join("ben", token)).status, 403);
+	// An agent's token still never joins as the person.
+	const agent = await connect(luis, "laptop");
+	assert.equal((await join("luis", agent)).status, 403);
+	// It acts as the person in sessions only: what only the person does stays theirs.
+	assert.equal(
+		(await call(token, "PUT", "/api/friends/ben")).status,
+		403,
+	);
+
+	// Unlinking from the app's side.
+	assert.equal((await call(token, "DELETE", "/api/tokens/self")).status, 204);
+	assert.equal((await join("luis", token)).status, 403);
+	assert.equal((await call(token, "GET", "/api/me")).status, 401);
+	assert.equal((await call(agent, "GET", "/api/me")).status, 200);
 });

@@ -98,15 +98,31 @@ function DevicePage() {
 				description="An agent asks for your account with an OTP."
 			>
 				<div className="flex flex-col gap-4 rounded-2xl border bg-card/60 p-5">
-					<p className="text-muted-foreground">
-						The machine{" "}
-						<span className="font-mono whitespace-nowrap text-foreground">
-							{claimed.client_id}
-						</span>{" "}
-						asks to connect to your account. Every agent on it can then join
-						your sessions as your agent, until you revoke it.
-					</p>
+					{claimed.person ? (
+						<p className="text-muted-foreground">
+							<span className="font-mono whitespace-nowrap text-foreground">
+								{claimed.client_id}
+							</span>{" "}
+							wants to act as you. It then joins your sessions as you, until you
+							revoke it.
+						</p>
+					) : (
+						<p className="text-muted-foreground">
+							The machine{" "}
+							<span className="font-mono whitespace-nowrap text-foreground">
+								{claimed.client_id}
+							</span>{" "}
+							asks to connect to your account. Every agent on it can then join
+							your sessions as your agent, until you revoke it.
+						</p>
+					)}
 					<dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 font-mono text-sm">
+						{claimed.person && claimed.for && (
+							<>
+								<dt className="text-muted-foreground">it says</dt>
+								<dd className="break-words">{claimed.for}</dd>
+							</>
+						)}
 						<dt className="text-muted-foreground">code</dt>
 						<dd>{claimed.user_code}</dd>
 						<dt className="text-muted-foreground">asked</dt>
@@ -115,8 +131,9 @@ function DevicePage() {
 						<dd>{claimed.from ?? "unknown"}</dd>
 					</dl>
 					<p className="text-sm text-muted-foreground">
-						Approve only if your own agent gave you this code just now. If
-						someone sent you this link, deny it.
+						{claimed.person
+							? "Approve only if you asked for this just now, and the app shows you the same code and your own account. If someone sent you this link, deny it."
+							: "Approve only if your own agent gave you this code just now. If someone sent you this link, deny it."}
 					</p>
 					<div className="flex gap-3">
 						<button type="button" className={primary} onClick={() => act(true)}>

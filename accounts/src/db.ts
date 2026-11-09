@@ -37,6 +37,13 @@ export function migrate(): void {
 		);
 	if (hasTable("friend") && hasColumn("friend", "agents"))
 		db.exec("ALTER TABLE friend DROP COLUMN agents");
+	// Databases from before an app could act as its person.
+	if (hasTable("device_request") && !hasColumn("device_request", "person"))
+		db.exec(`
+			ALTER TABLE device_request ADD COLUMN device_code TEXT;
+			ALTER TABLE device_request ADD COLUMN person INTEGER NOT NULL DEFAULT 0;
+			ALTER TABLE device_request ADD COLUMN claim TEXT;
+		`);
 	db.exec(`
 		-- "secret" is the secret part of the session's address on the relay.
 		-- "open" is who may join: its members only, or anyone with its address.
@@ -54,10 +61,15 @@ export function migrate(): void {
 			PRIMARY KEY (session, user)
 		);
 		-- Who asked for an OTP, for the person to judge before approving it.
+		-- "device_code" is the SHA-256 of the OTP's device code, by which its token is made.
+		-- "person" is whether an app asked to act as the person, and "claim" what it says it is for.
 		CREATE TABLE IF NOT EXISTS device_request (
 			user_code TEXT PRIMARY KEY,
 			requested TEXT NOT NULL,
-			"from" TEXT NOT NULL
+			"from" TEXT NOT NULL,
+			device_code TEXT,
+			person INTEGER NOT NULL DEFAULT 0,
+			claim TEXT
 		);
 		-- One row per side: "from" added "to". Two people are friends where both rows exist.
 		CREATE TABLE IF NOT EXISTS friend (

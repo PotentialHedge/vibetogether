@@ -54,6 +54,10 @@ export type Device = {
 	requested?: string;
 	/** Where it was asked from: an IP address or a country. */
 	from?: string;
+	/** Whether an app asks to act as the person, rather than a machine for its agents. */
+	person?: boolean;
+	/** What the app says it is for, in its own words. */
+	for?: string | null;
 };
 
 export class Unauthorized extends Error {}

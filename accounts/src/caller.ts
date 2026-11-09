@@ -1,9 +1,18 @@
 import { auth, oauthAccessTokenPrefix, tokenHash } from "./auth.ts";
 import { db } from "./db.ts";
 
-export type Caller = { id: string; login: string };
+/**
+ * An account, as a request is from it. `actsAsPerson` is an app's token that acts as the person,
+ * which joins as the person's own name. `token` is the token's id, as `/api/tokens` lists it.
+ */
+export type Caller = {
+	id: string;
+	login: string;
+	actsAsPerson: boolean;
+	token?: string;
+};
 
-type UserRow = { id: string; login: string };
+type UserRow = { id: string; login: string; grant: string };
 
 function bearerOf(headers: Headers): string | undefined {
 	const header = headers.get("authorization");
@@ -15,13 +24,21 @@ function bearerOf(headers: Headers): string | undefined {
 function oauthCaller(token: string): Caller | undefined {
 	const row = db
 		.prepare(
-			`SELECT u.id, u.login FROM oauthAccessToken t JOIN user u ON u.id = t.userId
+			`SELECT u.id, u.login, coalesce(t.authorizationCodeId, 'client:' || t.clientId) AS grant
+			 FROM oauthAccessToken t JOIN user u ON u.id = t.userId
 			 WHERE t.token = ? AND t.expiresAt > ? AND t.revoked IS NULL`,
 		)
 		.get(tokenHash(token.slice(oauthAccessTokenPrefix.length)), Date.now()) as
 		| UserRow
 		| undefined;
-	return row && { id: row.id, login: row.login };
+	return (
+		row && {
+			id: row.id,
+			login: row.login,
+			actsAsPerson: false,
+			token: `o_${Buffer.from(row.grant).toString("base64url")}`,
+		}
+	);
 }
 
 /**
@@ -33,9 +50,15 @@ export async function callerOf(headers: Headers): Promise<Caller | undefined> {
 	if (bearer?.startsWith(oauthAccessTokenPrefix)) return oauthCaller(bearer);
 	const session = await auth.api.getSession({ headers });
 	if (!session) return undefined;
+	const { agent, person } = session.session as {
+		agent?: string | null;
+		person?: boolean | null;
+	};
 	return {
 		id: session.user.id,
 		login: (session.user as { login: string }).login,
+		actsAsPerson: person === true,
+		...(agent && { token: `t_${session.session.id}` }),
 	};
 }
 

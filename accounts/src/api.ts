@@ -302,7 +302,13 @@ api.delete("/friends/:name", (c) => {
 // Tokens: each a machine's, a Better Auth session named after the machine, from an OTP or minted
 // on the account page, or an MCP client's, an OAuth grant named after the client.
 
-type AgentSession = { id: string; agent: string; createdAt: string | number };
+type AgentSession = {
+	id: string;
+	agent: string;
+	person: number | null;
+	claim: string | null;
+	createdAt: string | number;
+};
 /** One OAuth grant: the tokens that one authorization issued, refreshed ones included. */
 type AgentGrant = {
 	grant: string;
@@ -321,7 +327,7 @@ api.get("/tokens", (c) => {
 	const me = c.var.caller.id;
 	const sessions = db
 		.prepare(
-			"SELECT id, agent, createdAt FROM session WHERE userId = ? AND agent IS NOT NULL AND expiresAt > ?",
+			"SELECT id, agent, person, claim, createdAt FROM session WHERE userId = ? AND agent IS NOT NULL AND expiresAt > ?",
 		)
 		.all(me, Date.now()) as AgentSession[];
 	const grants = db
@@ -339,8 +345,9 @@ api.get("/tokens", (c) => {
 			...sessions.map((s) => ({
 				id: `t_${s.id}`,
 				name: s.agent,
-				kind: "machine",
+				kind: s.person === 1 ? "app" : "machine",
 				created: iso(s.createdAt),
+				...(s.person === 1 && { for: s.claim }),
 			})),
 			...grants.map((o) => ({
 				id: `o_${Buffer.from(o.grant).toString("base64url")}`,
@@ -379,17 +386,16 @@ api.post("/tokens", async (c) => {
 	);
 });
 
-api.delete("/tokens/:id", (c) => {
-	const me = c.var.caller.id;
-	const id = c.req.param("id");
-	if (id.startsWith("t_")) {
-		const result = db
-			.prepare(
-				"DELETE FROM session WHERE id = ? AND userId = ? AND agent IS NOT NULL",
-			)
-			.run(id.slice(2), me);
-		return result.changes ? c.body(null, 204) : c.text("No such token.", 404);
-	}
+/** Revokes `me`'s token `id`, as `/tokens` lists it; whether there was one. */
+function revokeToken(me: string, id: string): boolean {
+	if (id.startsWith("t_"))
+		return (
+			db
+				.prepare(
+					"DELETE FROM session WHERE id = ? AND userId = ? AND agent IS NOT NULL",
+				)
+				.run(id.slice(2), me).changes > 0
+		);
 	if (id.startsWith("o_")) {
 		const grant = Buffer.from(id.slice(2), "base64url").toString();
 		// The consent goes too, so that the client asks the person again rather than getting a token silently.
@@ -414,9 +420,22 @@ api.delete("/tokens/:id", (c) => {
 				`DELETE FROM oauthRefreshToken AS t WHERE ${grantKey} = ? AND userId = ?`,
 			)
 			.run(grant, me);
-		return tokens.changes || refresh.changes
-			? c.body(null, 204)
-			: c.text("No such token.", 404);
+		return tokens.changes > 0 || refresh.changes > 0;
 	}
-	return c.text("No such token.", 404);
+	return false;
+}
+
+// The token the request carries, such as an app's once its person unlinks it from the app's side.
+api.delete("/tokens/self", (c) => {
+	const { id, token } = c.var.caller;
+	if (!token) return c.text("The request carries no token.", 404);
+	return revokeToken(id, token)
+		? c.body(null, 204)
+		: c.text("No such token.", 404);
 });
+
+api.delete("/tokens/:id", (c) =>
+	revokeToken(c.var.caller.id, c.req.param("id"))
+		? c.body(null, 204)
+		: c.text("No such token.", 404),
+);

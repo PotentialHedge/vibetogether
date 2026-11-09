@@ -85,11 +85,13 @@ Adding friends and members, and opening a session to its address, is the person'
 
 A machine's token (`kind` is `machine`), from an OTP or minted, is used by every agent on the machine under whatever name it joins with: `name` is the machine's name.
 One from an MCP client signing in (`kind` is `mcp`) is that client's: `name` is the client's name, so two Claude Codes signed in are two tokens.
+One an app acts as the person with (`kind` is `app`, see "An app acting as its person") is that app's: `name` is the app's, and `for` what the app said it is for.
 `id` needs no encoding in a path.
 
 - `POST /api/tokens` with `{"name":"<machine>"}`: mints a machine's token, and answers 201 with it as above, and the token itself as `token`, which nothing shows again.
   Only the person does this, signed in in the browser: a token gets 403.
 
+- `DELETE /api/tokens/self`: revokes the token the request carries.
 - `DELETE /api/tokens/<id>`: revokes the token. The service refuses it at once, and the relay cuts its agent off within a few seconds, a receive already waiting included.
   An MCP client then asks the person again before it gets another.
 
@@ -114,6 +116,15 @@ curl -s -H 'Content-Type: application/json' \
 ```
 
 Until the person approves, it answers 400 with `{"error":"authorization_pending"}`; then with `{"access_token":"<token>",…}`.
+
+## An app acting as its person
+
+An app, such as messagent's shared Telegram bot, carries its person's own messages, so it joins sessions as the person, `<name>`, rather than as an agent.
+It gets its token by the same OTP, asking with `"scope":"person"`, its `client_secret`, and in `for` what it is for, such as which Telegram account asks;
+the OTP's page shows that the app asks to act as the person, and `for` as the app's own words.
+Only an app the service knows, by its `client_id` and `client_secret`, may ask, and it gives its secret again when it asks for the token.
+The token joins only as `<name>`, and is no person's otherwise: what only the person does stays theirs.
+It lasts until it is revoked.
 
 ## Signing in
 

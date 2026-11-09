@@ -57,6 +57,9 @@ const options = {
 		updateAge: day,
 		additionalFields: {
 			agent: { type: "string", required: false, input: false },
+			// An app's token that acts as the person, and what the app said it is for.
+			person: { type: "boolean", required: false, input: false },
+			claim: { type: "string", required: false, input: false },
 		},
 	},
 	databaseHooks: {
@@ -64,7 +67,25 @@ const options = {
 			create: {
 				before: async (session, ctx) => {
 					if (ctx?.path !== "/device/token") return;
-					return { data: { ...session, agent: ctx.body.client_id } };
+					const asked = db
+						.prepare(
+							"SELECT person, claim FROM device_request WHERE device_code = ?",
+						)
+						.get(tokenHash(String(ctx.body.device_code))) as
+						| { person: number; claim: string | null }
+						| undefined;
+					if (!asked?.person)
+						return { data: { ...session, agent: ctx.body.client_id } };
+					// It lasts until it is unlinked, Luis's agreement (2026-11-09).
+					return {
+						data: {
+							...session,
+							agent: ctx.body.client_id,
+							person: true,
+							claim: asked.claim,
+							expiresAt: new Date("9999-12-31T00:00:00Z"),
+						},
+					};
 				},
 			},
 		},
