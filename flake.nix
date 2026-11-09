@@ -162,6 +162,7 @@
       relay = import ./agentwire/nixos-module.nix self;
       mcp = import ./mcp/nixos-module.nix self;
       accounts = import ./accounts/nixos-module.nix self;
+      messagent = import ./apps/messagent/nixos-module.nix self;
     };
 
     # Every language in the tree, behind one command. The global pre-commit

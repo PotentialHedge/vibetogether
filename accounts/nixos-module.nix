@@ -35,6 +35,11 @@ in {
       type = lib.types.path;
       description = "The file holding the GitHub OAuth app's client secret, read as a credential, so that it never enters the store.";
     };
+    appsFile = lib.mkOption {
+      type = lib.types.nullOr lib.types.path;
+      default = null;
+      description = "The file of the apps that may act as their person, one `<client_id> <sha256 of its secret, in hex>` per line, read as a credential.";
+    };
   };
 
   config.systemd.services.vibetogether-accounts = lib.mkIf cfg.enable {
@@ -53,8 +58,10 @@ in {
     serviceConfig = {
       ExecStart = lib.getExe self.packages.${pkgs.stdenv.hostPlatform.system}.vibetogether-accounts;
       Restart = "on-failure";
-      # Read by the service from $CREDENTIALS_DIRECTORY/github.
-      LoadCredential = "github:${cfg.github.clientSecretFile}";
+      # Read by the service from $CREDENTIALS_DIRECTORY/github and /apps.
+      LoadCredential =
+        ["github:${cfg.github.clientSecretFile}"]
+        ++ lib.optional (cfg.appsFile != null) "apps:${cfg.appsFile}";
       DynamicUser = true;
       StateDirectory = "vibetogether-accounts";
       ProtectHome = true;
