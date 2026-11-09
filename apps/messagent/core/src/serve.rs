@@ -27,7 +27,7 @@ use crate::{
     bridge::{Agents, Bridge, Revoked, Room, Waker},
     config::write_private,
     messenger::Messenger,
-    telegram::{Bot, Message, Refusal, UserChat, User, message_of},
+    telegram::{Bot, Message, Refusal, User, UserChat, message_of},
 };
 
 /// The app's name at the account service, its `client_id`, which the OTP's page shows.
@@ -95,7 +95,9 @@ impl Accounts {
         if let Some(token) = token {
             request = request.header("Authorization", format!("Bearer {token}"));
         }
-        let mut response = request.send_json(body).map_err(|error| anyhow!("{path}: {error}"))?;
+        let mut response = request
+            .send_json(body)
+            .map_err(|error| anyhow!("{path}: {error}"))?;
         let status = response.status().as_u16();
         let body = response.body_mut().read_json().unwrap_or(Value::Null);
         Ok((status, body))
@@ -114,7 +116,9 @@ impl Accounts {
             }),
         )?;
         if status != 200 {
-            return Err(anyhow!("the account service refused an OTP ({status}): {body}"));
+            return Err(anyhow!(
+                "the account service refused an OTP ({status}): {body}"
+            ));
         }
         Ok(serde_json::from_value(body)?)
     }
@@ -155,7 +159,9 @@ impl Accounts {
         match response.status().as_u16() {
             200 => {
                 let me: Value = response.body_mut().read_json()?;
-                Ok(Some(me["name"].as_str().context("/api/me gave no name")?.into()))
+                Ok(Some(
+                    me["name"].as_str().context("/api/me gave no name")?.into(),
+                ))
             }
             401 => Ok(None),
             status => Err(anyhow!("/api/me answered {status}")),
@@ -339,7 +345,10 @@ impl Service {
         thread::spawn(move || {
             if let Err(error) = service.linking(user, &what_for) {
                 eprintln!("messagent serve: linking {user} failed: {error:#}");
-                service.tell(user, "Linking failed on our side. Send /start to try again.");
+                service.tell(
+                    user,
+                    "Linking failed on our side. Send /start to try again.",
+                );
             }
         });
     }
@@ -362,7 +371,10 @@ impl Service {
         let token = loop {
             thread::sleep(interval);
             if Instant::now() > until {
-                self.tell(user, "The link expired before it was approved. Send /start to try again.");
+                self.tell(
+                    user,
+                    "The link expired before it was approved. Send /start to try again.",
+                );
                 return Ok(());
             }
             match self.accounts.poll(&code.device_code) {
@@ -395,7 +407,9 @@ impl Service {
         let login = link.login.clone();
         let bridge = self.start(user, link)?;
         bridge.ensure()?;
-        bridge.notice(&format!("This Telegram chat is now linked to {login}'s account."))?;
+        bridge.notice(&format!(
+            "This Telegram chat is now linked to {login}'s account."
+        ))?;
         self.tell(
             user,
             &format!(
@@ -427,9 +441,18 @@ impl Service {
         }
         let user = from.id;
         let text = message.text.as_deref().map(str::trim);
-        let linked = self.linked.lock().expect("no holder panics").get(&user).map(|linked| {
-            (linked.login.clone(), linked.bridge.clone(), linked.chat.clone())
-        });
+        let linked = self
+            .linked
+            .lock()
+            .expect("no holder panics")
+            .get(&user)
+            .map(|linked| {
+                (
+                    linked.login.clone(),
+                    linked.bridge.clone(),
+                    linked.chat.clone(),
+                )
+            });
         let Some((login, bridge, chat)) = linked else {
             self.link(from);
             return;
@@ -514,7 +537,10 @@ pub fn serve(settings: Settings) -> Result<()> {
                 updates
             }
             Err(error) => {
-                if error.downcast_ref::<Refusal>().is_some_and(|refusal| refusal.code == 401) {
+                if error
+                    .downcast_ref::<Refusal>()
+                    .is_some_and(|refusal| refusal.code == 401)
+                {
                     return Err(error).context("the bot's token is no longer valid");
                 }
                 eprintln!("messagent serve: {error:#}; trying again in {delay:?}");

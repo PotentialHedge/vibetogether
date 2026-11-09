@@ -1,6 +1,7 @@
 """A fake of the few Bot API methods messagent uses, for the bridge's test.
 
-POST /inject with {"from": <id>, "text": ...} makes a message arrive in the sender's private chat;
+POST /inject with {"from": <id>, "text": ...} makes a message arrive in the sender's private chat,
+with "username" its sender's; with "kicked": true instead, the sender blocks the bot;
 with "photo" or "document" as base64 instead, a photo or a file, with "caption",
 and for a file "file_name" and "mime_type".
 GET /calls returns every call of the bot so far, as [{"method": ..., "body": ...}];
@@ -82,6 +83,20 @@ class Handler(BaseHTTPRequestHandler):
             body["chat_id"] = int(body["chat_id"])
         else:
             body = json.loads(raw or b"{}")
+        if self.path == "/inject" and body.get("kicked"):
+            with lock:
+                sender = body["from"]
+                updates.append({
+                    "update_id": len(updates) + 1,
+                    "my_chat_member": {
+                        "chat": {"id": sender, "type": "private"},
+                        "from": {"id": sender, "first_name": "Luis", "is_bot": False},
+                        "new_chat_member": {"status": "kicked"},
+                    },
+                })
+                lock.notify_all()
+            self.answer({"message_id": 0})
+            return
         if self.path == "/inject":
             with lock:
                 sender = body["from"]
@@ -95,6 +110,8 @@ class Handler(BaseHTTPRequestHandler):
                         "from": {"id": sender, "first_name": body.get("name", "Luis"), "is_bot": False},
                     },
                 })
+                if "username" in body:
+                    updates[-1]["message"]["from"]["username"] = body["username"]
                 message = updates[-1]["message"]
                 if "text" in body:
                     message["text"] = body["text"]

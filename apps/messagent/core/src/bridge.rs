@@ -554,8 +554,7 @@ impl Bridge {
                 continue;
             }
             let seen = sort(entry, user);
-            let for_agents =
-                pings_any(entry, messenger.native(), |name| self.room.is_agent(name));
+            let for_agents = pings_any(entry, messenger.native(), |name| self.room.is_agent(name));
             if seen != Seen::Nothing && !self.room.is_agent(&entry.from) && for_agents {
                 latest = entry.n;
                 fresh = true;
@@ -649,7 +648,11 @@ impl Bridge {
 
     /// Listens to the session in a thread of its own, until it is stopped;
     /// `ended` runs where listening ends with an error.
-    pub fn spawn(self: &Arc<Self>, waker: Waker, ended: impl FnOnce(anyhow::Error) + Send + 'static) {
+    pub fn spawn(
+        self: &Arc<Self>,
+        waker: Waker,
+        ended: impl FnOnce(anyhow::Error) + Send + 'static,
+    ) {
         let listener = self.clone();
         thread::spawn(move || {
             if let Err(error) = listener.listen(waker) {

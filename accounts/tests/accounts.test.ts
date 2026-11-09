@@ -32,7 +32,8 @@ Object.assign(process.env, {
 	GITHUB_CLIENT_SECRET: "test",
 	AGENTWIRE_RELAY: relayUrl,
 	// messagent's secret is "a-secret-of-the-bot".
-	ACCOUNTS_APPS: "messagent 6ab53bae0eef33d30015a3069604e5f1ca5f9a5d71b53554cc0e2c8b164a4ce2\n",
+	ACCOUNTS_APPS:
+		"messagent 6ab53bae0eef33d30015a3069604e5f1ca5f9a5d71b53554cc0e2c8b164a4ce2\n",
 });
 
 const { app } = await import("../src/app.ts");
@@ -808,10 +809,7 @@ test("an app acts as its person only with its secret, the person's approval, and
 	const agent = await connect(luis, "laptop");
 	assert.equal((await join("luis", agent)).status, 403);
 	// It acts as the person in sessions only: what only the person does stays theirs.
-	assert.equal(
-		(await call(token, "PUT", "/api/friends/ben")).status,
-		403,
-	);
+	assert.equal((await call(token, "PUT", "/api/friends/ben")).status, 403);
 	const other = await ask({ client_secret: "a-secret-of-the-bot" });
 	for (const [path, body] of [
 		["/api/auth/device/approve", { userCode: other.json.user_code }],

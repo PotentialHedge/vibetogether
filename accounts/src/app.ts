@@ -106,9 +106,7 @@ async function withRequester(request: Request): Promise<Response> {
 		params.scope.split(" ").includes("person");
 	if (person && !isApp(params)) return notAnApp();
 	const claim =
-		person && typeof params.for === "string"
-			? params.for.slice(0, 200)
-			: null;
+		person && typeof params.for === "string" ? params.for.slice(0, 200) : null;
 	const response = await auth.handler(request);
 	if (!response.ok) return response;
 	const body = (await response.clone().json()) as {

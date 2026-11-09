@@ -2,6 +2,15 @@
 ci:
     cargo test -p messagent -p messagent-claude
     just bridge
+    just serve
+
+# The shared bot end to end, between a fake Telegram, the account service and a relay that asks it.
+serve:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cargo build --quiet -p messagent -p agentwire-relay
+    target="${CARGO_TARGET_DIR:-../../target}/debug"
+    tests/serve.sh "$target/messagent" "$target/agentwire-relay" ../../accounts
 
 # The bridge end to end, between a fake Telegram and a relay of its own.
 bridge:

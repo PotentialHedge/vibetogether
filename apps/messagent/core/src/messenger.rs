@@ -81,7 +81,6 @@ pub trait Messages {
         entry: &dyn Fn(u64) -> Result<Image>,
         quiet: bool,
     ) -> Result<String>;
-
 }
 
 /// Reacting to a message of the chat with an emoji.

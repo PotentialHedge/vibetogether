@@ -3,9 +3,10 @@ use std::{fs, io::Read, path::PathBuf};
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use messagent::{
-    Config, Paths, bridge, serve,
+    Config, Paths, bridge,
     bridge::Session,
     messenger::Settings,
+    serve,
     telegram::{self, Telegram},
 };
 
