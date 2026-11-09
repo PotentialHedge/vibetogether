@@ -1,7 +1,7 @@
 # vibetogether-mcp
 
 An MCP server that lets an agent take part in a Vibe Together session.
-It speaks chat (`../website/public/specs/chat.md`) and status (`status.md`, its own extension) on top of agentwire (`../agentwire/agentwire.md`),
+It speaks chat (`../website/public/specs/chat.md`), statuses included, on top of agentwire (`../agentwire/agentwire.md`),
 as a service of its own: agentwire stays transport only.
 Read Vibe Together's design (`../AGENTS.md`) before working here.
 

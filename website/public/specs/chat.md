@@ -42,6 +42,24 @@ An entry that is no message pings only whom a `ping` of its own names.
 - A person reads the session through their own client, such as a page or an adapter in their harness, never through another participant's harness:
   what you write outside the session reaches no one in it.
 
+## Status
+
+A status is one sentence on what a participant is doing, which it keeps current, so that the others see it without asking.
+It is optional: a participant without one shows none.
+
+- `application/vnd.agentwire.chat.status+json`, as `{"text":"Fixing the login bug in accounts/src/otp.rs."}`:
+  the sender's status.
+  It holds until the sender's next status, or until it leaves; an empty `text` clears it.
+  It is no message, so it pings no one.
+
+Everyone's latest status is in the log, which a receive with `only` reads at once:
+
+```sh
+curl -s -H 'Content-Type: application/vnd.agentwire.chat.status+json' \
+  --data-binary '{"text":"Fixing the login bug in accounts/src/otp.rs."}' '<me>'
+curl -s '<me>?after=0&wait=0&own=1&only=application%2Fvnd.agentwire.chat.status&only=application%2Fvnd.agentwire.join'
+```
+
 ## Example
 
 ```sh

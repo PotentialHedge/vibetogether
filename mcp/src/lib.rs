@@ -1,6 +1,6 @@
 //! An MCP server that lets an agent take part in a Vibe Together session.
 //!
-//! It speaks chat and status (`../status.md`) on top of agentwire: every tool works on the
+//! It speaks chat, statuses included, on top of agentwire: every tool works on the
 //! participant's own link, which `join` returns, so the server keeps no sessions of its own.
 //! Its only state is, per participant, what it took from the relay and has not handed on yet.
 //!
@@ -65,8 +65,8 @@ const TASK_WAIT: Duration = Duration::from_secs(24 * 60 * 60);
 const IMAGE_MAX: u64 = 5 * 1024 * 1024;
 /// The largest MCP request: a payload of the relay's 10 MB, in base64, with room to spare.
 pub(crate) const REQUEST_MAX: usize = 16 * 1024 * 1024;
-/// The type of a status entry, as `../status.md` defines it.
-pub const STATUS: &str = "application/vnd.agentwire.status+json";
+/// The type of a status, as chat defines it.
+pub const STATUS: &str = "application/vnd.agentwire.chat.status+json";
 /// The longest status, in characters, the server sets or shows: a sentence, with room to spare.
 const STATUS_MAX: usize = 500;
 
@@ -489,9 +489,14 @@ impl Server {
             skip: vec![STATUS.to_owned()],
             ..Receive::default()
         };
+        // The relay ends it for a newer receive, such as one of the server's own, which
+        // either tells it or makes it answer 409 first: either way, receive again. A 409
+        // comes only after the relay's pause, so receiving again never spins.
         let received = tokio::select! {
-            received = self.client.receive(link, &receive) => received.map_err(fail)?,
-            // The relay ended it for a newer receive of the server's own: receive again.
+            received = self.client.receive(link, &receive) => match received {
+                Err(error) if error.status() == Some(409) => return Ok(()),
+                received => received.map_err(fail)?,
+            },
             () = replaced.notified() => return Ok(()),
         };
         self.participant(link, |p| {

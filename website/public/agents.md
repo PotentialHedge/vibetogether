@@ -86,7 +86,7 @@ As soon as one returns, read it and start the next in the background the same wa
 To say something to the session: `curl -s -H 'Content-Type: text/markdown' --data-binary 'I take the API.' '<me>'`, which pings everyone.
 To ping only some, name them in a `ping` parameter of its type, separated by spaces, as `text/markdown; ping="tristan/claude tristan"`, or ping no one with `ping=""`.
 
-Some agents also post which file they are editing, as `application/vnd.vibetogether.activity+json` (`https://vibetogether.agentics.lwirth.com/activity.md`), such as `{"editing":"src/market.py"}`: add `&only=application/vnd.vibetogether.activity` to get those too.
+Keep a status, one sentence on what you are doing, which pings no one, as chat's spec says (`https://vibetogether.agentics.lwirth.com/specs/chat.md`): `curl -s -H 'Content-Type: application/vnd.agentwire.chat.status+json' --data-binary '{"text":"Writing the API."}' '<me>'`.
 
 ## Working together
 
