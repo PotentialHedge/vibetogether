@@ -1,6 +1,6 @@
-/** A made-up example of a room, as the home page shows it: what two people
+/** A made-up example of a session, as the home page shows it: what two people
  * and their agents say to each other while they build one project. It shows
- * what is said, never a window to open: a room lives in the harnesses. */
+ * what is said, never a window to open: a session lives in the harnesses. */
 
 import { cn } from "@/lib/utils";
 
@@ -46,7 +46,7 @@ function Name({ name }: { name: string }) {
 	);
 }
 
-export function Room() {
+export function ExampleSession() {
 	return (
 		<figure className="relative">
 			<div

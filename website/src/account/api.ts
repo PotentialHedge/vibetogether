@@ -8,14 +8,14 @@ import { page } from "@/site";
 
 export type Me = { name: string; displayName: string; image: string };
 
-export type Room = {
+export type Session = {
 	id: string;
 	name: string;
 	owner: string;
 	members: string[];
 	/** Who may join: its members only, or anyone with its address. */
 	open: Open;
-	/** Its URL on the relay, hard to guess: it identifies the room, and is its secret. */
+	/** Its URL on the relay, hard to guess: it identifies the session, and is its secret. */
 	address: string;
 };
 
@@ -87,21 +87,22 @@ async function call<T>(
 
 const live = {
 	me: () => call<Me>("GET", "api/me"),
-	rooms: () => call<Room[]>("GET", "api/rooms"),
-	createRoom: (name: string) => call<Room>("POST", "api/rooms", { name }),
-	changeRoom: (id: string, change: { name?: string; open?: Open }) =>
-		call<Room>("PATCH", `api/rooms/${encodeURIComponent(id)}`, change),
-	deleteRoom: (id: string) =>
-		call<void>("DELETE", `api/rooms/${encodeURIComponent(id)}`),
+	sessions: () => call<Session[]>("GET", "api/sessions"),
+	createSession: (name: string) =>
+		call<Session>("POST", "api/sessions", { name }),
+	changeSession: (id: string, change: { name?: string; open?: Open }) =>
+		call<Session>("PATCH", `api/sessions/${encodeURIComponent(id)}`, change),
+	deleteSession: (id: string) =>
+		call<void>("DELETE", `api/sessions/${encodeURIComponent(id)}`),
 	addMember: (id: string, name: string) =>
 		call<void>(
 			"PUT",
-			`api/rooms/${encodeURIComponent(id)}/members/${encodeURIComponent(name)}`,
+			`api/sessions/${encodeURIComponent(id)}/members/${encodeURIComponent(name)}`,
 		),
 	removeMember: (id: string, name: string) =>
 		call<void>(
 			"DELETE",
-			`api/rooms/${encodeURIComponent(id)}/members/${encodeURIComponent(name)}`,
+			`api/sessions/${encodeURIComponent(id)}/members/${encodeURIComponent(name)}`,
 		),
 	friends: () => call<Friend[]>("GET", "api/friends"),
 	addFriend: (name: string) =>
@@ -160,9 +161,9 @@ function mock(): Api {
 		displayName: "Luis Wirth",
 		image: "https://avatars.githubusercontent.com/luiswirth",
 	};
-	let rooms: Room[] = [
+	let sessions: Session[] = [
 		{
-			id: "r_1",
+			id: "s_1",
 			name: "notes",
 			owner: "luiswirth",
 			members: [],
@@ -170,7 +171,7 @@ function mock(): Api {
 			address: "",
 		},
 		{
-			id: "r_2",
+			id: "s_2",
 			name: "booking-app",
 			owner: "luiswirth",
 			members: ["benarmstrong"],
@@ -178,7 +179,7 @@ function mock(): Api {
 			address: "",
 		},
 		{
-			id: "r_3",
+			id: "s_3",
 			name: "presio",
 			owner: "benarmstrong",
 			members: ["luiswirth", "tristangabl"],
@@ -229,9 +230,9 @@ function mock(): Api {
 	const done = async () => {};
 	return {
 		me: async () => me,
-		rooms: async () => rooms,
-		createRoom: async (name) => {
-			const room = {
+		sessions: async () => sessions,
+		createSession: async (name) => {
+			const session = {
 				id: `r_${Date.now()}`,
 				name,
 				owner: me.name,
@@ -239,28 +240,30 @@ function mock(): Api {
 				open: "members" as Open,
 				address: "",
 			};
-			rooms = [...rooms, room];
-			return room;
+			sessions = [...sessions, session];
+			return session;
 		},
-		changeRoom: async (id, change) => {
-			rooms = rooms.map((room) =>
-				room.id === id ? { ...room, ...change } : room,
+		changeSession: async (id, change) => {
+			sessions = sessions.map((session) =>
+				session.id === id ? { ...session, ...change } : session,
 			);
-			return rooms.find((room) => room.id === id) as Room;
+			return sessions.find((session) => session.id === id) as Session;
 		},
-		deleteRoom: async (id) => {
-			rooms = rooms.filter((room) => room.id !== id);
+		deleteSession: async (id) => {
+			sessions = sessions.filter((session) => session.id !== id);
 		},
 		addMember: async (id, name) => {
-			rooms = rooms.map((room) =>
-				room.id === id ? { ...room, members: [...room.members, name] } : room,
+			sessions = sessions.map((session) =>
+				session.id === id
+					? { ...session, members: [...session.members, name] }
+					: session,
 			);
 		},
 		removeMember: async (id, name) => {
-			rooms = rooms.map((room) =>
-				room.id === id
-					? { ...room, members: room.members.filter((m) => m !== name) }
-					: room,
+			sessions = sessions.map((session) =>
+				session.id === id
+					? { ...session, members: session.members.filter((m) => m !== name) }
+					: session,
 			);
 		},
 		friends: async () => friends,

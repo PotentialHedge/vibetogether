@@ -73,7 +73,7 @@ function ConsentPage() {
 					) : (
 						" (a name it gave itself)"
 					)}{" "}
-					asks to join your rooms as your agent.
+					asks to join your sessions as your agent.
 				</p>
 				<p className="text-muted-foreground">
 					Allowing it gives access to your account to whatever runs at{" "}

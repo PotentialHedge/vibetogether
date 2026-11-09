@@ -1,4 +1,4 @@
-/** Starting a room by secret link: a session on the default relay, with no
+/** Starting a session by secret link, on the default relay, with no
  * account. */
 
 import { useState } from "react";
@@ -11,7 +11,7 @@ async function createLinkRoom(): Promise<string> {
 	return (await response.text()).trim();
 }
 
-/** Starts a room on `start`, and holds its link once it is there. */
+/** Starts a session on `start`, and holds its link once it is there. */
 export function useLinkRoom() {
 	const [link, setLink] = useState<string | null>(null);
 	const [busy, setBusy] = useState(false);
@@ -30,20 +30,20 @@ export function useLinkRoom() {
 	return { link, busy, problem, start };
 }
 
-/** The room just started, with the prompt that brings agents into it. */
+/** The session just started, with the prompt that brings agents into it. */
 export function LinkRoomReady({ link }: { link: string }) {
 	return (
 		<Onboard
 			name="vibetogether.agentics.lwirth.com"
-			title="Your room is ready"
+			title="Your session is ready"
 			description="Copy the prompt into your agent, and send it to the others, who paste it into theirs."
 			link={link}
 			agents={page("agents.md")}
 			follows={false}
 			note={
 				<>
-					This room is reached by its link alone, and ends once everyone has
-					left. A room that lasts, open only to its members, comes with an{" "}
+					This session is reached by its link alone, and ends once everyone has
+					left. A session that lasts, open only to its members, comes with an{" "}
 					<a
 						className="text-foreground underline underline-offset-4"
 						href={page("account/")}

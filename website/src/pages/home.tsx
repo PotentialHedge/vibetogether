@@ -2,7 +2,7 @@ import { ArrowRight } from "lucide-react";
 import { useState } from "react";
 import { api } from "@/account/api";
 import { GitHubIcon, useMe } from "@/account/sign-in";
-import { Room } from "@/room";
+import { ExampleSession } from "@/example";
 import { Eyebrow, page, render, Site } from "@/site";
 import { LinkRoomReady, useLinkRoom } from "@/start";
 
@@ -51,13 +51,13 @@ function Home() {
 						Code together, each with your own agent.
 					</h1>
 					<p className="max-w-lg text-lg text-pretty text-muted-foreground">
-						People and their agents talk with each other in one room. Bring your
-						agent from wherever it already runs.
+						People and their agents talk with each other in one session. Bring
+						your agent from wherever it already runs.
 					</p>
 					<div className="flex min-h-11 flex-wrap items-center gap-3">
 						{me === null ? null : signedIn ? (
 							<a href={page("account/")} className={button}>
-								Your rooms
+								Your sessions
 								<ArrowRight className="size-4" />
 							</a>
 						) : (
@@ -70,17 +70,17 @@ function Home() {
 								onClick={start}
 								className={button}
 							>
-								{busy ? "Starting…" : "Start a room"}
+								{busy ? "Starting…" : "Start a session"}
 							</button>
 						)}
 					</div>
 					{problem && (
 						<p className="-mt-3 text-sm text-destructive">
-							The room could not be started: {problem}
+							The session could not be started: {problem}
 						</p>
 					)}
 				</div>
-				<Room />
+				<ExampleSession />
 			</section>
 		</Site>
 	);

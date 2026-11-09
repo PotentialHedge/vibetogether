@@ -1,22 +1,28 @@
-/** The account's rooms: the ones the person owns or is a member of, and
+/** The account's sessions: the ones the person owns or is a member of, and
  * making new ones. */
 
 import { useState } from "react";
-import { api, type Friend, type Me, type Open, type Room } from "@/account/api";
+import {
+	api,
+	type Friend,
+	type Me,
+	type Open,
+	type Session,
+} from "@/account/api";
 import { AddByName, Empty, Panel, Row } from "@/account/parts";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { page } from "@/site";
 
-/** Copies the prompt that brings an agent into one of the account's rooms,
+/** Copies the prompt that brings an agent into one of the account's sessions,
  * by its id: the agent finds its link through the account itself, so no
  * secret passes through the person's paste. */
-function CopyRoomPrompt({ room }: { room: Room }) {
+function CopySessionPrompt({ session }: { session: Session }) {
 	const [copied, setCopied] = useState(false);
 	// By its id, never its name: the name is the owner's free text, which a
 	// member would paste to their agent as their own words.
-	const prompt = `Read ${page("agents.md")}, connect to my Vibe Together account, and join the room ${room.id}.`;
+	const prompt = `Read ${page("agents.md")}, connect to my Vibe Together account, and join the session ${session.id}.`;
 	return (
 		<Button
 			variant="outline"
@@ -33,7 +39,7 @@ function CopyRoomPrompt({ room }: { room: Room }) {
 	);
 }
 
-/** Whom a room is open to, as its owner sets it. */
+/** Whom a session is open to, as its owner sets it. */
 function OpenSwitch({
 	value,
 	onChange,
@@ -73,15 +79,15 @@ function OpenSwitch({
 	);
 }
 
-export function Rooms({
+export function Sessions({
 	me,
-	rooms,
+	sessions,
 	friends,
 	act,
 	reload,
 }: {
 	me: Me;
-	rooms: Room[];
+	sessions: Session[];
 	friends: Friend[];
 	act: (action: () => Promise<unknown>) => () => Promise<void>;
 	reload: () => Promise<void>;
@@ -89,35 +95,35 @@ export function Rooms({
 	const mates = friends.filter((friend) => friend.state === "friends");
 	return (
 		<Panel
-			title="Rooms"
-			description="A room lasts until you delete it. It is open to its members only, or to anyone with its address."
+			title="Sessions"
+			description="A session lasts until you delete it. It is open to its members only, or to anyone with its address."
 			action={
 				<AddByName
-					placeholder="room name"
-					label="New room"
+					placeholder="session name"
+					label="New session"
 					onAdd={async (name) => {
-						await api.createRoom(name);
+						await api.createSession(name);
 						await reload();
 					}}
 				/>
 			}
 		>
-			{rooms.length === 0 && <Empty>No room yet.</Empty>}
-			{rooms.map((room) => {
-				const own = room.owner === me.name;
+			{sessions.length === 0 && <Empty>No session yet.</Empty>}
+			{sessions.map((session) => {
+				const own = session.owner === me.name;
 				const addable = mates.filter(
-					(friend) => !room.members.includes(friend.name),
+					(friend) => !session.members.includes(friend.name),
 				);
 				return (
-					<Row key={room.id}>
-						<span className="font-mono">{room.name}</span>
+					<Row key={session.id}>
+						<span className="font-mono">{session.name}</span>
 						{!own && (
 							<span className="text-sm text-muted-foreground">
-								by {room.owner}
+								by {session.owner}
 							</span>
 						)}
 						<span className="flex flex-wrap items-center gap-1.5">
-							{room.members.map((member) => (
+							{session.members.map((member) => (
 								<Badge key={member} variant="secondary" className="font-mono">
 									{member}
 									{own && (
@@ -125,14 +131,14 @@ export function Rooms({
 											type="button"
 											aria-label={`Remove ${member}`}
 											className="ml-1 text-muted-foreground hover:text-foreground"
-											onClick={act(() => api.removeMember(room.id, member))}
+											onClick={act(() => api.removeMember(session.id, member))}
 										>
 											×
 										</button>
 									)}
 								</Badge>
 							))}
-							{own && room.members.length === 0 && (
+							{own && session.members.length === 0 && (
 								<span className="text-sm text-muted-foreground">
 									no one else yet
 								</span>
@@ -141,19 +147,19 @@ export function Rooms({
 						<span className="ml-auto flex items-center gap-2">
 							{own ? (
 								<OpenSwitch
-									value={room.open}
+									value={session.open}
 									onChange={(open) =>
-										act(() => api.changeRoom(room.id, { open }))()
+										act(() => api.changeSession(session.id, { open }))()
 									}
 								/>
 							) : (
-								room.open === "link" && (
+								session.open === "link" && (
 									<span className="font-mono text-xs text-muted-foreground">
 										open by link
 									</span>
 								)
 							)}
-							<CopyRoomPrompt room={room} />
+							<CopySessionPrompt session={session} />
 							{own && addable.length > 0 && (
 								<select
 									aria-label="Add a friend"
@@ -161,7 +167,7 @@ export function Rooms({
 									value=""
 									onChange={(event) => {
 										const name = event.target.value;
-										if (name) act(() => api.addMember(room.id, name))();
+										if (name) act(() => api.addMember(session.id, name))();
 									}}
 								>
 									<option value="">add a friend</option>
@@ -176,7 +182,7 @@ export function Rooms({
 								<Button
 									variant="ghost"
 									size="sm"
-									onClick={act(() => api.deleteRoom(room.id))}
+									onClick={act(() => api.deleteSession(session.id))}
 								>
 									Delete
 								</Button>
@@ -184,7 +190,7 @@ export function Rooms({
 								<Button
 									variant="ghost"
 									size="sm"
-									onClick={act(() => api.removeMember(room.id, me.name))}
+									onClick={act(() => api.removeMember(session.id, me.name))}
 								>
 									Leave
 								</Button>

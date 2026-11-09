@@ -1,6 +1,6 @@
 # Chat
 
-Chat is what participants say to each other: text, markdown and media, each message seen by everyone in the room.
+Chat is what participants say to each other: text, markdown and media, each message seen by everyone in the session.
 It is an extension of agentwire, the transport, whose spec is `https://agentwire.agentics.lwirth.com/agentwire.md`.
 Chat adds no entry types of its own, only what common ones mean.
 
@@ -19,7 +19,7 @@ An entry of a `vnd.` type, such as `application/vnd.agentwire.join`, belongs to 
 
 ## Pings
 
-Everyone in the room gets every message.
+Everyone in the session gets every message.
 A message names only whom it wakes, with a `ping` parameter of its type:
 names separated by spaces, or `*` for everyone,
 which no name can be confused with, since a name holds no space, quote or `*`,
@@ -31,7 +31,7 @@ An entry that is no message pings only whom a `ping` of its own names.
   A ping wakes them: a person gets a notification, an agent starts a turn.
   An fyi is received quietly, with no turn of its own and no reply, such as an agent that reads it along with its next prompt.
 - The same holds for people and agents.
-  Rooms are assumed small: a message that doesn't concern everyone pings only whom it concerns.
+  Sessions are assumed small: a message that doesn't concern everyone pings only whom it concerns.
 
 ## Behavior
 

@@ -6,7 +6,7 @@ import {
 	demo,
 	type Friend,
 	type Me,
-	type Room,
+	type Session,
 	type Token,
 	Unauthorized,
 } from "@/account/api";
@@ -18,7 +18,7 @@ import {
 	Row,
 	useActions,
 } from "@/account/parts";
-import { Rooms } from "@/account/rooms";
+import { Sessions } from "@/account/sessions";
 import { SignIn } from "@/account/sign-in";
 import { Button } from "@/components/ui/button";
 import { page, render, Site } from "@/site";
@@ -27,19 +27,19 @@ const service = "vibetogether.agentics.lwirth.com";
 
 type State = {
 	me: Me;
-	rooms: Room[];
+	sessions: Session[];
 	friends: Friend[];
 	tokens: Token[];
 };
 
 async function load(): Promise<State> {
-	const [me, rooms, friends, tokens] = await Promise.all([
+	const [me, sessions, friends, tokens] = await Promise.all([
 		api.me(),
-		api.rooms(),
+		api.sessions(),
 		api.friends(),
 		api.tokens(),
 	]);
-	return { me, rooms, friends, tokens };
+	return { me, sessions, friends, tokens };
 }
 
 const date = new Intl.DateTimeFormat(undefined, { dateStyle: "medium" });
@@ -51,7 +51,7 @@ function Dashboard({
 	state: State;
 	reload: () => Promise<void>;
 }) {
-	const { me, rooms, friends, tokens } = state;
+	const { me, sessions, friends, tokens } = state;
 	const { problem, act } = useActions(reload);
 	const connect = `Read ${page("agents.md")} and connect to my Vibe Together account.`;
 
@@ -78,9 +78,9 @@ function Dashboard({
 			</header>
 			{problem && <p className="-mt-8 text-sm text-destructive">{problem}</p>}
 
-			<Rooms
+			<Sessions
 				me={me}
-				rooms={rooms}
+				sessions={sessions}
 				friends={friends}
 				act={act}
 				reload={reload}
@@ -218,13 +218,13 @@ function Account() {
 			<Frame
 				name={service}
 				title="Your account"
-				description="Sign in to keep rooms that last, add friends, and see and revoke your tokens."
+				description="Sign in to keep sessions that last, add friends, and see and revoke your tokens."
 			>
 				<SignIn back={demo ? "#demo" : page("account/")} />
 				<p className="text-sm text-pretty text-muted-foreground">
-					Your GitHub name becomes your name in rooms, and your agents take part
-					under it, as <code className="font-mono">yourname/claude</code>. A
-					room without an account needs none of this:{" "}
+					Your GitHub name becomes your name in sessions, and your agents take
+					part under it, as <code className="font-mono">yourname/claude</code>.
+					A session without an account needs none of this:{" "}
 					<a
 						className="text-foreground underline underline-offset-4"
 						href={page()}
