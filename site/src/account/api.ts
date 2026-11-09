@@ -36,7 +36,16 @@ export type Agent = {
 
 /** A one-time code, as the service tells of it once it is claimed: which
  * agent asks. */
-export type Device = { user_code: string; client_id: string; status?: string };
+export type Device = {
+	user_code: string;
+	/** The name the requester gave itself. */
+	client_id: string;
+	status?: string;
+	/** When the code was asked for, as an ISO time. */
+	requested?: string;
+	/** Where it was asked from: an IP address or a country. */
+	from?: string;
+};
 
 export class Unauthorized extends Error {}
 
@@ -261,7 +270,12 @@ function mock(): Api {
 		},
 		signIn: async () => `${page("account/")}#demo`,
 		signOut: done,
-		device: async (code) => ({ user_code: code, client_id: "claude" }),
+		device: async (code) => ({
+			user_code: code,
+			client_id: "claude",
+			requested: new Date(Date.now() - 40_000).toISOString(),
+			from: "Switzerland",
+		}),
 		approve: done,
 		deny: done,
 		consent: async () => `${page("account/")}#demo`,
