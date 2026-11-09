@@ -229,11 +229,11 @@ test("an agent gets a token by an OTP, joins its session, and is cut off once th
 	assert.deepEqual(Object.keys(tokens[0]).sort(), [
 		"created",
 		"id",
+		"kind",
 		"name",
-		"via",
 	]);
 	assert.equal(tokens[0].name, "claude");
-	assert.equal(tokens[0].via, "otp");
+	assert.equal(tokens[0].kind, "machine");
 
 	const [owned] = (await call(token, "GET", "/api/sessions")).json;
 	const session = owned.address.split("/").pop();
@@ -260,6 +260,35 @@ test("an agent gets a token by an OTP, joins its session, and is cut off once th
 		204,
 	);
 	assert.equal((await join("luis/claude", token)).status, 403);
+	assert.equal((await call(token, "GET", "/api/me")).status, 401);
+});
+
+test("the person mints a machine's token on the account page, which only they can", async () => {
+	const minted = await call(ben, "POST", "/api/tokens", {
+		name: "ben-laptop",
+	});
+	assert.equal(minted.status, 201, minted.text);
+	assert.equal(minted.json.name, "ben-laptop");
+	assert.equal(minted.json.kind, "machine");
+	const token: string = minted.json.token;
+	assert.equal((await call(token, "GET", "/api/me")).json.name, "ben");
+	const tokens = (await call(ben, "GET", "/api/tokens")).json;
+	const listed = tokens.find((t: { id: string }) => t.id === minted.json.id);
+	assert.equal(listed.name, "ben-laptop");
+	assert.equal(listed.token, undefined);
+
+	assert.equal(
+		(await call(token, "POST", "/api/tokens", { name: "more" })).status,
+		403,
+	);
+	assert.equal(
+		(await call(ben, "POST", "/api/tokens", { name: "Not A Name" })).status,
+		400,
+	);
+	assert.equal(
+		(await call(ben, "DELETE", `/api/tokens/${minted.json.id}`)).status,
+		204,
+	);
 	assert.equal((await call(token, "GET", "/api/me")).status, 401);
 });
 
@@ -534,7 +563,7 @@ test("an agent through MCP signs in by OAuth, and is cut off once revoked", asyn
 	);
 	assert.equal(agents.length, 2);
 	assert.equal(agents[0].name, "Claude Code");
-	assert.equal(agents[0].via, "mcp");
+	assert.equal(agents[0].kind, "mcp");
 	assert.match(agents[0].id, /^[A-Za-z0-9_-]+$/);
 	assert.equal(
 		(await call(luis, "DELETE", `/api/tokens/${agents[0].id}`)).status,

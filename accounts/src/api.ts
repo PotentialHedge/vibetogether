@@ -1,6 +1,8 @@
 import { Hono } from "hono";
+import { auth } from "./auth.ts";
 import { type Caller, callerOf } from "./caller.ts";
 import { db } from "./db.ts";
+import { isNamePart } from "./names.ts";
 import {
 	addressOf,
 	createSession,
@@ -289,8 +291,8 @@ api.delete("/friends/:name", (c) => {
 	return c.body(null, 204);
 });
 
-// Tokens: each from an OTP, a Better Auth session named after its machine, or from one sign-in of
-// an MCP client, an OAuth grant named after the client.
+// Tokens: each a machine's, a Better Auth session named after the machine, from an OTP or minted
+// on the account page, or an MCP client's, an OAuth grant named after the client.
 
 type AgentSession = { id: string; agent: string; createdAt: string | number };
 /** One OAuth grant: the tokens that one authorization issued, refreshed ones included. */
@@ -303,7 +305,7 @@ type AgentGrant = {
 // The tokens of one grant, by the authorization code that started it, which refreshing keeps.
 const grantKey = "coalesce(t.authorizationCodeId, 'client:' || t.clientId)";
 
-function iso(time: string | number): string {
+function iso(time: string | number | Date): string {
 	return new Date(time).toISOString();
 }
 
@@ -329,16 +331,43 @@ api.get("/tokens", (c) => {
 			...sessions.map((s) => ({
 				id: `t_${s.id}`,
 				name: s.agent,
-				via: "otp",
+				kind: "machine",
 				created: iso(s.createdAt),
 			})),
 			...grants.map((o) => ({
 				id: `o_${Buffer.from(o.grant).toString("base64url")}`,
 				name: o.name ?? "an MCP client",
-				via: "mcp",
+				kind: "mcp",
 				created: iso(o.createdAt),
 			})),
 		].sort((a, b) => a.created.localeCompare(b.created)),
+	);
+});
+
+api.post("/tokens", async (c) => {
+	if (!isPerson(c.req.raw)) return c.text(onlyThePerson, 403);
+	const body = (await bodyOf(c.req.raw)) as { name?: unknown } | undefined;
+	const name = body?.name;
+	if (typeof name !== "string" || !isNamePart(name))
+		return c.text(
+			"Give the machine's name, in lower case, such as lwirth-server.",
+			400,
+		);
+	const context = await auth.$context;
+	const session = await context.internalAdapter.createSession(
+		c.var.caller.id,
+		false,
+		{ agent: name },
+	);
+	return c.json(
+		{
+			id: `t_${session.id}`,
+			name,
+			kind: "machine",
+			created: iso(session.createdAt),
+			token: session.token,
+		},
+		201,
 	);
 });
 

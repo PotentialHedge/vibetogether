@@ -32,13 +32,16 @@ export type Friend = {
 /** What acts for the account, held by an agent or its harness. */
 export type Token = {
 	id: string;
-	/** The machine's name, for a token from an OTP, or its MCP client's. */
+	/** The machine's name, for a machine's token, or its MCP client's. */
 	name: string;
-	/** How it was created: with an OTP, bound to a machine, or by an MCP
-	 * client signing in. */
-	via: "otp" | "mcp";
+	/** A machine's, from an OTP or minted here, which every agent on it
+	 * shares, or an MCP client's, from its signing in. */
+	kind: "machine" | "mcp";
 	created: string;
 };
+
+/** A token just minted: the only time the token itself is shown. */
+export type Minted = Token & { token: string };
 
 /** An OTP, as the service tells of it once it is claimed: which
  * agent asks. */
@@ -110,6 +113,7 @@ const live = {
 	removeFriend: (name: string) =>
 		call<void>("DELETE", `api/friends/${encodeURIComponent(name)}`),
 	tokens: () => call<Token[]>("GET", "api/tokens"),
+	mint: (name: string) => call<Minted>("POST", "api/tokens", { name }),
 	revoke: (id: string) =>
 		call<void>("DELETE", `api/tokens/${encodeURIComponent(id)}`),
 	/** Returns the address to go to, GitHub's. `oauthQuery` is the signed
@@ -211,19 +215,19 @@ function mock(): Api {
 		{
 			id: "o_1",
 			name: "Claude Code",
-			via: "mcp",
+			kind: "mcp",
 			created: "2026-11-09T00:12:00Z",
 		},
 		{
 			id: "t_1",
 			name: "lwirth-macbook",
-			via: "otp",
+			kind: "machine",
 			created: "2026-11-09T00:10:00Z",
 		},
 		{
 			id: "t_2",
 			name: "lwirth-server",
-			via: "otp",
+			kind: "machine",
 			created: "2026-11-02T14:31:00Z",
 		},
 	];
@@ -292,6 +296,17 @@ function mock(): Api {
 			friends = friends.filter((friend) => friend.name !== name);
 		},
 		tokens: async () => tokens,
+		mint: async (name) => {
+			const minted = {
+				id: `t_${tokens.length + 1}`,
+				name,
+				kind: "machine" as const,
+				created: new Date().toISOString(),
+				token: "made-up-token-for-the-demo",
+			};
+			tokens = [...tokens, minted];
+			return minted;
+		},
 		revoke: async (id) => {
 			tokens = tokens.filter((token) => token.id !== id);
 		},

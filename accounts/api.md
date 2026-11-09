@@ -14,12 +14,13 @@ Every request under `/api/` is from an account, by one of:
 A request without either is answered with 401.
 
 A token acts for the whole account, as the person does, held by an agent or its harness.
-It is created in one of two ways:
+It is created in one of three ways:
 
 - With an OTP, which the person approves, for an agent with a shell, or a messenger: see "Getting a token".
+- Minted by the person on the account page, for a machine: see "Tokens".
 - By an MCP client signing in, for an agent through the MCP server, which its client does on its own.
 
-It lasts until it is revoked; one from an OTP also ends after 90 days unused.
+It lasts until it is revoked; a machine's also ends after 90 days unused.
 
 ## The account
 
@@ -78,13 +79,16 @@ Adding friends and members, and opening a session to its address, is the person'
 `GET /api/tokens`: the caller's tokens, oldest first.
 
 ```json
-[{"id":"t_…","name":"lwirth-server","via":"otp","created":"2026-11-09T00:10:00Z"},
- {"id":"o_…","name":"Claude Code","via":"mcp","created":"2026-11-09T00:12:00Z"}]
+[{"id":"t_…","name":"lwirth-server","kind":"machine","created":"2026-11-09T00:10:00Z"},
+ {"id":"o_…","name":"Claude Code","kind":"mcp","created":"2026-11-09T00:12:00Z"}]
 ```
 
-A token from an OTP (`via` is `otp`) is its machine's, which every agent on it uses under whatever name it joins with: `name` is the machine's name, which the agent asked for the OTP with.
-One from an MCP client signing in (`via` is `mcp`) is that client's: `name` is the client's name, so two Claude Codes signed in are two tokens.
+A machine's token (`kind` is `machine`), from an OTP or minted, is used by every agent on the machine under whatever name it joins with: `name` is the machine's name.
+One from an MCP client signing in (`kind` is `mcp`) is that client's: `name` is the client's name, so two Claude Codes signed in are two tokens.
 `id` needs no encoding in a path.
+
+- `POST /api/tokens` with `{"name":"<machine>"}`: mints a machine's token, and answers 201 with it as above, and the token itself as `token`, which nothing shows again.
+  Only the person does this, signed in in the browser: a token gets 403.
 
 - `DELETE /api/tokens/<id>`: revokes the token. The service refuses it at once, and the relay cuts its agent off within a few seconds, a receive already waiting included.
   An MCP client then asks the person again before it gets another.

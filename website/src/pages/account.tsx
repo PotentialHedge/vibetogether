@@ -6,6 +6,7 @@ import {
 	demo,
 	type Friend,
 	type Me,
+	type Minted,
 	type Session,
 	type Token,
 	Unauthorized,
@@ -53,7 +54,7 @@ function Dashboard({
 }) {
 	const { me, sessions, friends, tokens } = state;
 	const { problem, act } = useActions(reload);
-	const connect = `Read ${page("agents.md")} and connect to my Vibe Together account.`;
+	const [minted, setMinted] = useState<Minted | null>(null);
 
 	return (
 		<div className="mx-auto flex w-full max-w-4xl flex-col gap-14 px-6 pt-12 md:pt-16">
@@ -142,14 +143,25 @@ function Dashboard({
 			<Panel
 				title="Tokens"
 				description="A token connects an agent to your account, until you revoke it."
+				action={
+					<AddByName
+						placeholder="machine name"
+						label="Mint new token"
+						onAdd={async (name) => {
+							setMinted(await api.mint(name));
+							await reload();
+						}}
+					/>
+				}
 			>
+				{minted && <MintedToken minted={minted} />}
 				{tokens.length === 0 ? (
 					<Empty>No token yet.</Empty>
 				) : (
 					tokens.map((token) => (
 						<Row key={token.id}>
 							<span className="flex items-center gap-2 font-mono">
-								{token.via === "mcp" ? (
+								{token.kind === "mcp" ? (
 									<Plug
 										aria-label="MCP"
 										className="size-4 text-muted-foreground"
@@ -176,17 +188,37 @@ function Dashboard({
 						</Row>
 					))
 				)}
-				<div className="flex flex-col gap-2 bg-background/40 px-5 py-4">
-					<p className="text-sm text-muted-foreground">
-						To create a token, give your agent this prompt. It sends you an OTP
-						to approve here. An agent through the MCP server asks you to sign in
-						instead.
-					</p>
-					<pre className="rounded-lg border bg-background/80 px-3 py-2 font-mono text-sm whitespace-pre-wrap">
-						{connect}
-					</pre>
-				</div>
 			</Panel>
+		</div>
+	);
+}
+
+/** A token just minted, shown this once, with where to keep it. */
+function MintedToken({ minted }: { minted: Minted }) {
+	const [copied, setCopied] = useState(false);
+	return (
+		<div className="flex flex-col gap-3 bg-background/40 px-5 py-4">
+			<p className="text-sm text-pretty">
+				The token for <span className="font-mono">{minted.name}</span>, shown
+				only now. Save it on that machine in{" "}
+				<code className="font-mono">~/.config/vibetogether/token</code>, where
+				its agents look for it. Don't paste it into a chat: it acts for your
+				account.
+			</p>
+			<div className="flex flex-wrap items-center gap-2">
+				<code className="min-w-0 flex-1 rounded-lg border bg-background/80 px-3 py-2 font-mono text-sm break-all">
+					{minted.token}
+				</code>
+				<Button
+					variant="outline"
+					onClick={async () => {
+						await navigator.clipboard.writeText(minted.token);
+						setCopied(true);
+					}}
+				>
+					{copied ? "Copied" : "Copy"}
+				</Button>
+			</div>
 		</div>
 	);
 }
