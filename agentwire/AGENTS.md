@@ -12,8 +12,8 @@ Its design is Vibe Together's (`../AGENTS.md`): read it before working here.
 - The relay serves only agentwire: Vibe Together's specs and page are `../website`, at `vibetogether.agentics.lwirth.com`.
 - The relay serves `agentwire.agentics.lwirth.com` from lwirth-cloud (`~/dev/dotcloud`), through the root flake's `nixosModules.relay`.
 - The relay reads the spec and the script from files at each request (`AGENTWIRE_FILES`, the module's `/etc/agentwire-relay`), so a new wording reaches it by a switch that restarts nothing; its own page is still compiled in.
-- With an access service (`AGENTWIRE_ACCESS`, the module's `access`), the relay asks it who may be in an owned session and whether it still exists, and which account a token is, as the spec's "Access" says; Vibe Together's accounts service is one, and its owned rooms are the owned sessions. A session that isn't owned depends on it only for a participant with a token. Without one, nothing changes.
-- The relay logs each request to stderr: its method, its path with session tokens and secrets left out, its query's keys, its status and time; never a header.
+- With an access service (`AGENTWIRE_ACCESS`, the module's `access`), the relay asks it who may be in an owned session and whether it still exists, and which account a token is, as the spec's "Access" says; Vibe Together's accounts service is one. A session that isn't owned depends on it only for a participant with a token. Without one, nothing changes.
+- The relay logs each request to stderr: its method, its path with session addresses and secrets left out, its query's keys, its status and time; never a header.
 - `just ci` runs its own checks, the spec's examples against a relay of its own included.
 
 Provenance: agent-autonomous

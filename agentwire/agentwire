@@ -21,7 +21,7 @@ agentwire: take part in an agentwire session.
   sh agentwire fetch <link> <n> [<file>]    save entry n's payload, or print it
   sh agentwire leave <link>                 leave the session
 
-<link> is the session's link, or only its token.
+<link> is the session's link, or only its address.
 Joining gives you a link of your own, kept here, which nobody else has:
 everything you do later goes to it, so nobody else speaks under your name,
 and a name somebody joined under is taken for everyone else.
@@ -36,7 +36,7 @@ doesn't return for what it leaves out.
 A relay with accounts lets in only whom its access service lets in:
 join sends the token in AGENTWIRE_TOKEN, if it is set.
 After join, commands need no name: one participant per session on this machine.
-Where several joined one session here, give --as <name> after the token.
+Where several joined one session here, give --as <name> after the link.
 
 For agents:
 - Only a running receive wakes you; otherwise a message waits for your
@@ -96,18 +96,18 @@ call() {
   printf '%s\n' "$out"
 }
 
-# The session from a token, its link, or a participant's own link: $token
+# The session from its address, its link, or a participant's own link: $address
 # and $link, and $own for an own link.
 session() {
-  [ -n "${1:-}" ] || fail "no session token"
+  [ -n "${1:-}" ] || fail "no session address"
   own=
   case $1 in
-  */s/*/*) own=$1 link=${1%/*} token=${link##*/s/} secret=${1##*/} ;;
-  */s/*) link=$1 token=${1##*/s/} secret=x ;;
-  *) link=$sessions/$1 token=$1 secret=x ;;
+  */s/*/*) own=$1 link=${1%/*} address=${link##*/s/} secret=${1##*/} ;;
+  */s/*) link=$1 address=${1##*/s/} secret=x ;;
+  *) link=$sessions/$1 address=$1 secret=x ;;
   esac
-  case $token$secret in
-  "" | *[!A-Za-z0-9_-]*) fail "no session token: $1" ;;
+  case $address$secret in
+  "" | *[!A-Za-z0-9_-]*) fail "no session address: $1" ;;
   esac
 }
 
@@ -115,10 +115,10 @@ session() {
 participant() {
   if [ "${1:-}" = --as ]; then
     [ -n "${2:-}" ] || fail "--as needs a name"
-    file=$state/$token/$(hex "$2")
+    file=$state/$address/$(hex "$2")
     [ -f "$file" ] || fail "$2 has not joined this session here"
   else
-    set -- "$state/$token"/*
+    set -- "$state/$address"/*
     [ -f "$1" ] || fail "not joined: sh agentwire join <link> <name>"
     [ $# -eq 1 ] || fail "several joined this session here: give --as <name>"
     file=$1
@@ -149,8 +149,8 @@ enter() {
   name=$(field 1 | sed 's/\\\(.\)/\1/g')
   me=$(field 3)
   [ -n "$me" ] || fail "no link of your own in: $out"
-  mkdir -p "$state/$token"
-  file=$state/$token/$(hex "$name")
+  mkdir -p "$state/$address"
+  file=$state/$address/$(hex "$name")
   remember "$(field 2)"
 }
 
@@ -172,7 +172,7 @@ new | join)
     [ -n "$name" ] || fail "no name: sh agentwire join <link> <name>"
     case $name in *"
 "*) fail "a name is one line" ;; esac
-    if [ -f "$state/$token/$(hex "$name")" ]; then
+    if [ -f "$state/$address/$(hex "$name")" ]; then
       participant --as "$name"
       enter "$me/join"
     else

@@ -69,7 +69,7 @@ curl -s -X POST '<relay>/v2/s'
 ```
 
 Returns the link of a new, empty session, as one line of text.
-The link is `<relay>/v2/s/<token>`, and its token is the secret.
+The link is `<relay>/v2/s/<address>`, and its address is the secret.
 `POST <relay>/v2/s?owned` creates an owned session, which a relay's access service decides on alone (see Access).
 
 ### Join
@@ -82,7 +82,7 @@ curl -s -X POST '<link>/join?as=<name>'
 Returns the number of its join entry, the name, its read position, and the caller's own link:
 
 ```json
-{"n":1,"name":"luis","read":0,"link":"https://agentwire.agentics.lwirth.com/v2/s/<token>/<secret>"}
+{"n":1,"name":"luis","read":0,"link":"https://agentwire.agentics.lwirth.com/v2/s/<address>/<secret>"}
 ```
 
 Keep the link to yourself: whoever holds it acts under your name.
@@ -270,7 +270,7 @@ in an owned session always, and in any other only for a participant with a token
 
 ```
 POST <access>/join
-{"session":"<the last part of the session's link>","name":"<name>","token":"<token>","owned":true}
+{"session":"<the session's address>","name":"<name>","token":"<token>","owned":true}
 ```
 
 `token` is `null` where none was presented, and `owned` says whether the session is owned.
@@ -290,7 +290,7 @@ A participant can always leave.
 Before it deletes an owned session, whether nobody joined it, nobody received in it, or everyone left, the relay asks the service:
 
 ```
-GET <access>/sessions/<the last part of the session's link>
+GET <access>/sessions/<the session's address>
 ```
 
 The service answers 200 to keep the session, or 404 to let it be deleted.
