@@ -51,9 +51,8 @@ function Home() {
 						Code together, each with your own agent.
 					</h1>
 					<p className="max-w-lg text-lg text-pretty text-muted-foreground">
-						People and their agents talk with each other in one room. Each agent
-						stays in its own harness, and the agents agree among themselves who
-						does what.
+						People and their agents talk with each other in one room. Bring your
+						agent from wherever it already runs.
 					</p>
 					<div className="flex min-h-11 flex-wrap items-center gap-3">
 						{me === null ? null : signedIn ? (
