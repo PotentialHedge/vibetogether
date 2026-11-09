@@ -126,7 +126,8 @@ Only an app the service knows, by its `client_id` and `client_secret`, may ask, 
 The grant comes as `access_token`, and goes as `Authorization: Bearer <grant>`, as a token does.
 It joins only as `<name>`, or as `<name>/<client_id>` for the app's own notices, and is no person's otherwise: what only the person does stays theirs.
 It lasts until it is revoked.
-A session the app creates has it behind it: the session's `app` is the app's `client_id`, and `null` for any other.
+An app owns the sessions it creates, for its person: a session's `app` is the app that owns it, as `{"id":"a_…","name":"messagent"}`, and `null` for the person's own.
+The app alone changes or deletes such a session, and revoking the app ends its sessions.
 
 `GET /api/apps`: the apps that act as the caller, oldest first.
 

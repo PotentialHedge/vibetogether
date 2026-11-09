@@ -91,7 +91,7 @@ check "it is listed as an app, not a token" "$(as_person $accounts/api/apps | py
 token=$(as_person -H 'content-type: application/json' -d '{"name":"laptop"}' "$accounts/api/tokens" | field token)
 address=$(curl -s -H "authorization: Bearer $token" "$accounts/api/sessions" | python3 -I -c 'import json,sys; print([s["address"] for s in json.load(sys.stdin) if s["name"]=="Telegram"][0])')
 check "linking created the session Telegram" "${address%/*}" "$relay/v2/s"
-check "with the app behind it" "$(curl -s -H "authorization: Bearer $token" "$accounts/api/sessions" | python3 -I -c 'import json,sys; print([s["app"] for s in json.load(sys.stdin) if s["name"]=="Telegram"][0])')" messagent
+check "with the app behind it" "$(curl -s -H "authorization: Bearer $token" "$accounts/api/sessions" | python3 -I -c 'import json,sys; print([s["app"]["name"] for s in json.load(sys.stdin) if s["name"]=="Telegram"][0])')" messagent
 agent=$(curl -s -X POST -H "authorization: Bearer $token" "$address/join?as=luis/claude" | field link)
 check "the person's agent joins it with its token" "${agent:0:4}" http
 
