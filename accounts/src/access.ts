@@ -51,13 +51,18 @@ access.post("/join", async (c) => {
 			"The token is no valid token: it was revoked, or it expired.",
 			403,
 		);
-	// An app that acts as its person joins as the person alone, and an agent's token never does.
-	if (caller?.actsAsPerson && name !== caller.login)
+	// An app that acts as its person joins as the person, or as itself for its own notices,
+	// and an agent's token never as the person.
+	if (
+		caller?.app &&
+		name !== caller.login &&
+		name !== `${caller.login}/${caller.app}`
+	)
 		return c.text(
-			`The token acts as ${caller.login}, so it joins only as ${caller.login}.`,
+			`The token acts as ${caller.login}, so it joins only as ${caller.login} or ${caller.login}/${caller.app}.`,
 			403,
 		);
-	if (caller && !caller.actsAsPerson && !isAgentOf(name, caller.login))
+	if (caller && !caller.app && !isAgentOf(name, caller.login))
 		return c.text(
 			`The token is ${caller.login}'s, so it joins only as ${caller.login}/<agent>.`,
 			403,

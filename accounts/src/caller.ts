@@ -2,13 +2,14 @@ import { auth, oauthAccessTokenPrefix, tokenHash } from "./auth.ts";
 import { db } from "./db.ts";
 
 /**
- * An account, as a request is from it. `actsAsPerson` is an app's token that acts as the person,
- * which joins as the person's own name. `token` is the token's id, as `/api/tokens` lists it.
+ * An account, as a request is from it. `app` is set for an app's token that acts as the person,
+ * the app's `client_id`, which only an app the service knows gets. `token` is the token's id,
+ * as `/api/tokens` lists it.
  */
 export type Caller = {
 	id: string;
 	login: string;
-	actsAsPerson: boolean;
+	app?: string;
 	token?: string;
 };
 
@@ -35,7 +36,6 @@ function oauthCaller(token: string): Caller | undefined {
 		row && {
 			id: row.id,
 			login: row.login,
-			actsAsPerson: false,
 			token: `o_${Buffer.from(row.grant).toString("base64url")}`,
 		}
 	);
@@ -57,7 +57,7 @@ export async function callerOf(headers: Headers): Promise<Caller | undefined> {
 	return {
 		id: session.user.id,
 		login: (session.user as { login: string }).login,
-		actsAsPerson: person === true,
+		...(person === true && agent && { app: agent }),
 		...(agent && { token: `t_${session.session.id}` }),
 	};
 }

@@ -25,6 +25,10 @@ const tokenEndpoints = new Set([
 
 // Better Auth's own: signing in, OTPs, and the OAuth server with its metadata.
 app.on(["GET", "POST"], ["/api/auth/*", "/.well-known/*"], async (c) => {
+	// Only the canonical path, so that no variant, such as with a trailing or a doubled slash,
+	// reaches an endpoint past the checks below, which match the path exactly.
+	if (c.req.path.replace(/\/{2,}/g, "/").replace(/(.)\/$/, "$1") !== c.req.path)
+		return c.text("Not found.", 404);
 	if (
 		c.req.header("authorization") &&
 		!c.req.path.startsWith("/.well-known/") &&

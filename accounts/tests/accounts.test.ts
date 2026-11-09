@@ -799,6 +799,9 @@ test("an app acts as its person only with its secret, the person's approval, and
 			owned: true,
 		});
 	assert.deepEqual((await join("luis", token)).json, { account: "luis" });
+	assert.deepEqual((await join("luis/messagent", token)).json, {
+		account: "luis",
+	});
 	assert.equal((await join("luis/claude", token)).status, 403);
 	assert.equal((await join("ben", token)).status, 403);
 	// An agent's token still never joins as the person.
@@ -809,6 +812,29 @@ test("an app acts as its person only with its secret, the person's approval, and
 		(await call(token, "PUT", "/api/friends/ben")).status,
 		403,
 	);
+	const other = await ask({ client_secret: "a-secret-of-the-bot" });
+	for (const [path, body] of [
+		["/api/auth/device/approve", { userCode: other.json.user_code }],
+		["/api/auth/device/deny", { userCode: other.json.user_code }],
+		["/api/auth/update-user", { name: "x" }],
+	] as const)
+		assert.equal((await call(token, "POST", path, body)).status, 403, path);
+	// No variant of a path gets past the checks that match it exactly.
+	for (const path of [
+		"/api/auth/device/code/",
+		"/api/auth//device/code",
+		"/api/auth/device/token/",
+	])
+		assert.equal(
+			(
+				await call(null, "POST", path, {
+					client_id: "messagent",
+					scope: "person",
+				})
+			).status,
+			404,
+			path,
+		);
 
 	// Unlinking from the app's side.
 	assert.equal((await call(token, "DELETE", "/api/tokens/self")).status, 204);

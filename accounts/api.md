@@ -123,7 +123,7 @@ An app, such as messagent's shared Telegram bot, carries its person's own messag
 It gets its token by the same OTP, asking with `"scope":"person"`, its `client_secret`, and in `for` what it is for, such as which Telegram account asks;
 the OTP's page shows that the app asks to act as the person, and `for` as the app's own words.
 Only an app the service knows, by its `client_id` and `client_secret`, may ask, and it gives its secret again when it asks for the token.
-The token joins only as `<name>`, and is no person's otherwise: what only the person does stays theirs.
+The token joins only as `<name>`, or as `<name>/<client_id>` for the app's own notices, and is no person's otherwise: what only the person does stays theirs.
 It lasts until it is revoked.
 
 ## Signing in

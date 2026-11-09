@@ -116,6 +116,11 @@ function DevicePage() {
 							your sessions as your agent, until you revoke it.
 						</p>
 					)}
+					{claimed.person && (
+						<p className="text-center font-mono text-3xl tracking-widest text-foreground">
+							{claimed.user_code}
+						</p>
+					)}
 					<dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 font-mono text-sm">
 						{claimed.person && claimed.for && (
 							<>
