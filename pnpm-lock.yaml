@@ -48,6 +48,85 @@ importers:
         specifier: ^7.0.2
         version: 7.0.2
 
+  apps/voice:
+    dependencies:
+      '@base-ui/react':
+        specifier: ^1.9.0
+        version: 1.9.0(@types/react@19.3.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
+      '@fontsource-variable/geist':
+        specifier: ^5.3.0
+        version: 5.3.0
+      agentwire:
+        specifier: workspace:*
+        version: link:../../agentwire
+      class-variance-authority:
+        specifier: ^0.7.1
+        version: 0.7.1
+      cn:
+        specifier: ^0.5.0
+        version: 0.5.2
+      lucide-react:
+        specifier: ^1.60.0
+        version: 1.70.0(@types/react@19.3.0)(react@19.3.1)
+      onnxruntime-web:
+        specifier: 1.30.0
+        version: 1.30.0(patch_hash=486aaa1ab01a7e27ce6ec974d994976a8f8f5884306fe71c43be574a33919053)
+      react:
+        specifier: ^19.3.1
+        version: 19.3.1
+      react-dom:
+        specifier: ^19.3.1
+        version: 19.3.1(react@19.3.1)
+      shadcn:
+        specifier: ^4.22.1
+        version: 4.23.0
+      tw-animate-css:
+        specifier: ^1.4.0
+        version: 1.4.0
+      ui:
+        specifier: workspace:*
+        version: link:../../ui
+      voice-core:
+        specifier: workspace:*
+        version: link:core
+    devDependencies:
+      '@tailwindcss/vite':
+        specifier: ^4.3.3
+        version: 4.3.5(vite@8.3.6(@types/node@26.6.6)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15))
+      '@types/node':
+        specifier: ^26.6.5
+        version: 26.6.6
+      '@types/react':
+        specifier: ^19.3.0
+        version: 19.3.0
+      '@types/react-dom':
+        specifier: ^19.3.0
+        version: 19.3.0(@types/react@19.3.0)
+      '@vitejs/plugin-react':
+        specifier: ^6.1.2
+        version: 6.2.1(vite@8.3.6(@types/node@26.6.6)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15))
+      playwright-core:
+        specifier: ^1.64.1
+        version: 1.65.0
+      tailwindcss:
+        specifier: ^4.3.3
+        version: 4.3.5
+      tsx:
+        specifier: ^4.23.15
+        version: 4.23.15
+      typescript:
+        specifier: ^7.0.2
+        version: 7.0.2
+      vite:
+        specifier: ^8.3.4
+        version: 8.3.6(@types/node@26.6.6)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)
+
+  apps/voice/core:
+    dependencies:
+      onnxruntime-web:
+        specifier: 1.30.0
+        version: 1.30.0(patch_hash=486aaa1ab01a7e27ce6ec974d994976a8f8f5884306fe71c43be574a33919053)
+
   library:
     dependencies:
       '@base-ui/react':
@@ -103,7 +182,22 @@ importers:
         specifier: ^8.3.4
         version: 8.3.6(@types/node@26.6.6)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)
 
-  site:
+  ui:
+    devDependencies:
+      '@types/react':
+        specifier: ^19.3.0
+        version: 19.3.0
+      agentwire:
+        specifier: workspace:*
+        version: link:../agentwire
+      react:
+        specifier: '>=19'
+        version: 19.3.1
+      typescript:
+        specifier: ^7.0.2
+        version: 7.0.2
+
+  website:
     dependencies:
       '@base-ui/react':
         specifier: ^1.9.0
@@ -138,9 +232,9 @@ importers:
       tw-animate-css:
         specifier: ^1.4.0
         version: 1.4.0
-      vibetogether-web:
+      ui:
         specifier: workspace:*
-        version: link:../web
+        version: link:../ui
     devDependencies:
       '@tailwindcss/vite':
         specifier: ^4.3.3
@@ -166,100 +260,6 @@ importers:
       vite:
         specifier: ^8.3.4
         version: 8.3.6(@types/node@26.6.6)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)
-
-  voice:
-    dependencies:
-      '@base-ui/react':
-        specifier: ^1.9.0
-        version: 1.9.0(@types/react@19.3.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
-      '@fontsource-variable/geist':
-        specifier: ^5.3.0
-        version: 5.3.0
-      agentwire:
-        specifier: workspace:*
-        version: link:../agentwire
-      class-variance-authority:
-        specifier: ^0.7.1
-        version: 0.7.1
-      cn:
-        specifier: ^0.5.0
-        version: 0.5.2
-      lucide-react:
-        specifier: ^1.60.0
-        version: 1.70.0(@types/react@19.3.0)(react@19.3.1)
-      onnxruntime-web:
-        specifier: 1.30.0
-        version: 1.30.0(patch_hash=486aaa1ab01a7e27ce6ec974d994976a8f8f5884306fe71c43be574a33919053)
-      react:
-        specifier: ^19.3.1
-        version: 19.3.1
-      react-dom:
-        specifier: ^19.3.1
-        version: 19.3.1(react@19.3.1)
-      shadcn:
-        specifier: ^4.22.1
-        version: 4.23.0
-      tw-animate-css:
-        specifier: ^1.4.0
-        version: 1.4.0
-      vibetogether-web:
-        specifier: workspace:*
-        version: link:../web
-      voice-core:
-        specifier: workspace:*
-        version: link:core
-    devDependencies:
-      '@tailwindcss/vite':
-        specifier: ^4.3.3
-        version: 4.3.5(vite@8.3.6(@types/node@26.6.6)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15))
-      '@types/node':
-        specifier: ^26.6.5
-        version: 26.6.6
-      '@types/react':
-        specifier: ^19.3.0
-        version: 19.3.0
-      '@types/react-dom':
-        specifier: ^19.3.0
-        version: 19.3.0(@types/react@19.3.0)
-      '@vitejs/plugin-react':
-        specifier: ^6.1.2
-        version: 6.2.1(vite@8.3.6(@types/node@26.6.6)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15))
-      playwright-core:
-        specifier: ^1.64.1
-        version: 1.65.0
-      tailwindcss:
-        specifier: ^4.3.3
-        version: 4.3.5
-      tsx:
-        specifier: ^4.23.15
-        version: 4.23.15
-      typescript:
-        specifier: ^7.0.2
-        version: 7.0.2
-      vite:
-        specifier: ^8.3.4
-        version: 8.3.6(@types/node@26.6.6)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)
-
-  voice/core:
-    dependencies:
-      onnxruntime-web:
-        specifier: 1.30.0
-        version: 1.30.0(patch_hash=486aaa1ab01a7e27ce6ec974d994976a8f8f5884306fe71c43be574a33919053)
-
-  web:
-    devDependencies:
-      '@types/react':
-        specifier: ^19.3.0
-        version: 19.3.0
-      agentwire:
-        specifier: workspace:*
-        version: link:../agentwire
-      react:
-        specifier: '>=19'
-        version: 19.3.1
-      typescript:
-        specifier: ^7.0.2
-        version: 7.0.2
 
 packages:
 

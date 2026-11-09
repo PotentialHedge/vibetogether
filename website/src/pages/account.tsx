@@ -1,6 +1,6 @@
 import { Monitor, Plug } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
-import { Frame } from "vibetogether-web/onboard";
+import { Frame } from "ui/onboard";
 import {
 	api,
 	demo,

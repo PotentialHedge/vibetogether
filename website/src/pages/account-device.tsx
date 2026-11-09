@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { Frame } from "vibetogether-web/onboard";
+import { Frame } from "ui/onboard";
 import { api, type Device } from "@/account/api";
 import { SignIn, useMe } from "@/account/sign-in";
 import { Input } from "@/components/ui/input";

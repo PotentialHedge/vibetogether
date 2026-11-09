@@ -1,4 +1,4 @@
-import { Frame } from "vibetogether-web/onboard";
+import { Frame } from "ui/onboard";
 import { SignIn } from "@/account/sign-in";
 import { page, render, Site } from "@/site";
 

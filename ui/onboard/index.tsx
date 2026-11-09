@@ -1,7 +1,7 @@
 /** The page a person meets first on any Vibe Together service: one prompt to give
  * their agent, which does everything else. Styled with Tailwind and shadcn's
  * theme variables, so it takes on each service's theme; the service adds this
- * directory to Tailwind's sources, as `@source "../node_modules/vibetogether-web/onboard"`. */
+ * directory to Tailwind's sources, as `@source "../node_modules/ui/onboard"`. */
 
 import { type ReactNode, useState } from "react";
 

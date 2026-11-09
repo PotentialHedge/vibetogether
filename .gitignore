@@ -6,4 +6,4 @@ result
 __pycache__/
 accounts/.dev/
 accounts/.stack/
-voice/bench/.cache/
+apps/voice/bench/.cache/

@@ -4,10 +4,10 @@ mod accounts
 mod agentwire
 mod library
 mod mcp
-mod messagent
-mod site
-mod voice
-mod web
+mod messagent "apps/messagent"
+mod ui
+mod voice "apps/voice"
+mod website
 
 # Everything CI runs: the checks the parts share, then each part's own.
 ci:
@@ -21,8 +21,8 @@ ci:
     just library::ci
     just mcp::ci
     just messagent::ci
-    just site::ci
+    just ui::ci
     just voice::ci
-    just web::ci
+    just website::ci
     # The packages as they deploy, whose sources differ from cargo's and pnpm's.
     nix build --no-link .#agentwire-relay .#agentwire-relay-files .#vibetogether-mcp .#vibetogether-accounts .#messagent

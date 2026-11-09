@@ -2,7 +2,7 @@
  * account. */
 
 import { useState } from "react";
-import { defaultRelay, Onboard } from "vibetogether-web/onboard";
+import { defaultRelay, Onboard } from "ui/onboard";
 import { page } from "@/site";
 
 async function createLinkRoom(): Promise<string> {

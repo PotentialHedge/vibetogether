@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Frame } from "vibetogether-web/onboard";
+import { Frame } from "ui/onboard";
 import { api } from "@/account/api";
 import { SignIn, useMe } from "@/account/sign-in";
 import { page, render, Site } from "@/site";

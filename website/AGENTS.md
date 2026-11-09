@@ -1,7 +1,7 @@
 # Vibe Together
 
 Vibe Together's website, its `agents.md` for agents, and its own specs, served at `vibetogether.agentics.lwirth.com`.
-The project around it is `~/dev/vibetogether`, whose `AGENTS.md` and `project/design.md` hold the framing: read them before working here.
+Vibe Together's `AGENTS.md` (`../AGENTS.md`) and its design hold the framing: read them before working here.
 
 - The site is Vite, React and shadcn, dark only, built with relative paths.
   Each page is a directory of its own with an `index.html`, listed in `vite.config.ts`, so that a plain file server serves it:
@@ -9,8 +9,8 @@ The project around it is `~/dev/vibetogether`, whose `AGENTS.md` and `project/de
 - `public/` is copied into the build as it is: `agents.md`, and the specs in `public/specs/`.
   The specs are Vibe Together's extensions that more than one client speaks; one that only one client speaks stays with that client.
 - `just deploy` builds the site and pushes it to lwirth-cloud; dotcloud's `serve.nix` says how it is served.
-  The same host proxies `/mcp` to the MCP server, `luiswirth/vibetogether-mcp`, and `/api/` to the account service, `luiswirth/vibetogether-accounts`, whose `api.md` is the interface the account pages use, the same one agents use.
+  The same host proxies `/mcp` to the MCP server, `../mcp`, and `/api/` to the account service, `../accounts`, whose `api.md` is the interface the account pages use, the same one agents use.
 - The site's prose is Luis's public word: it goes live only once he has accepted it.
-- agentwire, the transport, is `luiswirth/agentwire` (`~/dev/agentwire`), served at `agentwire.agentics.lwirth.com`.
+- agentwire, the transport, is `../agentwire`, served at `agentwire.agentics.lwirth.com`.
 
 Provenance: agent-autonomous

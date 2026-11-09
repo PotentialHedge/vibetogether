@@ -8,7 +8,7 @@ bridge:
     #!/usr/bin/env bash
     set -euo pipefail
     cargo build --quiet -p messagent -p agentwire-relay
-    target="${CARGO_TARGET_DIR:-../target}/debug"
+    target="${CARGO_TARGET_DIR:-../../target}/debug"
     AGENTWIRE_ADDRESS=127.0.0.1:8792 "$target/agentwire-relay" &
     trap 'kill $!' EXIT
     tests/bridge.sh http://localhost:8792 "$target/messagent"

@@ -38,13 +38,20 @@
         [(rust pkgs) bacon cargo-edit nodejs pnpm biome just curl jq openssl python3 rsync ffmpeg-headless uv]
         ++ lib.optional stdenv.hostPlatform.isLinux chromium;
 
-    # A binary of the Cargo workspace. Cargo needs every member to build one,
-    # so each takes the Rust sources of all of them.
+    # A binary of the Cargo workspace, built from agentwire and the parts in
+    # `parts` alone, so that it changes with nothing else. Cargo needs every
+    # member of the workspace, so each of the other members is only its
+    # manifest, with an empty library as its source.
     rustPackage = pkgs: {
       pname,
+      parts ? [],
       binaries ? [pname],
       args ? {},
-    }:
+    }: let
+      rustFiles = lib.fileset.fileFilter (file: file.hasExt "rs" || file.name == "Cargo.toml");
+      manifests = lib.fileset.fileFilter (file: file.name == "Cargo.toml");
+      others = lib.filter (part: !(lib.elem part parts)) [./mcp ./apps/messagent];
+    in
       (pkgs.makeRustPlatform {
         cargo = rust pkgs;
         rustc = rust pkgs;
@@ -53,21 +60,30 @@
           version = "0.1.0";
           src = lib.fileset.toSource {
             root = ./.;
-            fileset = lib.fileset.unions [
-              ./Cargo.toml
-              ./Cargo.lock
-              (lib.fileset.fileFilter (file: file.hasExt "rs" || file.name == "Cargo.toml") ./agentwire)
-              ./agentwire/relay/people.html
-              (lib.fileset.fileFilter (file: file.hasExt "rs" || file.name == "Cargo.toml") ./mcp)
-              (lib.fileset.fileFilter (file: file.hasExt "rs" || file.name == "Cargo.toml") ./messagent)
-            ];
+            fileset = lib.fileset.unions ([
+                ./Cargo.toml
+                ./Cargo.lock
+                (rustFiles ./agentwire)
+                ./agentwire/relay/people.html
+              ]
+              ++ map rustFiles parts
+              ++ map manifests others);
           };
+          postPatch = ''
+            for manifest in $(find . -mindepth 2 -name Cargo.toml); do
+              dir=$(dirname "$manifest")
+              [ -n "$(find "$dir" -name '*.rs')" ] || { mkdir -p "$dir/src"; touch "$dir/src/lib.rs"; }
+            done
+          '';
           cargoLock.lockFile = ./Cargo.lock;
           cargoBuildFlags = ["-p" pname];
           cargoTestFlags = ["-p" pname];
           # A binary names the toolchain's sources, in panic messages, which
           # would pull all of it into whatever runs it.
           nativeBuildInputs = [pkgs.removeReferencesTo];
+          # The HTTP client loads the system's certificates even for the tests'
+          # local relay, and the build sandbox has none.
+          nativeCheckInputs = [pkgs.cacert];
           postFixup = lib.concatMapStrings (binary: "remove-references-to -t ${rust pkgs} $out/bin/${binary}\n") binaries;
           disallowedReferences = [(rust pkgs)];
           meta.mainProgram = pname;
@@ -87,15 +103,14 @@
 
       vibetogether-mcp = rustPackage pkgs {
         pname = "vibetogether-mcp";
-        # The HTTP client loads the system's certificates even for the tests'
-        # local relay, and the build sandbox has none.
-        args.nativeCheckInputs = [pkgs.cacert];
+        parts = [./mcp];
       };
 
       # Both binaries: `messagent`, and `messagent-claude`, which wakes Claude
       # Code.
       messagent = rustPackage pkgs {
         pname = "messagent";
+        parts = [./apps/messagent];
         binaries = ["messagent" "messagent-claude"];
         args = {
           cargoBuildFlags = ["-p" "messagent" "-p" "messagent-claude"];
@@ -115,6 +130,8 @@
             ./pnpm-lock.yaml
             ./pnpm-workspace.yaml
             ./accounts/package.json
+            # pnpm checks every patch of the workspace before it installs.
+            ./apps/voice/patches
             ./accounts/src
           ];
         };
@@ -123,17 +140,19 @@
         pnpmDeps = pkgs.fetchPnpmDeps {
           inherit (finalAttrs) pname version src pnpmWorkspaces;
           fetcherVersion = 4;
-          hash = lib.fakeHash;
+          hash = "sha256-WSz+rd4814NsCadY+OGbQL0hxqHT1MnJXoQWfWA4nyg=";
           # pnpm leaves an empty `links` in its store on Darwin only, which
           # fetchPnpmDeps keeps, so the hash would differ between platforms.
           preFixup = "rm -rf $storePath/v11/links";
         };
         pnpmInstallFlags = ["--prod"];
         installPhase = ''
-          mkdir -p $out/lib/vibetogether-accounts
-          cp -r accounts/package.json accounts/src accounts/node_modules $out/lib/vibetogether-accounts
+          # The part's node_modules links into the workspace's, so both go.
+          mkdir -p $out/lib/vibetogether-accounts/accounts
+          cp -r node_modules $out/lib/vibetogether-accounts
+          cp -r accounts/package.json accounts/src accounts/node_modules $out/lib/vibetogether-accounts/accounts
           makeWrapper ${lib.getExe pkgs.nodejs} $out/bin/vibetogether-accounts \
-            --add-flags $out/lib/vibetogether-accounts/src/main.ts
+            --add-flags $out/lib/vibetogether-accounts/accounts/src/main.ts
         '';
         meta.mainProgram = "vibetogether-accounts";
       });
