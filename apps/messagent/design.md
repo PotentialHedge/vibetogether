@@ -37,7 +37,7 @@ A piece of Ag² (`~/dev/agentics`), in a public repository of its own, Luis's de
   CLIs are preferred, Luis's decision: "CLI are the way to go in gerneral for harness-agnostic things."
   Every agent has a shell, Luis's decision: "a agent that cannot use a shell is not an agent in my definition".
 - Voice notes use the speech engines of voice mode, ElevenLabs and local, Luis's decision.
-- It runs on the user's machine, where their agent already runs, Luis's decision.
+- It runs on the user's machine, where their agent already runs, Luis's decision; for Telegram superseded by the shared bot (2026-11-09).
   We host as little as possible, for cost and maintenance.
 - Discord was tried for calls and dropped, Luis's decision: it is not the phone experience, and every user would make an app by hand.
   The try is in the history of messagent#1.
@@ -48,7 +48,7 @@ A piece of Ag² (`~/dev/agentics`), in a public repository of its own, Luis's de
 - Telegram first, as a bot that is a contact of its own, with voice notes for now, Luis's decision.
   WhatsApp is not pursued for now: its setup and its rules on AI make it a hassle.
   Phone numbers for an agent's own account wait until a Telegram bot's limits are reached.
-- Onboarding creates the bot, through Telegram's managed bots, Luis's decision.
+- Superseded by the shared bot (2026-11-09): onboarding creates the bot, through Telegram's managed bots, Luis's decision.
   The manager bot is ours to host, kept tiny.
   It runs on lwirth-cloud, where everything public of Ag² runs, Luis's decision.
   Telegram Serverless can't host it: a machine can't reach a Serverless bot from outside, so it couldn't hand the token over.
@@ -63,9 +63,11 @@ A piece of Ag² (`~/dev/agentics`), in a public repository of its own, Luis's de
 - What we hand out is a prompt, which points the agent at the resources it reads, Luis's decision.
   Its page for people, `messagent.agentics.lwirth.com`, a domain of its own as every client has, shows the prompt most prominently, with a little explanation, and is nice to look at.
 
-- One bot is one agent, a session dedicated to it, Luis's decision: "i guess that IS the messAGENT."
-  What it does is the user's policy, such as a lead that delegates to other agents.
-  One Telegram bot for everything, Luis's decision.
+- One shared Vibe Together bot for everyone, Luis's agreement (2026-11-09), replacing "one bot is one agent":
+  the agent gives its person a `t.me/<bot>?start=<one-time code>` link, whose tap links that Telegram chat to the person's account and so verifies the person.
+- The shared bot runs as one service of ours, on lwirth-cloud, Luis's agreement (2026-11-09): "sounds good. but we need to make sure everything is secure".
+  Telegram gives a bot's updates to one receiver only, so it can't run on each person's machine; this replaces "it runs on the user's machine" for Telegram.
+  Its security is designed with vibetogether-security from the start, not only reviewed before deploy.
 - One messagent per messenger, each its own agent, Luis's decision:
   "most people (including me) will probably only run one messenger", and one agent managing several is "confusing and unnecessarily complicated".
   The implementation works for any messenger.
