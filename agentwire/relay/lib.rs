@@ -192,9 +192,16 @@ impl Relay {
         };
         let verdict = self
             .verdict(access, session, &name, token.or(kept.as_deref()))
-            .await?;
+            .await;
+        // Refused, its name is no longer vouched for.
+        if let Err(refused) = &verdict
+            && refused.status == StatusCode::FORBIDDEN
+            && vouched.is_some()
+        {
+            self.sessions().vouch(session, secret, None, None)?;
+        }
         // Without an answer, it goes on as it was.
-        let Some(Verdict::Admitted(account)) = verdict else {
+        let Some(Verdict::Admitted(account)) = verdict? else {
             return Ok(());
         };
         let token = token.filter(|token| Some(*token) != kept.as_deref());
@@ -548,7 +555,11 @@ async fn receive(relay: &Relay, id: &str, secret: &str, query: &str) -> Result<R
             }
         },
     };
-    match answer.map_err(|_| fail(503, "the relay can't answer right now"))? {
+    let answer = answer.map_err(|_| fail(503, "the relay can't answer right now"))?;
+    // A receive may wait long past the access service's yes, so it asks again
+    // before it hands anything over, and a revoked token reads nothing more.
+    relay.admit(id, secret, None).await?;
+    match answer {
         Answer::Lines(lines) => Ok(text(lines, "application/jsonl; charset=utf-8")),
         Answer::Replaced => Err(fail(409, "a newer receive replaced this one")),
     }

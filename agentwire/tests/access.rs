@@ -111,9 +111,35 @@ async fn only_whom_the_service_lets_in_takes_part() {
     let presence = client.receive(&claude.link, &now).await.unwrap().presence;
     assert_eq!(presence["luis/claude"].account.as_deref(), Some("luis"));
 
-    // Revoking cuts the participant once the relay's yes runs out.
+    // Revoking cuts the participant once the relay's yes runs out, a receive
+    // already waiting included, and its name is no longer verified.
+    stub.tokens
+        .lock()
+        .unwrap()
+        .insert("t-ben".into(), "ben".into());
+    let ben = client.join(&link, "ben", Some("t-ben")).await.unwrap();
+    let waiting = tokio::spawn({
+        let (client, me, after) = (client.clone(), claude.link.clone(), ben.n);
+        async move {
+            let wait = Receive {
+                after: Some(after),
+                wait: Some(Duration::from_secs(60)),
+                ..Receive::default()
+            };
+            client.receive(&me, &wait).await
+        }
+    });
+    tokio::time::sleep(Duration::from_millis(200)).await;
     stub.tokens.lock().unwrap().remove("t-luis");
     tokio::time::sleep(Duration::from_secs(6)).await;
+    client
+        .send(&ben.link, "text/plain", None, "After revoking.")
+        .await
+        .unwrap();
+    let woken = waiting.await.unwrap().unwrap_err();
+    assert_eq!(woken.status(), Some(403));
+    let presence = client.receive(&ben.link, &now).await.unwrap().presence;
+    assert_eq!(presence["luis/claude"].account, None);
     let cut = client
         .send(&claude.link, "text/plain", None, "Still here?")
         .await

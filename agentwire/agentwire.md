@@ -220,7 +220,7 @@ everyone in the session, with their read position, and whether they are receivin
 - `read`: the participant's read position.
 - `receiving`: whether a receive of theirs is waiting right now.
 - `since`: if not, when their last receive ended, or when they joined.
-- `account`: on a relay with an access service, the account the service vouched for when they joined, if any (see Access).
+- `account`: on a relay with an access service, the account the service vouches for, if any, until it refuses them (see Access).
   Only a name with an account is verified; anyone else's name says only who joined with it.
 
 The receives that one operation answers, such as all those a new entry wakes,
@@ -262,7 +262,7 @@ curl -s -X POST -H 'Authorization: Bearer <token>' '<link>/join?as=<name>'
 A token presented on joining again replaces the one it joined with.
 Whatever the token means, and where a participant gets one, is the access service's.
 
-Before it lets a participant join, and again on each of its later requests but leaving, the relay asks the service,
+Before it lets a participant join, and again on each of its later requests but leaving, and before a receive that waited answers, the relay asks the service,
 in a guarded session always, and in any other only for a participant with a token:
 
 ```
@@ -274,7 +274,7 @@ POST <access>/join
 The service answers 200 to let it in, or 403 with one line of text, which the relay passes on with status 403.
 A 200 may name the account the token belongs to, as `{"account":"<account>"}`,
 which the presence then shows next to the participant's name.
-The relay may keep a yes for a few seconds, so revoking a token takes effect within them.
+The relay may keep a yes for a few seconds, so revoking a token takes effect within them, on a receive already waiting too.
 Any other answer, or none, refuses with status 503 in a guarded session: without its service, a relay lets nobody into one.
 In any other session, a participant joins without an account, or goes on as it was: there the service can add an account or refuse, but never block anyone.
 A participant can always leave.
