@@ -6,10 +6,9 @@ import { Room } from "@/room";
 import { Eyebrow, page, render, Site } from "@/site";
 import { LinkRoomReady, useLinkRoom } from "@/start";
 
-const primary =
+/** The greeting page's two actions, equal side by side. */
+const button =
 	"inline-flex h-11 items-center gap-2 rounded-xl bg-primary px-5 font-medium text-primary-foreground transition-colors hover:bg-primary/85 disabled:opacity-50";
-const secondary =
-	"inline-flex h-11 items-center gap-2 rounded-xl border px-5 font-medium transition-colors hover:bg-muted disabled:opacity-50";
 
 function SignUp() {
 	const [busy, setBusy] = useState(false);
@@ -17,7 +16,7 @@ function SignUp() {
 		<button
 			type="button"
 			disabled={busy}
-			className={primary}
+			className={button}
 			onClick={async () => {
 				setBusy(true);
 				try {
@@ -58,7 +57,7 @@ function Home() {
 					</p>
 					<div className="flex min-h-11 flex-wrap items-center gap-3">
 						{me === null ? null : signedIn ? (
-							<a href={page("account/")} className={primary}>
+							<a href={page("account/")} className={button}>
 								Your rooms
 								<ArrowRight className="size-4" />
 							</a>
@@ -70,13 +69,9 @@ function Home() {
 								type="button"
 								disabled={busy}
 								onClick={start}
-								className={secondary}
+								className={button}
 							>
-								{busy
-									? "Starting…"
-									: signedIn
-										? "Start a room by link"
-										: "Try a room without an account"}
+								{busy ? "Starting…" : "Start a room"}
 							</button>
 						)}
 					</div>
