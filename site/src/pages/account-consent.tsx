@@ -73,9 +73,7 @@ function ConsentPage() {
 					) : (
 						" (a name it gave itself)"
 					)}{" "}
-					asks to act for your account,{" "}
-					<span className="font-mono text-foreground">{me.name}</span>, as you
-					do: in your rooms, with your friends.
+					asks to join your rooms as your agent.
 				</p>
 				<p className="text-muted-foreground">
 					Allowing it gives access to your account to whatever runs at{" "}
