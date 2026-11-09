@@ -230,6 +230,8 @@ impl Drop for Waiting<'_> {
 }
 
 async fn handle(State(relay): State<Arc<Relay>>, request: Request) -> Response {
+    let started = std::time::Instant::now();
+    let (method, target) = (request.method().clone(), logged(request.uri()));
     let receiving = request.method() == Method::GET && in_session(request.uri().path());
     let mut response = if request.method() == Method::OPTIONS {
         StatusCode::NO_CONTENT.into_response()
@@ -246,7 +248,30 @@ async fn handle(State(relay): State<Arc<Relay>>, request: Request) -> Response {
             .headers_mut()
             .insert(name, HeaderValue::from_static(value));
     }
+    let (status, took) = (response.status().as_u16(), started.elapsed().as_millis());
+    eprintln!("{method} {target} {status} {took}ms");
     response
+}
+
+/// A request's target as the log keeps it: a session's token and a participant's
+/// secret are secrets, so they are left out, and so are the query's values, which
+/// hold names; the operation and the query's keys stay.
+fn logged(uri: &axum::http::Uri) -> String {
+    let mut path: Vec<&str> = uri.path().split('/').collect();
+    if let Some(at) = path.iter().position(|part| *part == "s") {
+        for part in path.iter_mut().skip(at + 1).take(2) {
+            if !part.is_empty() && *part != "join" {
+                *part = "…";
+            }
+        }
+    }
+    let keys: Vec<String> = form_urlencoded::parse(uri.query().unwrap_or("").as_bytes())
+        .map(|(key, _)| key.into_owned())
+        .collect();
+    match keys.is_empty() {
+        true => path.join("/"),
+        false => format!("{}?{}", path.join("/"), keys.join("&")),
+    }
 }
 
 /// Whether a path is a session's, of any version.
@@ -614,4 +639,24 @@ fn uri_component(text: &str) -> String {
             _ => format!("%{b:02X}"),
         })
         .collect()
+}
+
+#[cfg(test)]
+mod logged {
+    use super::logged;
+
+    #[test]
+    fn the_log_keeps_no_secret() {
+        let cases = [
+            ("/v2/s?guarded", "/v2/s?guarded"),
+            ("/v2/s/AAAA/join?as=luis", "/v2/s/…/join?as"),
+            ("/v2/s/AAAA/BBBB?after=3&wait=540", "/v2/s/…/…?after&wait"),
+            ("/v2/s/AAAA/BBBB/leave", "/v2/s/…/…/leave"),
+            ("/v2/s/AAAA/BBBB/7", "/v2/s/…/…/7"),
+            ("/agentwire.md", "/agentwire.md"),
+        ];
+        for (target, kept) in cases {
+            assert_eq!(logged(&target.parse().unwrap()), kept);
+        }
+    }
 }
