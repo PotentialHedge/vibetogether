@@ -10,14 +10,13 @@ import { cn } from "@/lib/utils";
 import { page } from "@/site";
 
 /** Copies the prompt that brings an agent into one of the account's rooms,
- * by its name: the agent finds its link through the account itself, so no
+ * by its id: the agent finds its link through the account itself, so no
  * secret passes through the person's paste. */
-function CopyRoomPrompt({ room, own }: { room: Room; own: boolean }) {
+function CopyRoomPrompt({ room }: { room: Room }) {
 	const [copied, setCopied] = useState(false);
-	const which = own
-		? `my room ${room.name}`
-		: `the room ${room.name} by ${room.owner}`;
-	const prompt = `Read ${page("agents.md")}, connect to my Vibe Together account, and join ${which}.`;
+	// By its id, never its name: the name is the owner's free text, which a
+	// member would paste to their agent as their own words.
+	const prompt = `Read ${page("agents.md")}, connect to my Vibe Together account, and join the room ${room.id}.`;
 	return (
 		<Button
 			variant="outline"
@@ -154,7 +153,7 @@ export function Rooms({
 									</span>
 								)
 							)}
-							<CopyRoomPrompt room={room} own={own} />
+							<CopyRoomPrompt room={room} />
 							{own && addable.length > 0 && (
 								<select
 									aria-label="Add a friend"
