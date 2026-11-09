@@ -81,7 +81,6 @@ function DevicePage() {
 		);
 
 	if (claimed) {
-		const agent = `${me.name}/${claimed.client_id}`;
 		const act = async (approve: boolean) => {
 			try {
 				await (approve
@@ -100,10 +99,12 @@ function DevicePage() {
 			>
 				<div className="flex flex-col gap-4 rounded-2xl border bg-card/60 p-5">
 					<p className="text-muted-foreground">
-						Approving gives whoever asked for this code your whole account, as
-						you have it: your rooms and your friends. It asks as{" "}
-						<span className="font-mono text-foreground">{agent}</span>, a name
-						it chose itself.
+						The machine{" "}
+						<span className="font-mono whitespace-nowrap text-foreground">
+							{claimed.client_id}
+						</span>{" "}
+						asks to connect to your account. Every agent on it can then use Vibe
+						Together, until you revoke it.
 					</p>
 					<dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 font-mono text-sm">
 						<dt className="text-muted-foreground">code</dt>
