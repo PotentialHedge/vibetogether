@@ -51,7 +51,7 @@ in {
       GITHUB_CLIENT_ID = cfg.github.clientId;
     };
     serviceConfig = {
-      ExecStart = lib.getExe self.packages.${pkgs.stdenv.hostPlatform.system}.default;
+      ExecStart = lib.getExe self.packages.${pkgs.stdenv.hostPlatform.system}.vibetogether-accounts;
       Restart = "on-failure";
       # Read by the service from $CREDENTIALS_DIRECTORY/github.
       LoadCredential = "github:${cfg.github.clientSecretFile}";

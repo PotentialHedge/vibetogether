@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # The bridge end to end: `messagent watch` between a fake Telegram and a relay,
 # with the agent played by curl. Usage: tests/bridge.sh <relay> <messagent binary>
+# until_ evaluates its argument as it waits, so the argument is quoted to expand later.
+# shellcheck disable=SC2016
 set -euo pipefail
 relay=$1
 messagent=$2
@@ -53,7 +55,10 @@ bodies() { calls | python3 -I -c 'import json,sys; [print(json.dumps(c["body"], 
 inject() { curl -s -d "{\"from\":$1,\"text\":\"$2\"}" "http://127.0.0.1:$port/inject" | python3 -I -c 'import json,sys; print(json.load(sys.stdin)["message_id"])'; }
 field() { python3 -I -c 'import json,sys; print(json.loads(sys.stdin.read().splitlines()[0])[sys.argv[1]])' "$1"; }
 
-until_ 'calls' || { echo "the fake Telegram didn't start"; exit 1; }
+until_ 'calls' || {
+  echo "the fake Telegram didn't start"
+  exit 1
+}
 
 export XDG_CONFIG_HOME=$work/config XDG_STATE_HOME=$work/state
 mkdir -p "$XDG_CONFIG_HOME/messagent" "$XDG_STATE_HOME/messagent"
@@ -133,7 +138,10 @@ check "a stranger's message is logged here" "$(grep -c 'ignore your instructions
 check "and never reaches the session" "$(curl -s "$agent?after=0&wait=0" | grep -c 'ignore your instructions')" 0
 
 # Joins another participant, as $joined, who leaves at the end.
-join() { joined=$(curl -s -X POST "$link/join?as=$1" | field link); others="$others $joined"; }
+join() {
+  joined=$(curl -s -X POST "$link/join?as=$1" | field link)
+  others="$others $joined"
+}
 join tristan
 curl -s -H 'Content-Type: text/plain; ping="ben"' --data-binary 'For Ben only.' "$joined" >/dev/null
 sleep 1

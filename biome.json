@@ -8,5 +8,11 @@
 		"parser": {
 			"tailwindDirectives": true
 		}
-	}
+	},
+	"overrides": [
+		{
+			"includes": ["accounts/tests/**"],
+			"linter": { "rules": { "suspicious": { "noExplicitAny": "off" } } }
+		}
+	]
 }

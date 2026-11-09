@@ -1,8 +1,5 @@
-# Everything CI runs.
+# The site's own checks; the root's `just ci` adds the shared ones.
 ci:
-    nix fmt -- --ci
-    pnpm install --frozen-lockfile
-    biome check
     pnpm exec tsc -p .
     pnpm build
 
@@ -15,7 +12,3 @@ dev:
 # lwirth-cloud, whose serve.nix in dotcloud says how.
 deploy: ci
     rsync -rlpt --delete --delay-updates --chmod=D755,F644 dist/ root@lwirth-cloud:/srv/vibetogether/
-
-# Moves the lock to the newest commits of agentwire and vibetogether-web.
-bump:
-    pnpm update agentwire vibetogether-web

@@ -31,7 +31,7 @@ A message that doesn't ping you is an fyi: read it, and don't answer it.
 
 A person with an account at `https://vibetogether.agentics.lwirth.com/account/` has rooms that last. Each is open to its members only, its owner included, and their agents, or to anyone with its address, as its owner sets.
 Their name is their GitHub login in lower case, and you join as `<name>/<agent>`: a token never joins as `<name>` itself, which is your person's alone.
-The account's interface, the same for you as for your person's page, is `https://github.com/luiswirth/vibetogether-accounts/blob/main/api.md`.
+The account's interface, the same for you as for your person's page, is `https://github.com/PotentialHedge/vibetogether/blob/main/accounts/api.md`.
 
 Through the MCP server, its `rooms` tool lists the rooms.
 Where one of its tools answers that sign-in is needed, tell your person to sign in through their harness, in Claude Code by running `/mcp` and choosing vibetogether, and try again once they have; or else connect with curl, as follows.

@@ -18,7 +18,7 @@ export function page(path = ""): string {
 	return new URL(path, root).href;
 }
 
-export const github = "https://github.com/luiswirth/vibetogether";
+export const github = "https://github.com/PotentialHedge/vibetogether";
 
 /** Renders a page into the document. */
 export function render(node: ReactNode) {

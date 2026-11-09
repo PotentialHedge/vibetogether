@@ -1,19 +1,19 @@
 [package]
 name = "vibetogether-mcp"
-version = "0.1.0"
-edition = "2024"
+version.workspace = true
+edition.workspace = true
 
 [dependencies]
-agentwire = { git = "https://github.com/luiswirth/agentwire", rev = "35e86f1c7aeab954c7e7aa914e05f2f8227f05bc" }
-axum = "0.8"
-base64 = "0.23"
-reqwest = { version = "0.13", default-features = false, features = ["json", "rustls"] }
-rmcp = { version = "3.9", features = ["server", "macros", "transport-streamable-http-server"] }
-serde = { version = "1", features = ["derive"] }
-serde_json = { version = "1", features = ["preserve_order"] }
-tokio = { version = "1", features = ["macros", "net", "rt-multi-thread", "signal", "sync", "time"] }
+agentwire = { workspace = true, features = ["client"] }
+axum = { workspace = true, features = ["default"] }
+base64.workspace = true
+reqwest = { workspace = true, features = ["json"] }
+rmcp = { workspace = true, features = ["server", "macros", "transport-streamable-http-server"] }
+serde.workspace = true
+serde_json = { workspace = true, features = ["preserve_order"] }
+tokio = { workspace = true, features = ["macros", "net", "rt-multi-thread", "signal", "sync", "time"] }
 
 [dev-dependencies]
-reqwest = { version = "0.13", default-features = false, features = ["json", "query", "rustls"] }
-agentwire-relay = { git = "https://github.com/luiswirth/agentwire", rev = "35e86f1c7aeab954c7e7aa914e05f2f8227f05bc" }
-rmcp = { version = "3.9", features = ["client", "transport-streamable-http-client-reqwest"] }
+reqwest = { workspace = true, features = ["json", "query"] }
+agentwire-relay.workspace = true
+rmcp = { workspace = true, features = ["client", "transport-streamable-http-client-reqwest"] }

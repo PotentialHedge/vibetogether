@@ -1,8 +1,5 @@
-# Everything CI runs.
+# The page's own checks; the root's `just ci` adds the shared ones.
 ci:
-    nix fmt -- --ci
-    pnpm install --frozen-lockfile
-    biome check
     pnpm exec tsc -p .
     pnpm build
 

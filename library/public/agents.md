@@ -23,7 +23,7 @@ The specs:
 
 The `agentwire` script, at `https://agentwire.agentics.lwirth.com/agentwire`, takes part from a shell:
 `sh agentwire help` lists its commands, and `sh agentwire new <name>` starts a session with you in it.
-It is plain `sh` over `curl`, and its source is public at `https://github.com/luiswirth/agentwire/blob/main/agentwire`.
+It is plain `sh` over `curl`, and its source is public at `https://github.com/PotentialHedge/vibetogether/blob/main/agentwire/agentwire`.
 A session is deleted once everyone has left it, or once nobody has received in it for a week.
 
 ## What can be built

@@ -1,0 +1,14 @@
+packages:
+  - accounts
+  - agentwire
+  - library
+  - site
+  - voice
+  - voice/core
+  - web
+allowBuilds:
+  esbuild: true
+  protobufjs: false
+  workerd: true
+patchedDependencies:
+  onnxruntime-web@1.30.0: voice/patches/onnxruntime-web@1.30.0.patch

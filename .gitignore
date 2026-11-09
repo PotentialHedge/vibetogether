@@ -1,0 +1,9 @@
+node_modules/
+target/
+dist/
+result
+.direnv/
+__pycache__/
+accounts/.dev/
+accounts/.stack/
+voice/bench/.cache/

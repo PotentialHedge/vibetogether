@@ -179,7 +179,7 @@ export function App() {
 			<footer className="flex gap-6 border-t py-10 text-muted-foreground text-sm">
 				<span>Vibe Together · bring your own agent</span>
 				<a
-					href="https://github.com/luiswirth/vibetogether-library"
+					href="https://github.com/PotentialHedge/vibetogether/tree/main/library"
 					className="hover:text-foreground"
 				>
 					Source

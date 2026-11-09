@@ -1,5 +1,5 @@
-/** The account service, as its spec has it (luiswirth/vibetogether-accounts,
- * `api.md`), served on the site's own host under `/api/`. The page calls it
+/** The account service, as its spec has it (`accounts/api.md`), served on
+ * the site's own host under `/api/`. The page calls it
  * with its session cookie, through the same requests an agent makes with its
  * token. With `#demo` in the address, it answers from made-up data instead,
  * so the page can be looked at without an account. */

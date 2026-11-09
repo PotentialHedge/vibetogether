@@ -53,8 +53,8 @@ const INSTRUCTIONS: &str = "The user's messenger chat is a Vibe Together room, \
     `curl -so agentwire https://agentwire.agentics.lwirth.com/agentwire`, then `sh agentwire help`. \
     Images go both ways as image entries: fetch one the user sends by its number. \
     Telegram's own formatting, captions, and reacting to a message, are entries of their own: \
-    https://raw.githubusercontent.com/luiswirth/messagent/main/telegram.md and \
-    https://raw.githubusercontent.com/luiswirth/messagent/main/reactions.md. \
+    https://raw.githubusercontent.com/PotentialHedge/vibetogether/main/messagent/telegram.md and \
+    https://raw.githubusercontent.com/PotentialHedge/vibetogether/main/messagent/reactions.md. \
     You are told here when entries wait for you.";
 
 /// What the agent is told when entries wait: the room's link, and its name there,

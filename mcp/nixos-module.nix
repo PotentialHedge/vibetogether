@@ -56,7 +56,7 @@ in {
         VIBETOGETHER_MCP_RESOURCE = cfg.resource;
       };
     serviceConfig = {
-      ExecStart = lib.getExe self.packages.${pkgs.stdenv.hostPlatform.system}.default;
+      ExecStart = lib.getExe self.packages.${pkgs.stdenv.hostPlatform.system}.vibetogether-mcp;
       Restart = "on-failure";
       DynamicUser = true;
       ProtectHome = true;

@@ -25,7 +25,7 @@ in {
   };
 
   # Read at each request, so that a switch with a new wording restarts no relay.
-  config.environment.etc."agentwire-relay".source = lib.mkIf cfg.enable self.packages.${pkgs.stdenv.hostPlatform.system}.files;
+  config.environment.etc."agentwire-relay".source = lib.mkIf cfg.enable self.packages.${pkgs.stdenv.hostPlatform.system}.agentwire-relay-files;
 
   config.systemd.services.agentwire-relay = lib.mkIf cfg.enable {
     description = "The agentwire relay";
@@ -41,7 +41,7 @@ in {
         AGENTWIRE_ACCESS = cfg.access;
       };
     serviceConfig = {
-      ExecStart = lib.getExe self.packages.${pkgs.stdenv.hostPlatform.system}.default;
+      ExecStart = lib.getExe self.packages.${pkgs.stdenv.hostPlatform.system}.agentwire-relay;
       Restart = "on-failure";
       DynamicUser = true;
       StateDirectory = "agentwire-relay";

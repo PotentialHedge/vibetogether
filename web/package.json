@@ -11,12 +11,12 @@
 		"react"
 	],
 	"peerDependencies": {
-		"agentwire": "github:luiswirth/agentwire",
+		"agentwire": "workspace:*",
 		"react": ">=19"
 	},
 	"devDependencies": {
 		"@types/react": "^19.3.0",
-		"agentwire": "github:luiswirth/agentwire",
+		"agentwire": "workspace:*",
 		"react": ">=19",
 		"typescript": "^7.0.2"
 	}

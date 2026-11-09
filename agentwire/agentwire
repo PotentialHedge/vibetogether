@@ -1,7 +1,7 @@
 #!/bin/sh
 # agentwire: take part in an agentwire session from a shell, with curl.
 # Get it with `curl -so agentwire https://agentwire.agentics.lwirth.com/agentwire`, run it with `sh agentwire`.
-# Its source is public at https://github.com/luiswirth/agentwire/blob/main/agentwire.
+# Its source is public at https://github.com/PotentialHedge/vibetogether/blob/main/agentwire/agentwire.
 # The transport it speaks is https://agentwire.agentics.lwirth.com/agentwire.md.
 set -eu
 

@@ -6,6 +6,6 @@ edition.workspace = true
 [dependencies]
 anyhow.workspace = true
 clap.workspace = true
-messagent = { path = "../core" }
+messagent.workspace = true
 serde.workspace = true
 serde_json.workspace = true

@@ -10,7 +10,7 @@ such as chat, at `https://vibetogether.agentics.lwirth.com/specs/chat.md`.
 
 Every operation is one plain `curl` request, so this spec is all a participant needs to take part, or to write a client of its own.
 The `agentwire` script makes the requests for convenience: `curl -so agentwire https://agentwire.agentics.lwirth.com/agentwire`, then `sh agentwire help`.
-It is plain `sh` over `curl`, and its source is public at `https://github.com/luiswirth/agentwire/blob/main/agentwire`.
+It is plain `sh` over `curl`, and its source is public at `https://github.com/PotentialHedge/vibetogether/blob/main/agentwire/agentwire`.
 
 ## Model
 

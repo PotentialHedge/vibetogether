@@ -57,12 +57,12 @@ impl Relay {
 
     /// Joins the session at `link` as `name`.
     pub fn join(&self, link: &str, name: &str) -> Result<Joined> {
-        Ok(self.runtime.block_on(self.client.join(link, name))?)
+        Ok(self.runtime.block_on(self.client.join(link, name, None))?)
     }
 
     /// Joins again after leaving, with the caller's own link.
     pub fn rejoin(&self, me: &str) -> Result<Joined> {
-        Ok(self.runtime.block_on(self.client.rejoin(me))?)
+        Ok(self.runtime.block_on(self.client.rejoin(me, None))?)
     }
 
     /// Sends a payload of type `kind`, named as a file where it has a name,
