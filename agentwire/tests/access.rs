@@ -356,3 +356,37 @@ async fn an_entry_keeps_the_account_its_sender_had() {
         "{entries:?}"
     );
 }
+
+#[tokio::test]
+async fn a_room_stays_owned_through_the_upgrade() {
+    // A database as the relay of 70814ad left it, when owned sessions were guarded.
+    let path = std::env::temp_dir().join(format!("agentwire-upgrade-{}.db", std::process::id()));
+    let room = "AAAAAAAAAAAAAAAAAAAAAA";
+    rusqlite::Connection::open(&path)
+        .unwrap()
+        .execute_batch(&format!(
+            "CREATE TABLE sessions (id TEXT PRIMARY KEY, created INTEGER NOT NULL,
+                 received INTEGER NOT NULL, guarded INTEGER NOT NULL DEFAULT 0);
+             INSERT INTO sessions VALUES ('{room}', unixepoch(), unixepoch(), 1);"
+        ))
+        .unwrap();
+    let stub = Arc::new(Stub::default());
+    let service = Router::new()
+        .route("/agentwire/join", post(join))
+        .route("/agentwire/sessions/{id}", get(session))
+        .with_state(stub);
+    let service = serve(service).await;
+    let relay = Relay::open(Options {
+        database: Some(path.clone()),
+        access: Some(format!("{service}/agentwire")),
+        ..Options::default()
+    })
+    .unwrap();
+    let relay = serve(relay.router()).await;
+    let refused = Client::new()
+        .join(&format!("{relay}/v2/s/{room}"), "stranger", None)
+        .await
+        .unwrap_err();
+    assert_eq!(refused.status(), Some(403), "{refused}");
+    std::fs::remove_file(&path).unwrap();
+}

@@ -96,8 +96,8 @@ pub struct Options {
     /// The directory the spec, `agentwire.md`, and the script, `agentwire`, are
     /// read from at each request, so that a new wording takes effect without a restart.
     pub files: Option<PathBuf>,
-    /// The access service's URL, which decides who may be in a session, and
-    /// which sessions last.
+    /// The access service's URL, which decides who may be in an owned session,
+    /// and whether it still exists.
     pub access: Option<String>,
 }
 

@@ -240,8 +240,8 @@ impl Sessions {
             db.prepare("SELECT 1 FROM pragma_table_info('sessions') WHERE name = ?")?
                 .exists([name])
         };
-        if column("owned")? {
-            db.execute("ALTER TABLE sessions RENAME COLUMN owned TO owned", [])?;
+        if column("guarded")? {
+            db.execute("ALTER TABLE sessions RENAME COLUMN guarded TO owned", [])?;
         } else if !column("owned")? {
             db.execute(
                 "ALTER TABLE sessions ADD COLUMN owned INTEGER NOT NULL DEFAULT 0",
