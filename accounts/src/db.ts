@@ -17,23 +17,41 @@ function hasColumn(table: string, column: string): boolean {
 	).some((c) => c.name === column);
 }
 
-/** The tables of rooms and friends, which refer to Better Auth's users. */
+function hasTable(table: string): boolean {
+	return (
+		db
+			.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?")
+			.get(table) !== undefined
+	);
+}
+
+/**
+ * The tables of owned sessions and friends, which refer to Better Auth's users.
+ * Better Auth's own `session` is a sign-in, so an account's session is an `owned_session`.
+ */
 export function migrate(): void {
+	// Databases from before a room could be open by link, and before friends had no setting.
+	if (hasTable("room") && !hasColumn("room", "open"))
+		db.exec(
+			"ALTER TABLE room ADD COLUMN open TEXT NOT NULL DEFAULT 'members' CHECK (open IN ('members', 'link'))",
+		);
+	if (hasTable("friend") && hasColumn("friend", "agents"))
+		db.exec("ALTER TABLE friend DROP COLUMN agents");
 	db.exec(`
-		-- "session" is the token of the room's session on the relay, the secret part of its address.
+		-- "secret" is the secret part of the session's address on the relay.
 		-- "open" is who may join: its members only, or anyone with its address.
-		CREATE TABLE IF NOT EXISTS room (
+		CREATE TABLE IF NOT EXISTS owned_session (
 			id TEXT PRIMARY KEY,
 			name TEXT NOT NULL,
 			owner TEXT NOT NULL REFERENCES user(id) ON DELETE CASCADE,
-			session TEXT UNIQUE,
+			secret TEXT UNIQUE,
 			created TEXT NOT NULL,
 			open TEXT NOT NULL DEFAULT 'members' CHECK (open IN ('members', 'link'))
 		);
-		CREATE TABLE IF NOT EXISTS member (
-			room TEXT NOT NULL REFERENCES room(id) ON DELETE CASCADE,
+		CREATE TABLE IF NOT EXISTS session_member (
+			session TEXT NOT NULL REFERENCES owned_session(id) ON DELETE CASCADE,
 			user TEXT NOT NULL REFERENCES user(id) ON DELETE CASCADE,
-			PRIMARY KEY (room, user)
+			PRIMARY KEY (session, user)
 		);
 		-- Who asked for an OTP, for the person to judge before approving it.
 		CREATE TABLE IF NOT EXISTS device_request (
@@ -49,11 +67,23 @@ export function migrate(): void {
 			PRIMARY KEY ("from", "to")
 		);
 	`);
-	// Databases from before a room could be open by link, and before friends had no setting.
-	if (!hasColumn("room", "open"))
-		db.exec(
-			"ALTER TABLE room ADD COLUMN open TEXT NOT NULL DEFAULT 'members' CHECK (open IN ('members', 'link'))",
-		);
-	if (hasColumn("friend", "agents"))
-		db.exec("ALTER TABLE friend DROP COLUMN agents");
+	// Databases from before Vibe Together said session for room: the rows move over, their ids
+	// from r_ to s_, and the secret in each address stays, so that every address still works.
+	if (hasTable("room")) {
+		db.exec("BEGIN");
+		try {
+			db.exec(`
+				INSERT INTO owned_session (id, name, owner, secret, created, open)
+					SELECT 's_' || substr(id, 3), name, owner, session, created, open FROM room;
+				INSERT INTO session_member (session, user)
+					SELECT 's_' || substr(room, 3), user FROM member;
+				DROP TABLE member;
+				DROP TABLE room;
+			`);
+			db.exec("COMMIT");
+		} catch (error) {
+			db.exec("ROLLBACK");
+			throw error;
+		}
+	}
 }
