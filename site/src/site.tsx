@@ -3,6 +3,8 @@
 
 import { type ReactNode, StrictMode } from "react";
 import { createRoot } from "react-dom/client";
+import { Person } from "@/account/parts";
+import { useMe } from "@/account/sign-in";
 import { cn } from "@/lib/utils";
 import "./index.css";
 
@@ -11,7 +13,7 @@ import "./index.css";
 const root = new URL("..", import.meta.url);
 
 /** The address of a page of the site, by its path from the root, such as
- * `start/`. */
+ * `account/`. */
 export function page(path = ""): string {
 	return new URL(path, root).href;
 }
@@ -24,11 +26,34 @@ export function render(node: ReactNode) {
 	if (element) createRoot(element).render(<StrictMode>{node}</StrictMode>);
 }
 
-const nav = [
-	{ path: "how-it-works/", label: "How it works" },
-	{ path: "agents.md", label: "For agents" },
-	{ path: "account/", label: "Account" },
-];
+/** The header's right end: the person's face, leading to their account, or
+ * signing in. Nothing while it is not known yet, so that neither flashes. */
+function Who({ current }: { current: string | undefined }) {
+	const me = useMe();
+	if (me === null) return <span className="ml-2 size-8" />;
+	if (me === "signed-out")
+		return (
+			<a
+				href={page("account/")}
+				className="ml-2 rounded-md bg-primary px-3 py-1.5 font-medium text-primary-foreground transition-colors hover:bg-primary/85"
+			>
+				Sign in
+			</a>
+		);
+	return (
+		<a
+			href={page("account/")}
+			title={me.name}
+			aria-label="Your account"
+			className={cn(
+				"ml-2 rounded-full ring-offset-2 ring-offset-background transition-shadow hover:ring-2 hover:ring-ring/60",
+				current === "account/" && "ring-2 ring-ring/60",
+			)}
+		>
+			<Person {...me} />
+		</a>
+	);
+}
 
 export function Site({
 	current,
@@ -48,33 +73,13 @@ export function Site({
 					Vibe Together
 				</a>
 				<nav className="ml-auto flex items-center gap-1 text-sm">
-					{nav.map(({ path, label }) => (
-						<a
-							key={path}
-							href={page(path)}
-							className={cn(
-								"hidden rounded-md px-3 py-1.5 text-muted-foreground transition-colors hover:text-foreground sm:block",
-								current === path && "text-foreground",
-							)}
-						>
-							{label}
-						</a>
-					))}
-					<a
-						href={page("start/")}
-						className="ml-2 rounded-md bg-primary px-3 py-1.5 font-medium text-primary-foreground transition-colors hover:bg-primary/85"
-					>
-						Start a room
-					</a>
+					<Who current={current} />
 				</nav>
 			</header>
 			<main className="flex-1">{children}</main>
 			<footer className="mt-24 border-t">
 				<div className="mx-auto flex w-full max-w-6xl flex-wrap items-center gap-x-6 gap-y-2 px-6 py-8 font-mono text-xs text-muted-foreground">
 					<span>Vibe Together</span>
-					<a className="hover:text-foreground" href={page("how-it-works/")}>
-						How it works
-					</a>
 					<a className="hover:text-foreground" href={page("agents.md")}>
 						agents.md
 					</a>
@@ -102,27 +107,5 @@ export function Eyebrow({ children }: { children: ReactNode }) {
 		<p className="font-mono text-xs tracking-widest text-muted-foreground uppercase">
 			{children}
 		</p>
-	);
-}
-
-export function Section({
-	label,
-	title,
-	children,
-	className,
-}: {
-	label: string;
-	title: ReactNode;
-	children?: ReactNode;
-	className?: string;
-}) {
-	return (
-		<section className={cn("mx-auto mt-28 w-full max-w-6xl px-6", className)}>
-			<Eyebrow>{label}</Eyebrow>
-			<h2 className="mt-3 max-w-2xl font-mono text-2xl font-medium tracking-tight text-balance">
-				{title}
-			</h2>
-			{children}
-		</section>
 	);
 }

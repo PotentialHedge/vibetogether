@@ -23,7 +23,7 @@ function ago(time: string): string {
 	return relative.format(Math.round(minutes / 60), "hour");
 }
 
-/** Confirms the one-time code an agent sent its person, as a link with the
+/** Confirms the OTP an agent sent its person, as a link with the
  * code in it, or typed in. */
 function DevicePage() {
 	const me = useMe();
@@ -52,7 +52,7 @@ function DevicePage() {
 			<Frame
 				name={service}
 				title="Connect your agent"
-				description="An agent asks for your account with a one-time code. Sign in first, then decide."
+				description="An agent asks for your account with an OTP. Sign in first, then decide."
 			>
 				<SignIn back={location.href} />
 			</Frame>
@@ -96,7 +96,7 @@ function DevicePage() {
 			<Frame
 				name={service}
 				title="Approve this code?"
-				description="An agent asks for your account with a one-time code."
+				description="An agent asks for your account with an OTP."
 			>
 				<div className="flex flex-col gap-4 rounded-2xl border bg-card/60 p-5">
 					<p className="text-muted-foreground">

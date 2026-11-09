@@ -13,10 +13,13 @@ export type Room = {
 	name: string;
 	owner: string;
 	members: string[];
-	link: string;
+	/** Who may join: its members only, or anyone with its address. */
+	open: Open;
+	/** Its URL on the relay, hard to guess: it identifies the room, and is its secret. */
+	address: string;
 };
 
-export type Setting = "ping" | "fyi";
+export type Open = "members" | "link";
 
 export type Friend = {
 	name: string;
@@ -24,17 +27,17 @@ export type Friend = {
 	image: string;
 	/** `asked`: the caller added them; `asking`: they added the caller. */
 	state: "friends" | "asked" | "asking";
-	agents: Setting;
 };
 
-export type Agent = {
+/** What acts for the account, held by an agent or its harness. */
+export type Token = {
 	id: string;
+	/** The name the agent asked for the OTP with, or its MCP client's. */
 	name: string;
-	kind: "code" | "oauth";
 	created: string;
 };
 
-/** A one-time code, as the service tells of it once it is claimed: which
+/** An OTP, as the service tells of it once it is claimed: which
  * agent asks. */
 export type Device = {
 	user_code: string;
@@ -73,8 +76,8 @@ const live = {
 	me: () => call<Me>("GET", "api/me"),
 	rooms: () => call<Room[]>("GET", "api/rooms"),
 	createRoom: (name: string) => call<Room>("POST", "api/rooms", { name }),
-	renameRoom: (id: string, name: string) =>
-		call<Room>("PATCH", `api/rooms/${encodeURIComponent(id)}`, { name }),
+	changeRoom: (id: string, change: { name?: string; open?: Open }) =>
+		call<Room>("PATCH", `api/rooms/${encodeURIComponent(id)}`, change),
 	deleteRoom: (id: string) =>
 		call<void>("DELETE", `api/rooms/${encodeURIComponent(id)}`),
 	addMember: (id: string, name: string) =>
@@ -88,17 +91,13 @@ const live = {
 			`api/rooms/${encodeURIComponent(id)}/members/${encodeURIComponent(name)}`,
 		),
 	friends: () => call<Friend[]>("GET", "api/friends"),
-	addFriend: (name: string, agents?: Setting) =>
-		call<void>(
-			"PUT",
-			`api/friends/${encodeURIComponent(name)}`,
-			agents && { agents },
-		),
+	addFriend: (name: string) =>
+		call<void>("PUT", `api/friends/${encodeURIComponent(name)}`),
 	removeFriend: (name: string) =>
 		call<void>("DELETE", `api/friends/${encodeURIComponent(name)}`),
-	agents: () => call<Agent[]>("GET", "api/agents"),
+	tokens: () => call<Token[]>("GET", "api/tokens"),
 	revoke: (id: string) =>
-		call<void>("DELETE", `api/agents/${encodeURIComponent(id)}`),
+		call<void>("DELETE", `api/tokens/${encodeURIComponent(id)}`),
 	/** Returns the address to go to, GitHub's. `oauthQuery` is the signed
 	 * query an MCP client's authorization sent the person here with, so that
 	 * it goes on after GitHub. */
@@ -149,20 +148,29 @@ function mock(): Api {
 		image: "https://avatars.githubusercontent.com/luiswirth",
 	};
 	let rooms: Room[] = [
-		{ id: "r_1", name: "agents", owner: "luiswirth", members: [], link: "" },
+		{
+			id: "r_1",
+			name: "notes",
+			owner: "luiswirth",
+			members: [],
+			open: "members",
+			address: "",
+		},
 		{
 			id: "r_2",
 			name: "booking-app",
 			owner: "luiswirth",
 			members: ["benarmstrong"],
-			link: "",
+			open: "link",
+			address: "",
 		},
 		{
 			id: "r_3",
 			name: "presio",
 			owner: "benarmstrong",
 			members: ["luiswirth", "tristangabl"],
-			link: "",
+			open: "members",
+			address: "",
 		},
 	];
 	let friends: Friend[] = [
@@ -171,37 +179,32 @@ function mock(): Api {
 			displayName: "Benedict Armstrong",
 			image: "https://avatars.githubusercontent.com/benarmstrong",
 			state: "friends",
-			agents: "ping",
 		},
 		{
 			name: "tristangabl",
 			displayName: "Tristan Gabl",
 			image: "",
 			state: "friends",
-			agents: "fyi",
 		},
 		{
 			name: "someone",
 			displayName: "Some One",
 			image: "",
 			state: "asking",
-			agents: "fyi",
 		},
 	];
-	let agents: Agent[] = [
+	let tokens: Token[] = [
 		{
 			id: "o_1",
 			name: "Claude Code",
-			kind: "oauth",
 			created: "2026-11-09T00:12:00Z",
 		},
 		{
 			id: "s_1",
 			name: "claude",
-			kind: "code",
 			created: "2026-11-09T00:10:00Z",
 		},
-		{ id: "s_2", name: "codex", kind: "code", created: "2026-11-02T14:31:00Z" },
+		{ id: "s_2", name: "codex", created: "2026-11-02T14:31:00Z" },
 	];
 	const done = async () => {};
 	return {
@@ -213,13 +216,16 @@ function mock(): Api {
 				name,
 				owner: me.name,
 				members: [],
-				link: "",
+				open: "members" as Open,
+				address: "",
 			};
 			rooms = [...rooms, room];
 			return room;
 		},
-		renameRoom: async (id, name) => {
-			rooms = rooms.map((room) => (room.id === id ? { ...room, name } : room));
+		changeRoom: async (id, change) => {
+			rooms = rooms.map((room) =>
+				room.id === id ? { ...room, ...change } : room,
+			);
 			return rooms.find((room) => room.id === id) as Room;
 		},
 		deleteRoom: async (id) => {
@@ -238,7 +244,7 @@ function mock(): Api {
 			);
 		},
 		friends: async () => friends,
-		addFriend: async (name, setting) => {
+		addFriend: async (name) => {
 			const known = friends.find((friend) => friend.name === name);
 			friends = known
 				? friends.map((friend) =>
@@ -246,7 +252,6 @@ function mock(): Api {
 							? {
 									...friend,
 									state: friend.state === "asking" ? "friends" : friend.state,
-									agents: setting ?? friend.agents,
 								}
 							: friend,
 					)
@@ -257,16 +262,15 @@ function mock(): Api {
 							displayName: name,
 							image: "",
 							state: "asked",
-							agents: "fyi",
 						},
 					];
 		},
 		removeFriend: async (name) => {
 			friends = friends.filter((friend) => friend.name !== name);
 		},
-		agents: async () => agents,
+		tokens: async () => tokens,
 		revoke: async (id) => {
-			agents = agents.filter((agent) => agent.id !== id);
+			tokens = tokens.filter((token) => token.id !== id);
 		},
 		signIn: async () => `${page("account/")}#demo`,
 		signOut: done,

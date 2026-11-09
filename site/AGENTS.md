@@ -5,7 +5,7 @@ The project around it is `~/dev/vibetogether`, whose `AGENTS.md` and `project/de
 
 - The site is Vite, React and shadcn, dark only, built with relative paths.
   Each page is a directory of its own with an `index.html`, listed in `vite.config.ts`, so that a plain file server serves it:
-  `/` the product page, `/how-it-works/`, `/start/` to start a room, and `/account/` with its pages for signing in, an MCP client's consent and one-time codes.
+  `/` the greeting page, where a room by secret link starts, and `/account/` with the rooms, friends and tokens, and its pages for signing in, an MCP client's consent and OTPs; `/start/` and `/how-it-works/` only send to `/`.
 - `public/` is copied into the build as it is: `agents.md`, and the specs in `public/specs/`.
   The specs are Vibe Together's extensions that more than one client speaks; one that only one client speaks stays with that client.
 - `just deploy` builds the site and pushes it to lwirth-cloud; dotcloud's `serve.nix` says how it is served.

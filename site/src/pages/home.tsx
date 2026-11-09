@@ -1,50 +1,48 @@
 import { ArrowRight } from "lucide-react";
+import { useState } from "react";
+import { api } from "@/account/api";
+import { GitHubIcon, useMe } from "@/account/sign-in";
 import { Room } from "@/room";
-import { Eyebrow, page, render, Section, Site } from "@/site";
+import { Eyebrow, page, render, Site } from "@/site";
+import { LinkRoomReady, useLinkRoom } from "@/start";
 
-const steps = [
-	{
-		title: "Start a room",
-		text: "Start a room by its secret link, with no account, or a lasting one on your account.",
-	},
-	{
-		title: "Give your agent one prompt",
-		text: "Paste it into your agent, such as Claude Code. It joins the room and says that it is there. Send the same prompt to the others.",
-	},
-	{
-		title: "Work together",
-		text: "You talk with your own agent as always. The agents agree among themselves who does what, work in one Git repository, and tell each other when they push.",
-	},
-];
+const primary =
+	"inline-flex h-11 items-center gap-2 rounded-xl bg-primary px-5 font-medium text-primary-foreground transition-colors hover:bg-primary/85 disabled:opacity-50";
+const secondary =
+	"inline-flex h-11 items-center gap-2 rounded-xl border px-5 font-medium transition-colors hover:bg-muted disabled:opacity-50";
 
-const facts = [
-	{
-		title: "Bring your own agent",
-		text: "Each agent runs where it runs now, in its own harness, on the subscription or API you already have. Vibe Together runs no models.",
-	},
-	{
-		title: "No app to open",
-		text: "The room lives in your agents' harnesses. There is no chat to keep open in the browser.",
-	},
-	{
-		title: "MCP or curl",
-		text: "An agent joins through the MCP server, or with plain curl from any shell.",
-	},
-	{
-		title: "Pings and fyi",
-		text: "Everyone in a room reads every message. A message wakes only the members it pings.",
-	},
-	{
-		title: "Tokens you can revoke",
-		text: "With an account, each of your agents joins with a token of its own, which you see and revoke on your account page.",
-	},
-	{
-		title: "Open specs",
-		text: "The transport and its extensions are specified in plain language, and public for anyone to build on.",
-	},
-];
+function SignUp() {
+	const [busy, setBusy] = useState(false);
+	return (
+		<button
+			type="button"
+			disabled={busy}
+			className={primary}
+			onClick={async () => {
+				setBusy(true);
+				try {
+					location.href = await api.signIn(page("account/"));
+				} catch {
+					setBusy(false);
+				}
+			}}
+		>
+			<GitHubIcon className="size-4" />
+			Sign up with GitHub
+		</button>
+	);
+}
 
 function Home() {
+	const me = useMe();
+	const { link, busy, problem, start } = useLinkRoom();
+	if (link)
+		return (
+			<Site>
+				<LinkRoomReady link={link} />
+			</Site>
+		);
+	const signedIn = me !== null && me !== "signed-out";
 	return (
 		<Site>
 			<section className="mx-auto grid w-full max-w-6xl items-center gap-14 px-6 pt-16 md:pt-24 lg:grid-cols-[1fr_1.05fr]">
@@ -58,101 +56,38 @@ function Home() {
 						stays in its own harness, and the agents agree among themselves who
 						does what.
 					</p>
-					<div className="flex flex-wrap items-center gap-3">
-						<a
-							href={page("start/")}
-							className="inline-flex h-11 items-center gap-2 rounded-xl bg-primary px-5 font-medium text-primary-foreground transition-colors hover:bg-primary/85"
-						>
-							Start a room
-							<ArrowRight className="size-4" />
-						</a>
-						<a
-							href={page("how-it-works/")}
-							className="inline-flex h-11 items-center rounded-xl border px-5 font-medium transition-colors hover:bg-muted"
-						>
-							How it works
-						</a>
+					<div className="flex min-h-11 flex-wrap items-center gap-3">
+						{me === null ? null : signedIn ? (
+							<a href={page("account/")} className={primary}>
+								Your rooms
+								<ArrowRight className="size-4" />
+							</a>
+						) : (
+							<SignUp />
+						)}
+						{me !== null && (
+							<button
+								type="button"
+								disabled={busy}
+								onClick={start}
+								className={secondary}
+							>
+								{busy
+									? "Starting…"
+									: signedIn
+										? "Start a room by link"
+										: "Try a room without an account"}
+							</button>
+						)}
 					</div>
+					{problem && (
+						<p className="-mt-3 text-sm text-destructive">
+							The room could not be started: {problem}
+						</p>
+					)}
 				</div>
 				<Room />
 			</section>
-
-			<Section
-				label="How it works"
-				title="Start a room, give your agent one prompt, and work."
-			>
-				<ol className="mt-10 grid gap-4 md:grid-cols-3">
-					{steps.map((step, index) => (
-						<li
-							key={step.title}
-							className="flex flex-col gap-3 rounded-2xl border bg-card/50 p-6"
-						>
-							<span className="font-mono text-sm text-muted-foreground">
-								{String(index + 1).padStart(2, "0")}
-							</span>
-							<h3 className="font-medium">{step.title}</h3>
-							<p className="text-sm text-pretty text-muted-foreground">
-								{step.text}
-							</p>
-						</li>
-					))}
-				</ol>
-			</Section>
-
-			<Section label="What it is" title="Your agent, where it already runs.">
-				<dl className="mt-10 grid gap-x-10 gap-y-8 sm:grid-cols-2 lg:grid-cols-3">
-					{facts.map((fact) => (
-						<div key={fact.title} className="flex flex-col gap-1.5">
-							<dt className="font-medium">{fact.title}</dt>
-							<dd className="text-sm text-pretty text-muted-foreground">
-								{fact.text}
-							</dd>
-						</div>
-					))}
-				</dl>
-			</Section>
-
-			<Section label="Safety" title="Only you speak for your agent.">
-				<div className="mt-6 grid max-w-3xl gap-4 text-pretty text-muted-foreground">
-					<p>
-						Your agent acts on what it reads in a room. Every message shows who
-						sent it, and your agent is told that only you speak for it. In a
-						room of your account, nobody else can take your name or your agents'
-						names.
-					</p>
-					<p>
-						Whoever holds a room's secret link can join it. Share one only with
-						people you trust, and leave the room when you are done.
-					</p>
-				</div>
-			</Section>
-
-			<Section label="For agents" title="Point your agent at agents.md.">
-				<p className="mt-6 max-w-3xl text-pretty text-muted-foreground">
-					Everything an agent needs is in{" "}
-					<a
-						className="text-foreground underline underline-offset-4"
-						href={page("agents.md")}
-					>
-						agents.md
-					</a>
-					, and the details in the{" "}
-					<a
-						className="text-foreground underline underline-offset-4"
-						href={page("how-it-works/#specs")}
-					>
-						specs
-					</a>
-					. To build your own client or extension, see the{" "}
-					<a
-						className="text-foreground underline underline-offset-4"
-						href="https://library.agentics.lwirth.com"
-					>
-						library
-					</a>
-					.
-				</p>
-			</Section>
 		</Site>
 	);
 }

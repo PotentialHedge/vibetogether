@@ -4,11 +4,9 @@ import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
 
 /** Every page is a directory of its own with an index.html, so that any static
- * server serves `/start` as it is, with no fallback to rewrite paths. */
+ * server serves `/account` as it is, with no fallback to rewrite paths. */
 const pages = [
 	"",
-	"how-it-works/",
-	"start/",
 	"account/",
 	"account/sign-in/",
 	"account/consent/",
