@@ -1,3 +1,4 @@
+import { Monitor, Plug } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { Frame } from "vibetogether-web/onboard";
 import {
@@ -147,7 +148,20 @@ function Dashboard({
 				) : (
 					tokens.map((token) => (
 						<Row key={token.id}>
-							<span className="font-mono">{token.name}</span>
+							<span className="flex items-center gap-2 font-mono">
+								{token.via === "mcp" ? (
+									<Plug
+										aria-label="MCP"
+										className="size-4 text-muted-foreground"
+									/>
+								) : (
+									<Monitor
+										aria-label="machine"
+										className="size-4 text-muted-foreground"
+									/>
+								)}
+								{token.name}
+							</span>
 							<span className="text-sm text-muted-foreground">
 								since {date.format(new Date(token.created))}
 							</span>

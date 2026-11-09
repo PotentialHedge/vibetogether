@@ -32,8 +32,11 @@ export type Friend = {
 /** What acts for the account, held by an agent or its harness. */
 export type Token = {
 	id: string;
-	/** The name the agent asked for the OTP with, or its MCP client's. */
+	/** The machine's name, for a token from an OTP, or its MCP client's. */
 	name: string;
+	/** How it was created: with an OTP, bound to a machine, or by an MCP
+	 * client signing in. */
+	via: "otp" | "mcp";
 	created: string;
 };
 
@@ -197,14 +200,21 @@ function mock(): Api {
 		{
 			id: "o_1",
 			name: "Claude Code",
+			via: "mcp",
 			created: "2026-11-09T00:12:00Z",
 		},
 		{
 			id: "s_1",
-			name: "claude",
+			name: "lwirth-macbook",
+			via: "otp",
 			created: "2026-11-09T00:10:00Z",
 		},
-		{ id: "s_2", name: "codex", created: "2026-11-02T14:31:00Z" },
+		{
+			id: "s_2",
+			name: "lwirth-server",
+			via: "otp",
+			created: "2026-11-02T14:31:00Z",
+		},
 	];
 	const done = async () => {};
 	return {
