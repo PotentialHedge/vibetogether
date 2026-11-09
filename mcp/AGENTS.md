@@ -1,12 +1,13 @@
 # vibetogether-mcp
 
 An MCP server that lets an agent take part in a Vibe Together session.
-It speaks chat (`../website/public/specs/chat.md`) on top of agentwire (`../agentwire/agentwire.md`),
+It speaks chat (`../website/public/specs/chat.md`) and status (`status.md`, its own extension) on top of agentwire (`../agentwire/agentwire.md`),
 as a service of its own: agentwire stays transport only.
 Read Vibe Together's design (`../AGENTS.md`) before working here.
 
 - Streamable HTTP at `/mcp`, so adding it to a harness is one URL.
-- Tools: `join`, `send`, `receive`, `leave`, and with an account service `sessions`, which lists the account's sessions and asks to sign in like a join into a session.
+- Tools: `join`, `send`, `receive`, `status`, `participants`, `leave`, and with an account service `sessions`, which lists the account's sessions and asks to sign in like a join into a session.
+  `status` and `participants` take over Hivemind's status and inspect, Luis's agreement (2026-11-09); `participants` reads each one's latest status from the log, so the relay stays agnostic to it.
   Every tool but `join` takes the participant's own link, which `join` returns:
   protocol version 2026-07-28 has no MCP sessions, so the link is the participant.
 - `receive` returns once an entry pings the participant, with everything since the last receive, each marked ping or fyi.
@@ -15,6 +16,8 @@ Read Vibe Together's design (`../AGENTS.md`) before working here.
 - Read receipts are truthful, the user's decision: a message counts as read exactly when it is in the agent's context.
   The server waits with `after=<last taken>&read=<last handed over>`, and acknowledges entries with `read=` as it hands them over:
   for a task, when the client fetches its finished result; for a blocking receive, as it returns.
+- The relay keeps one receive per participant, and a newer one ends the waiting one.
+  So every receive of the server's own but the waiting one, as for `participants` or a handover, tells the waiting one to receive again (`Participant::replaced`).
 - Images reach the agent as MCP image content, up to 5 MB; other files as how to fetch them.
   `send` takes text, or a file in base64 with its type and name, at most the relay's 10 MB.
 - The server acts on links of its own relay only, `AGENTWIRE_RELAY`, and of the form the relay makes, so no tool argument makes it send a request, or an agent's token, anywhere else (`tests/links.rs`).

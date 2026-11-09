@@ -244,6 +244,95 @@ async fn receive_blocks_without_tasks_until_a_message_pings_the_agent() {
     );
 }
 
+fn status(link: &str, status: &str) -> CallToolRequestParams {
+    CallToolRequestParams::new("status").with_arguments(object!({ "link": link, "status": status }))
+}
+
+fn participants(link: &str) -> CallToolRequestParams {
+    CallToolRequestParams::new("participants").with_arguments(object!({ "link": link }))
+}
+
+#[tokio::test]
+async fn participants_shows_each_ones_status_and_receive_leaves_statuses_out() {
+    let world = world().await;
+    let client = world.client(ClientCapabilities::default()).await;
+    let link = join(&client, &world.session).await;
+
+    text(
+        &client
+            .call_tool(status(&link, "Reading the spec."))
+            .await
+            .unwrap(),
+    );
+    let luis = r#"{"text":"Cooking."}"#;
+    world
+        .post(vibetogether_mcp::STATUS, luis.as_bytes(), &world.luis)
+        .await;
+    let shown = text(&client.call_tool(participants(&link)).await.unwrap());
+    assert!(shown.contains(r#""name":"luis","#), "{shown}");
+    assert!(shown.contains(r#""text":"Cooking.""#), "{shown}");
+    assert!(
+        shown.contains(r#""name":"luis/claude","you":true"#) && shown.contains("Reading the spec."),
+        "{shown}"
+    );
+
+    text(&client.call_tool(status(&link, "")).await.unwrap());
+    let shown = text(&client.call_tool(participants(&link)).await.unwrap());
+    assert!(!shown.contains("Reading the spec."), "{shown}");
+
+    // A status wakes no one, and receive leaves it out.
+    world.say(None, "Hello.").await;
+    let received = text(&client.call_tool(receive(&link)).await.unwrap());
+    assert!(received.contains("Hello."), "{received}");
+    assert!(!received.contains("Cooking."), "{received}");
+}
+
+#[tokio::test]
+async fn participants_keeps_a_waiting_receive_going() {
+    let world = world().await;
+    let client = world
+        .client(ClientCapabilities::builder().enable_tasks().build())
+        .await;
+    let link = join(&client, &world.session).await;
+
+    let CallToolResponse::Task(created) = client.call_tool_once(receive(&link)).await.unwrap()
+    else {
+        panic!("receive answered without a task");
+    };
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    let shown = text(&client.call_tool(participants(&link)).await.unwrap());
+    assert!(shown.contains(r#""name":"luis","#), "{shown}");
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    // The agent shows as listening to the others again.
+    let body = world
+        .http
+        .get(format!("{}?wait=0", world.luis))
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    assert!(
+        body.contains(r#""luis/claude":{"read":0,"receiving":true"#),
+        "{body}"
+    );
+
+    world.say(Some("luis/claude"), "For you.").await;
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    let task = client
+        .peer()
+        .get_task(GetTaskParams::new(created.task.task_id.clone()))
+        .await
+        .unwrap()
+        .task;
+    let TaskPayload::Completed { result } = task.payload else {
+        panic!("the task did not complete: {:?}", task.payload);
+    };
+    let result: CallToolResult = serde_json::from_value(result.into()).unwrap();
+    assert!(text(&result).contains("For you."));
+}
+
 #[tokio::test]
 async fn images_and_files_go_both_ways() {
     let world = world().await;

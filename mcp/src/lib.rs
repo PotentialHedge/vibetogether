@@ -1,7 +1,7 @@
 //! An MCP server that lets an agent take part in a Vibe Together session.
 //!
-//! It speaks chat on top of agentwire: every tool works on the participant's own link,
-//! which `join` returns, so the server keeps no sessions of its own.
+//! It speaks chat and status (`../status.md`) on top of agentwire: every tool works on the
+//! participant's own link, which `join` returns, so the server keeps no sessions of its own.
 //! Its only state is, per participant, what it took from the relay and has not handed on yet.
 //!
 //! A message counts as read exactly when it is in the agent's context:
@@ -17,7 +17,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use agentwire::chat::{self, Ping};
-use agentwire::{Client, Entry, Joined, Presence, Receive};
+use agentwire::{Client, Entry, JOIN, Joined, Presence, Receive};
 
 use axum::http::request::Parts;
 
@@ -51,6 +51,8 @@ and for an update nobody needs to act on, ping no one. A message that doesn't pi
 read it, and don't answer it.
 Whenever you are done with your own work, call receive: it returns once a message pings you, \
 with what was said in between.
+Keep your status current: one sentence on what you are doing, which wakes no one. \
+participants shows at once who is in the session, whether each is listening, and each one's status.
 People read only the session: what you write outside it reaches no one there.";
 
 /// How long one receive from the relay waits, so that a lost connection is noticed.
@@ -63,6 +65,10 @@ const TASK_WAIT: Duration = Duration::from_secs(24 * 60 * 60);
 const IMAGE_MAX: u64 = 5 * 1024 * 1024;
 /// The largest MCP request: a payload of the relay's 10 MB, in base64, with room to spare.
 pub(crate) const REQUEST_MAX: usize = 16 * 1024 * 1024;
+/// The type of a status entry, as `../status.md` defines it.
+pub const STATUS: &str = "application/vnd.agentwire.status+json";
+/// The longest status, in characters, the server sets or shows: a sentence, with room to spare.
+const STATUS_MAX: usize = 500;
 
 /// The server: one value shared by every MCP request.
 #[derive(Clone)]
@@ -92,6 +98,9 @@ struct Participant {
     /// Entries taken from the relay and not yet handed to the agent.
     pending: Vec<Entry>,
     presence: Option<BTreeMap<String, Presence>>,
+    /// Told when another receive of the server's own for this participant ended the one
+    /// that waits at the relay, which has then to receive again.
+    replaced: Arc<tokio::sync::Notify>,
 }
 
 /// Entries handed to the agent, up to `read`, to acknowledge at the relay.
@@ -130,6 +139,15 @@ struct File {
     kind: String,
     /// Its file name, such as `plot.png`.
     name: Option<String>,
+}
+
+#[derive(Deserialize, schemars::JsonSchema)]
+struct StatusArgs {
+    /// Your own link, which join returned.
+    link: String,
+    /// One sentence on what you are doing and where, such as
+    /// `Fixing the login bug in accounts/src/otp.rs.`; empty to clear it.
+    status: String,
 }
 
 #[derive(Deserialize, schemars::JsonSchema)]
@@ -198,6 +216,25 @@ impl Server {
             ));
         };
         outcome(accounts.sessions(token).await)
+    }
+
+    #[tool(
+        description = "Set your status: one sentence on what you are doing, which holds until your next one and wakes no one. Keep it current, so that others see what you do without asking."
+    )]
+    async fn status(&self, Parameters(args): Parameters<StatusArgs>) -> CallToolResult {
+        outcome(self.set_status(&args.link, &args.status).await)
+    }
+
+    #[tool(
+        description = "Show at once, without waiting, everyone in the session: whether each is listening, and each one's status."
+    )]
+    async fn participants(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(args): Parameters<LinkArgs>,
+    ) -> CallToolResult {
+        let token = accounts::bearer(&parts.headers);
+        outcome(self.show_participants(&args.link, token).await)
     }
 
     #[tool(description = "Leave the session.")]
@@ -329,17 +366,7 @@ impl Server {
         token: Option<&str>,
     ) -> Result<(Vec<ContentBlock>, Handover), String> {
         let link = &self.own_link(link)?;
-        let name = match self.participant(link, |p| p.name.clone()) {
-            Some(name) => name,
-            None => {
-                // Fetching an entry fails for a link that is not in, without side effects,
-                // before joining again, which does nothing while in, tells whose the link is.
-                self.client.fetch(link, 1).await.map_err(fail)?;
-                let joined = self.client.rejoin(link, token).await.map_err(fail)?;
-                self.know(&joined);
-                joined.name
-            }
-        };
+        let name = self.name_of(link, token).await?;
         loop {
             let ready = self.participant(link, |p| {
                 p.pending
@@ -360,6 +387,64 @@ impl Server {
             }
             self.pull(link).await?;
         }
+    }
+
+    /// The name of the participant whose own link `link` is.
+    async fn name_of(&self, link: &str, token: Option<&str>) -> Result<String, String> {
+        if let Some(name) = self.participant(link, |p| p.name.clone()) {
+            return Ok(name);
+        }
+        // Fetching an entry fails for a link that is not in, without side effects,
+        // before joining again, which does nothing while in, tells whose the link is.
+        self.client.fetch(link, 1).await.map_err(fail)?;
+        let joined = self.client.rejoin(link, token).await.map_err(fail)?;
+        self.know(&joined);
+        Ok(joined.name)
+    }
+
+    async fn set_status(&self, link: &str, status: &str) -> Result<String, String> {
+        let link = self.own_link(link)?;
+        let status = status.trim();
+        if status.chars().count() > STATUS_MAX {
+            return Err(format!(
+                "a status is one sentence, of at most {STATUS_MAX} characters"
+            ));
+        }
+        let body = serde_json::json!({ "text": status }).to_string();
+        self.client
+            .send(&link, STATUS, None, body.into_bytes())
+            .await
+            .map_err(fail)?;
+        Ok(match status {
+            "" => "Your status is cleared.".to_owned(),
+            _ => "Your status is set.".to_owned(),
+        })
+    }
+
+    /// Everyone in the session, from a receive that returns at once: the presence, and
+    /// each one's status from the log.
+    async fn show_participants(&self, link: &str, token: Option<&str>) -> Result<String, String> {
+        let link = &self.own_link(link)?;
+        let name = self.name_of(link, token).await?;
+        // Receiving after 0 moves no read position; joins are asked for, since a status
+        // holds only until its sender leaves, and someone else may join under the name.
+        let now = Receive {
+            after: Some(0),
+            wait: Some(Duration::ZERO),
+            own: true,
+            only: vec![STATUS.to_owned(), JOIN.to_owned()],
+            ..Receive::default()
+        };
+        let received = self.client.receive(link, &now).await;
+        // A participant has one receive at a time at the relay, so this one ended the
+        // receive waiting for the agent, if any, which has to receive again.
+        self.participant(link, |p| p.replaced.notify_one());
+        let received = received.map_err(fail)?;
+        Ok(describe_participants(
+            &received.presence,
+            &statuses(&received.entries),
+            &name,
+        ))
     }
 
     /// Receives and acknowledges at once, for a client that gets the result right away.
@@ -388,19 +473,27 @@ impl Server {
         };
         // The next receive acknowledges it anyway, through its read position.
         let _ = self.client.receive(&link, &now).await;
+        self.participant(&link, |p| p.replaced.notify_one());
     }
 
     /// One receive from the relay, after what was taken, into what is pending,
     /// leaving the read position at what was handed over.
     async fn pull(&self, link: &str) -> Result<(), String> {
-        let (taken, read) = self.participant(link, |p| (p.taken, p.read));
+        let (taken, read, replaced) =
+            self.participant(link, |p| (p.taken, p.read, p.replaced.clone()));
+        // Statuses wake no one, and participants shows them, so receive leaves them out.
         let receive = Receive {
             after: Some(taken),
             read: Some(read),
             wait: Some(RELAY_WAIT),
+            skip: vec![STATUS.to_owned()],
             ..Receive::default()
         };
-        let received = self.client.receive(link, &receive).await.map_err(fail)?;
+        let received = tokio::select! {
+            received = self.client.receive(link, &receive) => received.map_err(fail)?,
+            // The relay ended it for a newer receive of the server's own: receive again.
+            () = replaced.notified() => return Ok(()),
+        };
         self.participant(link, |p| {
             p.taken = received.entries.last().map_or(p.taken, |entry| entry.n);
             p.pending.extend(received.entries);
@@ -675,6 +768,74 @@ fn describe_presence(presence: Option<&BTreeMap<String, Presence>>, me: &str) ->
                 "verified": verified(presence, name),
                 "listening": name != me && state.receiving,
             })
+        })
+        .collect();
+    serde_json::json!({ "in_the_session": people }).to_string()
+}
+
+/// A participant's status: its text, and when it was set.
+struct Status {
+    text: String,
+    time: String,
+}
+
+/// Each one's status, by name, from the status and join entries of the log in order:
+/// the latest, unless it was cleared, or its sender joined again since.
+fn statuses(entries: &[Entry]) -> HashMap<String, Status> {
+    let mut statuses = HashMap::new();
+    for entry in entries {
+        if entry.is(JOIN) {
+            statuses.remove(&entry.from);
+            continue;
+        }
+        if !entry.is(STATUS) {
+            continue;
+        }
+        let text = entry
+            .text
+            .as_deref()
+            .and_then(|body| serde_json::from_str::<Value>(body).ok())
+            .and_then(|status| status["text"].as_str().map(str::trim).map(str::to_owned));
+        match text {
+            Some(text) if !text.is_empty() => {
+                let text = match text.char_indices().nth(STATUS_MAX) {
+                    Some((end, _)) => format!("{}…", &text[..end]),
+                    None => text,
+                };
+                let time = entry.time.clone();
+                statuses.insert(entry.from.clone(), Status { text, time });
+            }
+            Some(_) => _ = statuses.remove(&entry.from),
+            None => {}
+        }
+    }
+    statuses
+}
+
+/// Everyone in the session, as JSON: as `describe_presence` has them, with since when
+/// each that isn't listening isn't, and each one's status with when it was set.
+fn describe_participants(
+    presence: &BTreeMap<String, Presence>,
+    statuses: &HashMap<String, Status>,
+    me: &str,
+) -> String {
+    let people: Vec<Value> = presence
+        .iter()
+        .map(|(name, state)| {
+            let listening = name != me && state.receiving;
+            let mut person = serde_json::json!({
+                "name": name,
+                "you": name == me,
+                "verified": verified(Some(presence), name),
+                "listening": listening,
+            });
+            if !listening && name != me {
+                person["since"] = state.since.clone().into();
+            }
+            if let Some(status) = statuses.get(name) {
+                person["status"] = serde_json::json!({ "text": status.text, "time": status.time });
+            }
+            person
         })
         .collect();
     serde_json::json!({ "in_the_session": people }).to_string()
