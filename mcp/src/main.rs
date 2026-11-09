@@ -1,9 +1,9 @@
 //! The server as a program: it listens at `VIBETOGETHER_MCP_ADDRESS`, by default
-//! 127.0.0.1:8792, serves MCP at `/mcp`, and takes a room's address, or its last part alone, to be on
+//! 127.0.0.1:8792, serves MCP at `/mcp`, and takes a session's address, or its last part alone, to be on
 //! the relay at `AGENTWIRE_RELAY`, by default the public one.
 //! It accepts requests for the hosts in `VIBETOGETHER_MCP_HOSTS`, separated by commas,
 //! by default only loopback ones; behind a public domain, name it there.
-//! With `VIBETOGETHER_MCP_ACCOUNTS`, the account service's URL, joining a room signs
+//! With `VIBETOGETHER_MCP_ACCOUNTS`, the account service's URL, joining a session signs
 //! in to that service, and the server names itself in its challenge by its public URL,
 //! `VIBETOGETHER_MCP_RESOURCE`.
 
@@ -11,7 +11,7 @@ use std::env;
 use std::error::Error;
 
 use tokio::net::TcpListener;
-use vibetogether_mcp::{Accounts, Room, router};
+use vibetogether_mcp::{Accounts, Server, router};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
@@ -33,7 +33,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         }
         Err(_) => None,
     };
-    let router = router(Room::new(relay), hosts, accounts);
+    let router = router(Server::new(relay), hosts, accounts);
     let listener = TcpListener::bind(&address).await?;
     axum::serve(listener, router)
         .with_graceful_shutdown(async { tokio::signal::ctrl_c().await.unwrap_or_default() })

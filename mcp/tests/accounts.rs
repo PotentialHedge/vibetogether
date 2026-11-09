@@ -1,5 +1,5 @@
 //! Signing in, lazily, against a stub of the account service that is also the relay's
-//! access service: everything works without an account but joining a room, which is
+//! access service: everything works without an account but joining a session, which is
 //! challenged, and a token is passed on, so that its name shows as verified.
 
 use std::collections::HashSet;
@@ -21,16 +21,16 @@ use rmcp::transport::streamable_http_client::StreamableHttpClientTransportConfig
 use rmcp::{ClientLifecycleMode, ClientServiceExt, RoleClient, object};
 use serde::Deserialize;
 use tokio::net::TcpListener;
-use vibetogether_mcp::{Accounts, Room, router};
+use vibetogether_mcp::{Accounts, Server, router};
 
 const RESOURCE: &str = "https://vibetogether.example/mcp";
 const METADATA: &str = "https://vibetogether.example/.well-known/oauth-protected-resource/mcp";
 
-/// The rooms, by session token; the one account is `luis`, whose token is `t-luis`.
+/// The sessions, by session token; the one account is `luis`, whose token is `t-luis`.
 #[derive(Default)]
 struct Stub {
-    rooms: Mutex<HashSet<String>>,
-    /// The rooms open to anyone with their address.
+    sessions: Mutex<HashSet<String>>,
+    /// The sessions open to anyone with their address.
     open: Mutex<HashSet<String>>,
 }
 
@@ -41,11 +41,11 @@ async fn me(headers: HeaderMap) -> (StatusCode, String) {
     }
 }
 
-async fn rooms(headers: HeaderMap) -> (StatusCode, String) {
+async fn sessions(headers: HeaderMap) -> (StatusCode, String) {
     match headers.get("authorization").and_then(|v| v.to_str().ok()) {
         Some("Bearer t-luis") => (
             StatusCode::OK,
-            r#"[{"id":"r_1","name":"agents","owner":"luis","members":[],"open":"members","address":"L"}]"#.into(),
+            r#"[{"id":"s_1","name":"agents","owner":"luis","members":[],"open":"members","address":"L"}]"#.into(),
         ),
         _ => (StatusCode::UNAUTHORIZED, String::new()),
     }
@@ -60,14 +60,16 @@ struct Join {
 }
 
 async fn join(State(stub): State<Arc<Stub>>, Json(join): Json<Join>) -> (StatusCode, String) {
-    let room = stub.rooms.lock().unwrap().contains(&join.session);
+    let session = stub.sessions.lock().unwrap().contains(&join.session);
     let open = stub.open.lock().unwrap().contains(&join.session);
     match join.token.as_deref() {
         Some("t-luis") if join.name.split('/').next() == Some("luis") => {
             (StatusCode::OK, r#"{"account":"luis"}"#.into())
         }
         Some(_) => (StatusCode::FORBIDDEN, "not your name\n".into()),
-        None if (join.owned && !open) || room => (StatusCode::FORBIDDEN, "sign in first\n".into()),
+        None if (join.owned && !open) || session => {
+            (StatusCode::FORBIDDEN, "sign in first\n".into())
+        }
         None => (StatusCode::OK, r#"{"account":null}"#.into()),
     }
 }
@@ -76,10 +78,11 @@ async fn session(
     State(stub): State<Arc<Stub>>,
     Path(id): Path<String>,
 ) -> (StatusCode, &'static str) {
-    let known = stub.rooms.lock().unwrap().contains(&id) || stub.open.lock().unwrap().contains(&id);
+    let known =
+        stub.sessions.lock().unwrap().contains(&id) || stub.open.lock().unwrap().contains(&id);
     match known {
         true => (StatusCode::OK, "{}"),
-        false => (StatusCode::NOT_FOUND, "no such room\n"),
+        false => (StatusCode::NOT_FOUND, "no such session\n"),
     }
 }
 
@@ -90,11 +93,11 @@ async fn serve(router: axum::Router) -> String {
     format!("http://{address}")
 }
 
-/// The server, signed in to the stub, with a room and a session by secret link.
+/// The server, signed in to the stub, with a session and a session by secret link.
 struct World {
     mcp: String,
-    room: String,
-    /// A room an account owns that is open to anyone with its address.
+    session: String,
+    /// A session an account owns that is open to anyone with its address.
     shared: String,
     open: String,
 }
@@ -104,7 +107,7 @@ async fn world() -> World {
     let service = serve(
         axum::Router::new()
             .route("/api/me", get(me))
-            .route("/api/rooms", get(rooms))
+            .route("/api/sessions", get(sessions))
             .route("/agentwire/join", post(join))
             .route("/agentwire/sessions/{id}", get(session))
             .with_state(stub.clone()),
@@ -117,18 +120,18 @@ async fn world() -> World {
     .unwrap();
     let relay = serve(relay.router()).await;
     let accounts = Accounts::new(&service, RESOURCE).unwrap();
-    let mcp = serve(router(Room::new(&relay), ["127.0.0.1"], Some(accounts))).await;
+    let mcp = serve(router(Server::new(&relay), ["127.0.0.1"], Some(accounts))).await;
     let client = Client::new();
-    let room = client.create_owned(&relay).await.unwrap();
-    let id = room.rsplit('/').next().unwrap().to_owned();
-    stub.rooms.lock().unwrap().insert(id);
+    let session = client.create_owned(&relay).await.unwrap();
+    let id = session.rsplit('/').next().unwrap().to_owned();
+    stub.sessions.lock().unwrap().insert(id);
     let shared = client.create_owned(&relay).await.unwrap();
     let id = shared.rsplit('/').next().unwrap().to_owned();
     stub.open.lock().unwrap().insert(id);
     let open = client.create(&relay).await.unwrap();
     World {
         mcp: format!("{mcp}/mcp"),
-        room,
+        session,
         shared,
         open,
     }
@@ -163,7 +166,7 @@ async fn join_as(
     client
         .call_tool(
             CallToolRequestParams::new("join")
-                .with_arguments(object!({ "room": session, "name": name })),
+                .with_arguments(object!({ "session": session, "name": name })),
         )
         .await
         .unwrap()
@@ -177,7 +180,7 @@ fn text(result: &CallToolResult) -> String {
 async fn post_join(mcp: &str, session: &str, token: Option<&str>) -> reqwest::Response {
     let call = serde_json::json!({
         "jsonrpc": "2.0", "id": 1, "method": "tools/call",
-        "params": {"name": "join", "arguments": {"room": session, "name": "luis/claude"}},
+        "params": {"name": "join", "arguments": {"session": session, "name": "luis/claude"}},
     });
     let mut request = reqwest::Client::new()
         .post(mcp)
@@ -205,17 +208,17 @@ async fn without_an_account_a_session_by_secret_link_works() {
 #[tokio::test]
 async fn joining_a_room_without_a_token_is_challenged() {
     let world = world().await;
-    let answer = post_join(&world.mcp, &world.room, None).await;
+    let answer = post_join(&world.mcp, &world.session, None).await;
     assert_eq!(answer.status(), 401);
     let challenge = answer.headers()["www-authenticate"].to_str().unwrap();
     assert_eq!(
         challenge,
         format!(r#"Bearer resource_metadata="{METADATA}""#)
     );
-    // A room named by its token alone, too.
-    let id = world.room.rsplit('/').next().unwrap();
+    // A session named by its token alone, too.
+    let id = world.session.rsplit('/').next().unwrap();
     assert_eq!(post_join(&world.mcp, id, None).await.status(), 401);
-    // The session by secret link is no room.
+    // The session by secret link is no session.
     assert_ne!(post_join(&world.mcp, &world.open, None).await.status(), 401);
 }
 
@@ -235,7 +238,7 @@ async fn a_token_the_service_rejects_is_challenged() {
 async fn an_agent_joins_with_its_token_and_shows_as_verified() {
     let world = world().await;
     let client = client(&world.mcp, Some("t-luis")).await;
-    for session in [&world.room, &world.open] {
+    for session in [&world.session, &world.open] {
         let joined = join_as(&client, session, "luis/claude").await;
         assert_ne!(joined.is_error, Some(true), "{joined:?}");
         let text = text(&joined);
@@ -254,7 +257,7 @@ async fn listing_the_rooms_asks_to_sign_in_first() {
     let world = world().await;
     let call = serde_json::json!({
         "jsonrpc": "2.0", "id": 1, "method": "tools/call",
-        "params": {"name": "rooms", "arguments": {}},
+        "params": {"name": "sessions", "arguments": {}},
     });
     let answer = reqwest::Client::new()
         .post(&world.mcp)
@@ -267,12 +270,12 @@ async fn listing_the_rooms_asks_to_sign_in_first() {
 
     let client = client(&world.mcp, Some("t-luis")).await;
     let listed = client
-        .call_tool(CallToolRequestParams::new("rooms"))
+        .call_tool(CallToolRequestParams::new("sessions"))
         .await
         .unwrap();
     assert_eq!(
         text(&listed),
-        r#"{"rooms":[{"id":"r_1","name":"agents","owner":"luis","address":"L"}]}"#
+        r#"{"sessions":[{"id":"s_1","name":"agents","owner":"luis","address":"L"}]}"#
     );
 }
 

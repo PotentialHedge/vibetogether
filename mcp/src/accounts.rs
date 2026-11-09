@@ -1,7 +1,7 @@
 //! Signing in, lazily, with an account service such as Vibe Together's.
 //!
-//! Everything works without an account, as zero setup needs, except joining a room and
-//! listing the account's rooms: such a call without a token gets MCP's challenge, a 401 that points at the
+//! Everything works without an account, as zero setup needs, except joining a session and
+//! listing the account's sessions: such a call without a token gets MCP's challenge, a 401 that points at the
 //! server's metadata (RFC 9728), from which an MCP client gets a token through the
 //! service's OAuth and retries. The challenge has to be the HTTP answer itself, before
 //! the MCP SDK runs, since a tool's error, inside a 200, starts no sign-in.
@@ -33,14 +33,14 @@ pub struct Accounts {
     service: String,
     /// What the challenge's `WWW-Authenticate` names: the server's metadata.
     metadata: String,
-    /// The relay a session token alone refers to, where the rooms are.
+    /// The relay a session token alone refers to, where the sessions are.
     relay: String,
     http: reqwest::Client,
     /// The tokens the service vouched for, until when.
     vouched: Mutex<HashMap<String, Instant>>,
 }
 
-/// A room, as the service lists it.
+/// A session, as the service lists it.
 #[derive(Deserialize)]
 struct Listed {
     id: String,
@@ -70,7 +70,7 @@ impl Accounts {
         })
     }
 
-    /// The same, with the relay whose sessions may be rooms.
+    /// The same, with the relay whose sessions may be sessions.
     pub(crate) fn on(mut self, relay: &str) -> Self {
         self.relay = relay.trim_end_matches('/').to_owned();
         self
@@ -105,17 +105,16 @@ impl Accounts {
         }
     }
 
-    /// Whether joining `room`, its address or the address's last part as `join` takes
-    /// it, as `name` without a token needs signing in: a room an account owns that the
+    /// Whether joining `session`, its address or the address's last part as `join` takes
+    /// it, as `name` without a token needs signing in: a session an account owns that the
     /// service lets no one in without a token, such as one open to its members only.
     /// No where the service doesn't say.
-    async fn needs_sign_in(&self, room: &str, name: &str) -> bool {
-        let session = room;
+    async fn needs_sign_in(&self, session: &str, name: &str) -> bool {
         let session = session.trim().trim_end_matches('/');
         let id = match session.strip_prefix(&format!("{}/v2/s/", self.relay)) {
             Some(id) => id,
             None if !session.contains('/') => session,
-            // A session on another relay is no room of this service's.
+            // A session on another relay is no account's of this service.
             None => return false,
         };
         if !crate::is_token(id) {
@@ -141,13 +140,13 @@ impl Accounts {
         answer.is_ok_and(|answer| answer.status() == StatusCode::FORBIDDEN)
     }
 
-    /// The rooms of the account whose token is `token`, as the agent reads them: JSON,
-    /// since a room's name is the owner's to choose.
-    pub(crate) async fn rooms(&self, token: &str) -> Result<String, String> {
+    /// The sessions of the account whose token is `token`, as the agent reads them: JSON,
+    /// since a session's name is the owner's to choose.
+    pub(crate) async fn sessions(&self, token: &str) -> Result<String, String> {
         let unreachable = |_| "the account service doesn't answer; try again later".to_owned();
         let answer = self
             .http
-            .get(format!("{}/api/rooms", self.service))
+            .get(format!("{}/api/sessions", self.service))
             .bearer_auth(token)
             .timeout(ANSWER)
             .send()
@@ -156,12 +155,12 @@ impl Accounts {
         if !answer.status().is_success() {
             return Err(format!("the account service refused: {}", answer.status()));
         }
-        let rooms: Vec<Listed> = answer.json().await.map_err(unreachable)?;
-        let rooms: Vec<Value> = rooms
+        let sessions: Vec<Listed> = answer.json().await.map_err(unreachable)?;
+        let sessions: Vec<Value> = sessions
             .into_iter()
-            .map(|room| serde_json::json!({"id": room.id, "name": room.name, "owner": room.owner, "address": room.address}))
+            .map(|session| serde_json::json!({"id": session.id, "name": session.name, "owner": session.owner, "address": session.address}))
             .collect();
-        Ok(serde_json::json!({ "rooms": rooms }).to_string())
+        Ok(serde_json::json!({ "sessions": sessions }).to_string())
     }
 
     fn challenge(&self, invalid: bool) -> Response {
@@ -178,7 +177,7 @@ impl Accounts {
     }
 }
 
-/// Challenges a request with a token the service rejects, and a `join` into a room
+/// Challenges a request with a token the service rejects, and a `join` into a session
 /// without a token; lets everything else through.
 pub async fn check(
     State(accounts): State<Arc<Accounts>>,
@@ -200,13 +199,13 @@ pub async fn check(
         return (StatusCode::PAYLOAD_TOO_LARGE, "the request is too large\n").into_response();
     };
     let calls = calls(&bytes);
-    if calls.iter().any(|(tool, _, _)| tool == "rooms") {
+    if calls.iter().any(|(tool, _, _)| tool == "sessions") {
         return accounts.challenge(false);
     }
-    for (tool, room, name) in &calls {
+    for (tool, session, name) in &calls {
         if tool == "join"
-            && let (Some(room), Some(name)) = (room, name)
-            && accounts.needs_sign_in(room, name).await
+            && let (Some(session), Some(name)) = (session, name)
+            && accounts.needs_sign_in(session, name).await
         {
             return accounts.challenge(false);
         }
@@ -215,7 +214,7 @@ pub async fn check(
         .await
 }
 
-/// The tools a JSON-RPC message, or a batch of them, calls, each with the room and the
+/// The tools a JSON-RPC message, or a batch of them, calls, each with the session and the
 /// name it gives, if any.
 fn calls(body: &[u8]) -> Vec<(String, Option<String>, Option<String>)> {
     let Ok(message) = serde_json::from_slice::<Value>(body) else {
@@ -232,9 +231,9 @@ fn calls(body: &[u8]) -> Vec<(String, Option<String>, Option<String>)> {
             let params = &message["params"];
             let tool = params["name"].as_str()?.to_owned();
             let arguments = &params["arguments"];
-            let room = arguments["room"].as_str().map(str::to_owned);
+            let session = arguments["session"].as_str().map(str::to_owned);
             let name = arguments["name"].as_str().map(str::to_owned);
-            Some((tool, room, name))
+            Some((tool, session, name))
         })
         .collect()
 }

@@ -14,7 +14,7 @@ use rmcp::service::RunningService;
 use rmcp::transport::StreamableHttpClientTransport;
 use rmcp::{ClientLifecycleMode, ClientServiceExt, RoleClient, object};
 use tokio::net::TcpListener;
-use vibetogether_mcp::{Room, router};
+use vibetogether_mcp::{Server, router};
 
 struct World {
     mcp: String,
@@ -33,7 +33,7 @@ async fn serve(router: axum::Router) -> String {
 /// A relay, the server, and a session that `luis` joined.
 async fn world() -> World {
     let relay = serve(Relay::open(Options::default()).unwrap().router()).await;
-    let mcp = serve(router(Room::new(&relay), ["127.0.0.1"], None)).await;
+    let mcp = serve(router(Server::new(&relay), ["127.0.0.1"], None)).await;
     let http = reqwest::Client::new();
     let session = http
         .post(format!("{relay}/v2/s"))
@@ -122,7 +122,7 @@ async fn join(client: &RunningService<RoleClient, ClientConfig>, session: &str) 
     let result = client
         .call_tool(
             CallToolRequestParams::new("join")
-                .with_arguments(object!({ "room": session, "name": "luis/claude" })),
+                .with_arguments(object!({ "session": session, "name": "luis/claude" })),
         )
         .await
         .unwrap();

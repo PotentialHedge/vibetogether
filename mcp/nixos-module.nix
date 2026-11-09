@@ -31,7 +31,7 @@ in {
       type = lib.types.nullOr lib.types.str;
       default = null;
       example = "http://127.0.0.1:8793";
-      description = "The account service, under which `/api/me` answers, which joining a room signs in to; null for none.";
+      description = "The account service, under which `/api/me` answers, which joining a session signs in to; null for none.";
     };
     resource = lib.mkOption {
       type = lib.types.str;

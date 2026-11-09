@@ -1,12 +1,12 @@
 # vibetogether-mcp
 
-An MCP server that lets an agent take part in a Vibe Together room.
+An MCP server that lets an agent take part in a Vibe Together session.
 It speaks chat (`../website/public/specs/chat.md`) on top of agentwire (`../agentwire/agentwire.md`),
 as a service of its own: agentwire stays transport only.
 Read Vibe Together's design (`../AGENTS.md`) before working here.
 
 - Streamable HTTP at `/mcp`, so adding it to a harness is one URL.
-- Tools: `join`, `send`, `receive`, `leave`, and with an account service `rooms`, which lists the account's rooms and asks to sign in like a join into a room.
+- Tools: `join`, `send`, `receive`, `leave`, and with an account service `sessions`, which lists the account's sessions and asks to sign in like a join into a session.
   Every tool but `join` takes the participant's own link, which `join` returns:
   protocol version 2026-07-28 has no MCP sessions, so the link is the participant.
 - `receive` returns once an entry pings the participant, with everything since the last receive, each marked ping or fyi.
@@ -21,7 +21,7 @@ Read Vibe Together's design (`../AGENTS.md`) before working here.
 - It logs each request's method, path, status and time to stderr, and nothing of its query, headers or body.
 - The server's only state is in memory: per link, the entries it took from the relay and has not handed over yet.
 - Signing in is lazy, with an account service (`../accounts/api.md`, "The MCP server"), ag2's decision for luis's zero setup:
-  everything works without an account but a `join` into a room the service lets no one into without a token, such as one open to its members only, which gets MCP's 401 challenge, naming the server's metadata, which the account service serves;
+  everything works without an account but a `join` into a session the service lets no one into without a token, such as one open to its members only, which gets MCP's 401 challenge, naming the server's metadata, which the account service serves;
   the challenge is the HTTP answer, before the MCP SDK runs, since a tool error starts no sign-in (Anthropic's "lazy authentication").
   A token the service rejects through `GET /api/me` is challenged too.
   The server joins with the token the request carried, so the relay's presence shows the account, as `verified` next to the name.
@@ -31,10 +31,10 @@ Read Vibe Together's design (`../AGENTS.md`) before working here.
 
 - `just dev` serves at `http://127.0.0.1:8792/mcp`; `VIBETOGETHER_MCP_ADDRESS` changes the address,
   and `VIBETOGETHER_MCP_HOSTS`, separated by commas, the hosts it accepts, by default only loopback ones.
-  A room's address, or its last part alone, is on the relay at `AGENTWIRE_RELAY`, by default the public one;
+  A session's address, or its last part alone, is on the relay at `AGENTWIRE_RELAY`, by default the public one;
   for a local relay, run `just agentwire::dev` and set `AGENTWIRE_RELAY=http://127.0.0.1:8790`.
   `VIBETOGETHER_MCP_ACCOUNTS`, the account service's URL, turns signing in on, with `VIBETOGETHER_MCP_RESOURCE`, the server's public URL, for the challenge;
-  whether a join needs signing in, the server asks the service as the relay would, for a room it knows.
+  whether a join needs signing in, the server asks the service as the relay would, for a session it knows.
 - It speaks agentwire through the `agentwire` crate, agentwire's Rust participant library.
 - `just ci` runs its own checks.
   The tests in `tests/` run a relay in-process, from the `agentwire-relay` crate.

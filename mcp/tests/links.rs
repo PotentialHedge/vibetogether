@@ -14,7 +14,7 @@ use rmcp::transport::StreamableHttpClientTransport;
 use rmcp::transport::streamable_http_client::StreamableHttpClientTransportConfig;
 use rmcp::{ClientLifecycleMode, ClientServiceExt, RoleClient};
 use tokio::net::TcpListener;
-use vibetogether_mcp::{Room, router};
+use vibetogether_mcp::{Server, router};
 
 async fn serve(router: axum::Router) -> String {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -54,7 +54,7 @@ async fn no_link_leads_anywhere_but_the_relay() {
     )
     .await;
     let relay = serve(Relay::open(Options::default()).unwrap().router()).await;
-    let mcp = serve(router(Room::new(&relay), ["127.0.0.1"], None)).await;
+    let mcp = serve(router(Server::new(&relay), ["127.0.0.1"], None)).await;
     let config =
         StreamableHttpClientTransportConfig::with_uri(format!("{mcp}/mcp")).auth_header("t-luis");
     let client = ClientConfig::new(
@@ -83,7 +83,7 @@ async fn no_link_leads_anywhere_but_the_relay() {
         let joined = call(
             &client,
             "join",
-            serde_json::json!({ "room": session, "name": "luis/claude" }),
+            serde_json::json!({ "session": session, "name": "luis/claude" }),
         )
         .await;
         assert_eq!(joined.is_error, Some(true), "{session}: {joined:?}");
@@ -135,7 +135,7 @@ async fn no_link_leads_anywhere_but_the_relay() {
         let joined = call(
             &client,
             "join",
-            serde_json::json!({ "room": session, "name": name }),
+            serde_json::json!({ "session": session, "name": name }),
         )
         .await;
         assert_ne!(joined.is_error, Some(true), "{joined:?}");
