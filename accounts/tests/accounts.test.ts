@@ -799,13 +799,37 @@ test("an app acts as its person only with its secret, the person's approval, and
 		(await call(luis, "DELETE", `/api/tokens/t_${listed.id.slice(2)}`)).status,
 		404,
 	);
+	// The app owns the sessions it creates, and manages them alone.
 	const created = await call(token, "POST", "/api/sessions", {
 		name: "Telegram",
 	});
-	assert.equal(created.json.app, "messagent");
+	assert.deepEqual(created.json.app, { id: listed.id, name: "messagent" });
+	const kept = await call(token, "POST", "/api/sessions", { name: "kept" });
+	for (const someone of [luis, luisToken])
+		assert.equal(
+			(await call(someone, "DELETE", `/api/sessions/${created.json.id}`))
+				.status,
+			403,
+		);
 	assert.equal(
-		(await call(luis, "DELETE", `/api/sessions/${created.json.id}`)).status,
+		(
+			await call(luis, "PATCH", `/api/sessions/${created.json.id}`, {
+				name: "mine",
+			})
+		).status,
+		403,
+	);
+	assert.equal(
+		(await call(token, "DELETE", `/api/sessions/${created.json.id}`)).status,
 		204,
+	);
+	// An app manages only its own sessions.
+	const [own] = (await call(luis, "GET", "/api/sessions")).json.filter(
+		(s: any) => s.app === null && s.owner === "luis",
+	);
+	assert.equal(
+		(await call(token, "DELETE", `/api/sessions/${own.id}`)).status,
+		403,
 	);
 
 	const [owned] = (await call(token, "GET", "/api/sessions")).json;
@@ -855,6 +879,13 @@ test("an app acts as its person only with its secret, the person's approval, and
 	// Unlinking from the app's side.
 	assert.equal((await call(token, "DELETE", "/api/tokens/self")).status, 404);
 	assert.equal((await call(token, "DELETE", "/api/apps/self")).status, 204);
+	// Revoking the app ends its sessions.
+	assert.equal(
+		(await call(luis, "GET", "/api/sessions")).json.some(
+			(s: any) => s.id === kept.json.id,
+		),
+		false,
+	);
 	assert.equal((await join("luis", token)).status, 403);
 	assert.equal((await call(token, "GET", "/api/me")).status, 401);
 	assert.equal((await call(agent, "GET", "/api/me")).status, 200);

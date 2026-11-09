@@ -10,9 +10,16 @@ export type SessionRow = {
 	secret: string | null;
 	created: string;
 	open: "members" | "link";
-	/** The app behind the session, such as `messagent` for a Telegram chat, which created it. */
-	app: string | null;
+	/** The app's grant that owns the session for the person, such as messagent's for a Telegram chat. */
+	app_grant: string | null;
 };
+
+/**
+ * The condition that an owned session still is: one an app owns ends with the app's grant,
+ * however the grant ends, revoked or by Better Auth.
+ */
+export const live =
+	"(app_grant IS NULL OR app_grant IN (SELECT id FROM session WHERE person = 1))";
 
 export function newId(prefix: string): string {
 	return `${prefix}_${randomBytes(12).toString("base64url")}`;
@@ -53,7 +60,7 @@ export async function createSession(
 	owner: string,
 	name: string,
 	open: SessionRow["open"],
-	app: string | null = null,
+	appGrant: string | null = null,
 ): Promise<SessionRow> {
 	const session: SessionRow = {
 		id: newId("s"),
@@ -62,10 +69,10 @@ export async function createSession(
 		secret: null,
 		created: new Date().toISOString(),
 		open,
-		app,
+		app_grant: appGrant,
 	};
 	db.prepare(
-		"INSERT INTO owned_session (id, name, owner, secret, created, open, app) VALUES (?, ?, ?, ?, ?, ?, ?)",
+		"INSERT INTO owned_session (id, name, owner, secret, created, open, app_grant) VALUES (?, ?, ?, ?, ?, ?, ?)",
 	).run(
 		session.id,
 		session.name,
@@ -73,7 +80,7 @@ export async function createSession(
 		session.secret,
 		session.created,
 		session.open,
-		session.app,
+		session.app_grant,
 	);
 	try {
 		session.secret = await secretOf(session);

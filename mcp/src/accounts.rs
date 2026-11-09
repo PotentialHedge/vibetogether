@@ -47,6 +47,14 @@ struct Listed {
     name: String,
     owner: String,
     address: String,
+    /// The app that owns it for its person, such as messagent for a Telegram chat.
+    #[serde(default)]
+    app: Option<ListedApp>,
+}
+
+#[derive(Deserialize)]
+struct ListedApp {
+    name: String,
 }
 
 impl Accounts {
@@ -158,7 +166,7 @@ impl Accounts {
         let sessions: Vec<Listed> = answer.json().await.map_err(unreachable)?;
         let sessions: Vec<Value> = sessions
             .into_iter()
-            .map(|session| serde_json::json!({"id": session.id, "name": session.name, "owner": session.owner, "address": session.address}))
+            .map(|session| serde_json::json!({"id": session.id, "name": session.name, "owner": session.owner, "address": session.address, "app": session.app.map(|app| app.name)}))
             .collect();
         Ok(serde_json::json!({ "sessions": sessions }).to_string())
     }

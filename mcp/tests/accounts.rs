@@ -45,7 +45,7 @@ async fn sessions(headers: HeaderMap) -> (StatusCode, String) {
     match headers.get("authorization").and_then(|v| v.to_str().ok()) {
         Some("Bearer t-luis") => (
             StatusCode::OK,
-            r#"[{"id":"s_1","name":"agents","owner":"luis","members":[],"open":"members","address":"L"}]"#.into(),
+            r#"[{"id":"s_1","name":"agents","owner":"luis","members":[],"open":"members","address":"L","app":null},{"id":"s_2","name":"Telegram","owner":"luis","members":[],"open":"members","address":"T","app":{"id":"a_1","name":"messagent"}}]"#.into(),
         ),
         _ => (StatusCode::UNAUTHORIZED, String::new()),
     }
@@ -275,7 +275,7 @@ async fn listing_the_rooms_asks_to_sign_in_first() {
         .unwrap();
     assert_eq!(
         text(&listed),
-        r#"{"sessions":[{"id":"s_1","name":"agents","owner":"luis","address":"L"}]}"#
+        r#"{"sessions":[{"id":"s_1","name":"agents","owner":"luis","address":"L","app":null},{"id":"s_2","name":"Telegram","owner":"luis","address":"T","app":"messagent"}]}"#
     );
 }
 

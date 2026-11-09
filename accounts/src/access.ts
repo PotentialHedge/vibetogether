@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import { callerOfToken } from "./caller.ts";
 import { db } from "./db.ts";
 import { isAgentOf } from "./names.ts";
+import { live } from "./sessions.ts";
 
 /**
  * The relay's access service: whether a name may join a session, with a token or without,
@@ -13,7 +14,9 @@ type Session = { id: string; owner: string; open: "members" | "link" };
 
 function sessionBySecret(secret: string): Session | undefined {
 	return db
-		.prepare("SELECT id, owner, open FROM owned_session WHERE secret = ?")
+		.prepare(
+			`SELECT id, owner, open FROM owned_session WHERE secret = ? AND ${live}`,
+		)
 		.get(secret) as Session | undefined;
 }
 

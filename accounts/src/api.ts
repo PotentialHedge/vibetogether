@@ -7,6 +7,7 @@ import { isNamePart } from "./names.ts";
 import {
 	addressOf,
 	createSession,
+	live,
 	type SessionRow,
 	secretOf,
 } from "./sessions.ts";
@@ -59,7 +60,7 @@ async function sessionJson(session: SessionRow) {
 		owner: loginOf(session.owner),
 		members: members.map((m) => m.login),
 		open: session.open,
-		app: session.app,
+		app: appOf(session),
 		address,
 	};
 }
@@ -145,26 +146,52 @@ api.get("/me", (c) => {
 
 // Sessions
 
+/** The app that owns a session for the person, as `/apps` lists it, or null for the person's own. */
+function appOf(session: SessionRow): { id: string; name: string } | null {
+	if (!session.app_grant) return null;
+	const grant = db
+		.prepare("SELECT agent FROM session WHERE id = ?")
+		.get(session.app_grant) as { agent: string } | undefined;
+	return grant ? { id: `a_${session.app_grant}`, name: grant.agent } : null;
+}
+
+/**
+ * Why the caller may not manage a session it owns, or undefined where it may:
+ * an app's session is its app's alone, and an app manages only its own.
+ */
+function notManaged(session: SessionRow, caller: Caller): string | undefined {
+	if (session.app_grant)
+		return caller.token === `a_${session.app_grant}`
+			? undefined
+			: "This session is its app's: the app manages it, and revoking the app ends it.";
+	return caller.app ? "An app manages only its own sessions." : undefined;
+}
+
 function sessionOf(id: string): SessionRow | undefined {
-	return db.prepare("SELECT * FROM owned_session WHERE id = ?").get(id) as
-		| SessionRow
-		| undefined;
+	return db
+		.prepare(`SELECT * FROM owned_session WHERE id = ? AND ${live}`)
+		.get(id) as SessionRow | undefined;
 }
 
 api.get("/sessions", async (c) => {
 	const sessions = db
 		.prepare(
-			`SELECT * FROM owned_session WHERE owner = ? OR id IN (SELECT session FROM session_member WHERE user = ?) ORDER BY created`,
+			`SELECT * FROM owned_session WHERE (owner = ? OR id IN (SELECT session FROM session_member WHERE user = ?)) AND ${live} ORDER BY created`,
 		)
 		.all(c.var.caller.id, c.var.caller.id) as SessionRow[];
 	return c.json(await Promise.all(sessions.map(sessionJson)));
 });
 
 api.post("/sessions", async (c) => {
+	const { app, token } = c.var.caller;
+	// An app's session is owned by its grant, which counts its own, apart from the person's.
+	const appGrant = app && token ? token.slice(2) : null;
 	const owned = (
 		db
-			.prepare("SELECT count(*) AS n FROM owned_session WHERE owner = ?")
-			.get(c.var.caller.id) as { n: number }
+			.prepare(
+				"SELECT count(*) AS n FROM owned_session WHERE owner = ? AND app_grant IS ?",
+			)
+			.get(c.var.caller.id, appGrant) as { n: number }
 	).n;
 	if (owned >= maxSessions)
 		return c.text(
@@ -181,7 +208,7 @@ api.post("/sessions", async (c) => {
 				c.var.caller.id,
 				input.name,
 				input.open ?? "members",
-				c.var.caller.app ?? null,
+				appGrant,
 			),
 		),
 		201,
@@ -193,6 +220,8 @@ api.patch("/sessions/:id", async (c) => {
 	if (!session) return c.text("No such session.", 404);
 	if (session.owner !== c.var.caller.id)
 		return c.text("Only the session's owner changes it.", 403);
+	const notYours = notManaged(session, c.var.caller);
+	if (notYours) return c.text(notYours, 403);
 	const input = sessionInput(await bodyOf(c.req.raw));
 	if (!input) return c.text(sessionInputHelp, 400);
 	if (input.open === "link" && !isPerson(c.req.raw))
@@ -211,6 +240,8 @@ api.delete("/sessions/:id", (c) => {
 	if (!session) return c.text("No such session.", 404);
 	if (session.owner !== c.var.caller.id)
 		return c.text("Only the session's owner deletes it.", 403);
+	const notYours = notManaged(session, c.var.caller);
+	if (notYours) return c.text(notYours, 403);
 	db.prepare("DELETE FROM owned_session WHERE id = ?").run(session.id);
 	return c.body(null, 204);
 });
@@ -221,6 +252,8 @@ api.put("/sessions/:id/members/:name", async (c) => {
 	if (!session) return c.text("No such session.", 404);
 	if (session.owner !== c.var.caller.id)
 		return c.text("Only the session's owner adds members.", 403);
+	const notYours = notManaged(session, c.var.caller);
+	if (notYours) return c.text(notYours, 403);
 	const person = personByLogin(c.req.param("name"));
 	if (!person) return c.text("No such person.", 404);
 	if (person.id === session.owner)
@@ -441,6 +474,7 @@ api.delete("/tokens/:id", (c) =>
 
 // Apps: each acts as its person, by a grant the person approved with an OTP, a Better Auth
 // session marked as the person's. An app's grant is no token: tokens only connect agents.
+// An app owns the sessions it creates, and revoking it ends them, by the grant's cascade.
 
 type AppGrant = {
 	id: string;
@@ -467,12 +501,17 @@ api.get("/apps", (c) => {
 
 /** Revokes `me`'s app grant `id`, as `/apps` lists it; whether there was one. */
 function revokeApp(me: string, id: string): boolean {
-	return (
-		id.startsWith("a_") &&
+	if (!id.startsWith("a_")) return false;
+	const revoked =
 		db
 			.prepare("DELETE FROM session WHERE id = ? AND userId = ? AND person = 1")
-			.run(id.slice(2), me).changes > 0
-	);
+			.run(id.slice(2), me).changes > 0;
+	// Its sessions end with it.
+	if (revoked)
+		db.prepare("DELETE FROM owned_session WHERE app_grant = ?").run(
+			id.slice(2),
+		);
+	return revoked;
 }
 
 // The grant the request carries, as an app unlinks itself from its side.

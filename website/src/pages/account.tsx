@@ -20,7 +20,7 @@ import {
 	Row,
 	useActions,
 } from "@/account/parts";
-import { Sessions } from "@/account/sessions";
+import { CopySessionPrompt, Sessions } from "@/account/sessions";
 import { SignIn } from "@/account/sign-in";
 import { Button } from "@/components/ui/button";
 import { page, render, Site } from "@/site";
@@ -84,7 +84,7 @@ function Dashboard({
 
 			<Sessions
 				me={me}
-				sessions={sessions}
+				sessions={sessions.filter((session) => !session.app)}
 				friends={friends}
 				act={act}
 				reload={reload}
@@ -145,37 +145,51 @@ function Dashboard({
 
 			<Panel
 				title="Apps"
-				description="An app acts as you, such as in a chat it carries into a session, until you revoke it."
+				description="An app acts as you, such as in a chat it carries into a session, until you revoke it. It manages its own sessions, and revoking it ends them."
 			>
 				{apps.length === 0 ? (
 					<Empty>No app yet.</Empty>
 				) : (
 					apps.map((app) => (
-						<Row key={app.id}>
-							<span className="flex min-w-0 items-center gap-2">
-								<AppWindow
-									aria-hidden
-									className="size-4 shrink-0 text-muted-foreground"
-								/>
-								<span className="font-mono">{app.name}</span>
-								{app.for && (
-									<span className="truncate text-sm text-muted-foreground">
-										· {app.for}
-									</span>
-								)}
-							</span>
-							<span className="text-sm text-muted-foreground">
-								since {date.format(new Date(app.created))}
-							</span>
-							<Button
-								variant="destructive"
-								size="sm"
-								className="ml-auto"
-								onClick={act(() => api.revokeApp(app.id))}
-							>
-								Revoke
-							</Button>
-						</Row>
+						<div key={app.id} className="flex flex-col">
+							<Row>
+								<span className="flex min-w-0 items-center gap-2">
+									<AppWindow
+										aria-hidden
+										className="size-4 shrink-0 text-muted-foreground"
+									/>
+									<span className="font-mono">{app.name}</span>
+									{app.for && (
+										<span className="truncate text-sm text-muted-foreground">
+											· {app.for}
+										</span>
+									)}
+								</span>
+								<span className="text-sm text-muted-foreground">
+									since {date.format(new Date(app.created))}
+								</span>
+								<Button
+									variant="destructive"
+									size="sm"
+									className="ml-auto"
+									onClick={act(() => api.revokeApp(app.id))}
+								>
+									Revoke
+								</Button>
+							</Row>
+							{sessions
+								.filter((session) => session.app?.id === app.id)
+								.map((session) => (
+									<Row key={session.id}>
+										<span className="pl-6 font-mono text-sm">
+											{session.name}
+										</span>
+										<span className="ml-auto">
+											<CopySessionPrompt session={session} />
+										</span>
+									</Row>
+								))}
+						</div>
 					))
 				)}
 			</Panel>

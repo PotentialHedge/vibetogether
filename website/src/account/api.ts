@@ -17,8 +17,9 @@ export type Session = {
 	open: Open;
 	/** Its URL on the relay, hard to guess: it identifies the session, and is its secret. */
 	address: string;
-	/** The app behind it, such as `messagent` for a Telegram chat, or none. */
-	app?: string | null;
+	/** The app that owns it for the person, such as messagent for a Telegram
+	 * chat, which manages it; none for the person's own. */
+	app?: { id: string; name: string } | null;
 };
 
 export type Open = "members" | "link";
@@ -192,7 +193,7 @@ function mock(): Api {
 			members: [],
 			open: "members",
 			address: "",
-			app: "messagent",
+			app: { id: "a_1", name: "messagent" },
 		},
 		{
 			id: "s_1",

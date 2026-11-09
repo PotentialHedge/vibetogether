@@ -202,7 +202,7 @@ impl Server {
     }
 
     #[tool(
-        description = "List the sessions of your person's Vibe Together account: each with its id, by which your person names it, and its address, which join takes. The first call asks your person to sign in."
+        description = "List the sessions of your person's Vibe Together account: each with its id, by which your person names it, its address, which join takes, and the app behind it, such as messagent for your person's Telegram chat. The first call asks your person to sign in."
     )]
     async fn sessions(&self, Extension(parts): Extension<Parts>) -> CallToolResult {
         let Some(accounts) = &self.accounts else {

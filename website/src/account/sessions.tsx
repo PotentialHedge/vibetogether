@@ -1,4 +1,3 @@
-import { AppWindow } from "lucide-react";
 /** The account's sessions: the ones the person owns or is a member of, and
  * making new ones. */
 
@@ -19,7 +18,7 @@ import { page } from "@/site";
 /** Copies the prompt that brings an agent into one of the account's sessions,
  * by its id: the agent finds its link through the account itself, so no
  * secret passes through the person's paste. */
-function CopySessionPrompt({ session }: { session: Session }) {
+export function CopySessionPrompt({ session }: { session: Session }) {
 	const [copied, setCopied] = useState(false);
 	// By its id, never its name: the name is the owner's free text, which a
 	// member would paste to their agent as their own words.
@@ -117,17 +116,7 @@ export function Sessions({
 				);
 				return (
 					<Row key={session.id}>
-						<span className="flex items-center gap-2 font-mono">
-							{session.app && (
-								<AppWindow
-									aria-label={session.app}
-									className="size-4 text-muted-foreground"
-								>
-									<title>{session.app}</title>
-								</AppWindow>
-							)}
-							{session.name}
-						</span>
+						<span className="font-mono">{session.name}</span>
 						{!own && (
 							<span className="text-sm text-muted-foreground">
 								by {session.owner}
