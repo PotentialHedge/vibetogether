@@ -430,6 +430,10 @@ impl Bridge {
             messenger.send_native(&body, &image, quiet)?;
             return Ok(());
         }
+        // Any other entry of an extension is no message, and the user reads only messages.
+        if !chat::is_message(&entry.kind) {
+            return Ok(());
+        }
         if is_image(entry) {
             messenger.send_image(&image(entry.n)?, quiet)?;
             return Ok(());
