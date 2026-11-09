@@ -64,7 +64,10 @@ A piece of Ag² (`~/dev/agentics`), in a public repository of its own, Luis's de
   Its page for people, `messagent.agentics.lwirth.com`, a domain of its own as every client has, shows the prompt most prominently, with a little explanation, and is nice to look at.
 
 - One shared Vibe Together bot for everyone, Luis's agreement (2026-11-09), replacing "one bot is one agent":
-  the agent gives its person a `t.me/<bot>?start=<one-time code>` link, whose tap links that Telegram chat to the person's account and so verifies the person.
+  The person opens the bot, which sends them the generic approval page, "messagent wants to act as you", where they approve signed in, Luis's decision (2026-11-09), replacing a start-code link the agent hands over:
+  no link that makes its holder the person ever passes through an agent.
+  The account page knows nothing of any app, Luis: "i don't think the account page should know any specifics of any apps".
+  The bot joins as the verified person, Luis's approval (2026-11-09) of "messagent wants to act as you".
 - The shared bot runs as one service of ours, on lwirth-cloud, Luis's agreement (2026-11-09): "sounds good. but we need to make sure everything is secure".
   Telegram gives a bot's updates to one receiver only, so it can't run on each person's machine; this replaces "it runs on the user's machine" for Telegram.
   Its security is designed with vibetogether-security from the start, not only reviewed before deploy.
