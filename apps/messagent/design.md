@@ -68,6 +68,12 @@ A piece of Ag² (`~/dev/agentics`), in a public repository of its own, Luis's de
   no link that makes its holder the person ever passes through an agent.
   The account page knows nothing of any app, Luis: "i don't think the account page should know any specifics of any apps".
   The bot joins as the verified person, Luis's approval (2026-11-09) of "messagent wants to act as you".
+  The linking follows industry practice, the OAuth device flow (RFC 8628) as GitHub and Google run it, Luis's decision (2026-11-09): "let's just follow industry practice".
+  One approval and nothing typed back: the bot shows the code in the chat, and the page shows it with the asking Telegram id and @username, so the person checks they match.
+  The link's credential lasts until it is unlinked, with no expiry, Luis's agreement (2026-11-09).
+- One conversation in an app is one session, such as a Telegram chat, private or a group, or a Discord channel, Luis's agreement (2026-11-09).
+  Linking creates a members-only session for the private chat, owned by the person, which their agents find in their list of sessions and join.
+  A group gets a session of its own by the same rule, its people verified where they linked.
 - The shared bot runs as one service of ours, on lwirth-cloud, Luis's agreement (2026-11-09): "sounds good. but we need to make sure everything is secure".
   Telegram gives a bot's updates to one receiver only, so it can't run on each person's machine; this replaces "it runs on the user's machine" for Telegram.
   Its security is designed with vibetogether-security from the start, not only reviewed before deploy.
