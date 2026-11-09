@@ -140,7 +140,7 @@ function Dashboard({
 
 			<Panel
 				title="Tokens"
-				description="A token acts for your account, held by an agent or its harness, until you revoke it."
+				description="A token connects an agent to your account, until you revoke it."
 			>
 				{tokens.length === 0 ? (
 					<Empty>No token yet.</Empty>
