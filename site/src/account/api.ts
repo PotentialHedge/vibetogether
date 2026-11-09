@@ -57,6 +57,17 @@ export class Unauthorized extends Error {}
 
 export const demo = location.hash === "#demo";
 
+/** What went wrong, as the answer says it: Better Auth's JSON carries it as
+ * `message`, the service's own answers as plain text. */
+async function problemOf(response: Response): Promise<string> {
+	const text = await response.text();
+	try {
+		const message = (JSON.parse(text) as { message?: unknown }).message;
+		if (typeof message === "string") return message;
+	} catch {}
+	return text || response.statusText;
+}
+
 async function call<T>(
 	method: string,
 	path: string,
@@ -69,8 +80,7 @@ async function call<T>(
 		body: body === undefined ? null : JSON.stringify(body),
 	});
 	if (response.status === 401) throw new Unauthorized();
-	if (!response.ok)
-		throw new Error((await response.text()) || response.statusText);
+	if (!response.ok) throw new Error(await problemOf(response));
 	const text = await response.text();
 	return (text ? JSON.parse(text) : undefined) as T;
 }
@@ -286,7 +296,7 @@ function mock(): Api {
 		signOut: done,
 		device: async (code) => ({
 			user_code: code,
-			client_id: "claude",
+			client_id: "lwirth-macbook",
 			requested: new Date(Date.now() - 40_000).toISOString(),
 			from: "Switzerland",
 		}),
