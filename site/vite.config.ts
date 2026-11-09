@@ -27,11 +27,15 @@ export default defineConfig({
 			),
 		},
 	},
-	// The account service, as `just dev` in vibetogether-accounts serves it.
+	// The account service: `just dev` in vibetogether-accounts serves it at
+	// 8793, `just stack` at 8798, chosen with ACCOUNTS.
 	server: {
 		port: 5173,
 		proxy: Object.fromEntries(
-			["/api", "/.well-known"].map((path) => [path, "http://127.0.0.1:8793"]),
+			["/api", "/.well-known"].map((path) => [
+				path,
+				process.env.ACCOUNTS ?? "http://127.0.0.1:8793",
+			]),
 		),
 	},
 	plugins: [react(), tailwindcss()],
