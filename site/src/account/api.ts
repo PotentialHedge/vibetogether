@@ -65,18 +65,31 @@ const live = {
 	rooms: () => call<Room[]>("GET", "api/rooms"),
 	createRoom: (name: string) => call<Room>("POST", "api/rooms", { name }),
 	renameRoom: (id: string, name: string) =>
-		call<Room>("PATCH", `api/rooms/${id}`, { name }),
-	deleteRoom: (id: string) => call<void>("DELETE", `api/rooms/${id}`),
+		call<Room>("PATCH", `api/rooms/${encodeURIComponent(id)}`, { name }),
+	deleteRoom: (id: string) =>
+		call<void>("DELETE", `api/rooms/${encodeURIComponent(id)}`),
 	addMember: (id: string, name: string) =>
-		call<void>("PUT", `api/rooms/${id}/members/${name}`),
+		call<void>(
+			"PUT",
+			`api/rooms/${encodeURIComponent(id)}/members/${encodeURIComponent(name)}`,
+		),
 	removeMember: (id: string, name: string) =>
-		call<void>("DELETE", `api/rooms/${id}/members/${name}`),
+		call<void>(
+			"DELETE",
+			`api/rooms/${encodeURIComponent(id)}/members/${encodeURIComponent(name)}`,
+		),
 	friends: () => call<Friend[]>("GET", "api/friends"),
 	addFriend: (name: string, agents?: Setting) =>
-		call<void>("PUT", `api/friends/${name}`, agents && { agents }),
-	removeFriend: (name: string) => call<void>("DELETE", `api/friends/${name}`),
+		call<void>(
+			"PUT",
+			`api/friends/${encodeURIComponent(name)}`,
+			agents && { agents },
+		),
+	removeFriend: (name: string) =>
+		call<void>("DELETE", `api/friends/${encodeURIComponent(name)}`),
 	agents: () => call<Agent[]>("GET", "api/agents"),
-	revoke: (id: string) => call<void>("DELETE", `api/agents/${id}`),
+	revoke: (id: string) =>
+		call<void>("DELETE", `api/agents/${encodeURIComponent(id)}`),
 	/** Returns the address to go to, GitHub's. `oauthQuery` is the signed
 	 * query an MCP client's authorization sent the person here with, so that
 	 * it goes on after GitHub. */

@@ -182,6 +182,31 @@ function SettingSwitch({
 	);
 }
 
+/** Copies the prompt that brings an agent into one of the account's rooms,
+ * by its name: the agent finds its link through the account itself, so no
+ * secret passes through the person's paste. */
+function CopyRoomPrompt({ room, own }: { room: Room; own: boolean }) {
+	const [copied, setCopied] = useState(false);
+	const which = own
+		? `my room ${room.name}`
+		: `the room ${room.name} by ${room.owner}`;
+	const prompt = `Read ${page("agents.md")}, connect to my Vibe Together account, and join ${which}.`;
+	return (
+		<Button
+			variant="outline"
+			size="sm"
+			title={prompt}
+			onClick={async () => {
+				await navigator.clipboard.writeText(prompt);
+				setCopied(true);
+				setTimeout(() => setCopied(false), 2000);
+			}}
+		>
+			{copied ? "Copied" : "Copy prompt"}
+		</Button>
+	);
+}
+
 const date = new Intl.DateTimeFormat(undefined, { dateStyle: "medium" });
 
 function Dashboard({
@@ -328,6 +353,7 @@ function Dashboard({
 								)}
 							</span>
 							<span className="ml-auto flex items-center gap-2">
+								<CopyRoomPrompt room={room} own={own} />
 								{own && addable.length > 0 && (
 									<select
 										aria-label="Add a friend"
