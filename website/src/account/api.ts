@@ -35,8 +35,11 @@ export type Token = {
 	/** The machine's name, for a machine's token, or its MCP client's. */
 	name: string;
 	/** A machine's, from an OTP or minted here, which every agent on it
-	 * shares, or an MCP client's, from its signing in. */
-	kind: "machine" | "mcp";
+	 * shares, an MCP client's, from its signing in, or an app's that acts
+	 * as the person, from an OTP. */
+	kind: "machine" | "mcp" | "app";
+	/** For an app's, what the app said it is for. */
+	for?: string | null;
 	created: string;
 };
 

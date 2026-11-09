@@ -1,4 +1,4 @@
-import { Monitor, Plug } from "lucide-react";
+import { Monitor, Plug, UserRound } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { Frame } from "ui/onboard";
 import {
@@ -166,6 +166,11 @@ function Dashboard({
 										aria-label="MCP"
 										className="size-4 text-muted-foreground"
 									/>
+								) : token.kind === "app" ? (
+									<UserRound
+										aria-label="acts as you"
+										className="size-4 text-muted-foreground"
+									/>
 								) : (
 									<Monitor
 										aria-label="machine"
@@ -174,6 +179,11 @@ function Dashboard({
 								)}
 								{token.name}
 							</span>
+							{token.for && (
+								<span className="truncate text-sm text-muted-foreground">
+									{token.for}
+								</span>
+							)}
 							<span className="text-sm text-muted-foreground">
 								since {date.format(new Date(token.created))}
 							</span>
