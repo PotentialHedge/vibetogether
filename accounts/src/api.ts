@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { auth } from "./auth.ts";
 import { type Caller, callerOf } from "./caller.ts";
+import { config } from "./config.ts";
 import { db } from "./db.ts";
 import { isNamePart } from "./names.ts";
 import {
@@ -112,7 +113,14 @@ function isPerson(request: Request): boolean {
 const onlyThePerson =
 	"Only the person does this, signed in in the browser, never with a token.";
 
+const origin = new URL(config.url).origin;
+
 api.use(async (c, next) => {
+	// A change by the person, signed in in the browser, comes from the account page alone: the
+	// session cookie is sent from every site that counts as the same site, other subdomains included.
+	const changes = !["GET", "HEAD", "OPTIONS"].includes(c.req.method);
+	if (changes && isPerson(c.req.raw) && c.req.header("origin") !== origin)
+		return c.text("A change by the person comes from the account page.", 403);
 	const caller = await callerOf(c.req.raw.headers);
 	if (!caller)
 		return c.text(

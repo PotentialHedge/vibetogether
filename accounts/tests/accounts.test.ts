@@ -281,6 +281,16 @@ test("the person mints a machine's token on the account page, which only they ca
 		(await call(token, "POST", "/api/tokens", { name: "more" })).status,
 		403,
 	);
+	const elsewhere = await app.request("/api/tokens", {
+		method: "POST",
+		headers: {
+			origin: "https://elsewhere.lwirth.com",
+			cookie: ben.slice("cookie:".length),
+			"content-type": "application/json",
+		},
+		body: JSON.stringify({ name: "stolen" }),
+	});
+	assert.equal(elsewhere.status, 403);
 	assert.equal(
 		(await call(ben, "POST", "/api/tokens", { name: "Not A Name" })).status,
 		400,
