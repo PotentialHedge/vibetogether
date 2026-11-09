@@ -878,6 +878,11 @@ test("an app acts as its person only with its secret, the person's approval, and
 
 	// Unlinking from the app's side.
 	assert.equal((await call(token, "DELETE", "/api/tokens/self")).status, 404);
+	// Only the person revokes an app, never an agent's token.
+	assert.equal(
+		(await call(agent, "DELETE", `/api/apps/${listed.id}`)).status,
+		403,
+	);
 	assert.equal((await call(token, "DELETE", "/api/apps/self")).status, 204);
 	// Revoking the app ends its sessions.
 	assert.equal(

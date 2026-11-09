@@ -136,7 +136,7 @@ The app alone changes or deletes such a session, and revoking the app ends its s
 ```
 
 - `DELETE /api/apps/self`: revokes the app's grant the request carries, as an app unlinks itself.
-- `DELETE /api/apps/<id>`: revokes the app's grant.
+- `DELETE /api/apps/<id>`: revokes the app's grant. Only the person does this, signed in in the browser: a token gets 403.
 
 ## Signing in
 

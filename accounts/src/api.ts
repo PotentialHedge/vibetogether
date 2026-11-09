@@ -522,8 +522,10 @@ api.delete("/apps/self", (c) => {
 		: c.text("The request carries no app's grant.", 404);
 });
 
-api.delete("/apps/:id", (c) =>
-	revokeApp(c.var.caller.id, c.req.param("id"))
+// An app is the person's: only they revoke it, signed in, and the app itself by `/apps/self`.
+api.delete("/apps/:id", (c) => {
+	if (!isPerson(c.req.raw)) return c.text(onlyThePerson, 403);
+	return revokeApp(c.var.caller.id, c.req.param("id"))
 		? c.body(null, 204)
-		: c.text("No such app.", 404),
-);
+		: c.text("No such app.", 404);
+});
