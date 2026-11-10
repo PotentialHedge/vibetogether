@@ -2,7 +2,7 @@
 
 use std::{fmt, time::Duration};
 
-use reqwest::{RequestBuilder, Response, StatusCode};
+use reqwest::{Method, RequestBuilder, Response, StatusCode};
 
 use crate::{Appended, Joined, MAX_PAYLOAD, Received};
 
@@ -111,6 +111,16 @@ pub struct Client {
     http: reqwest::Client,
     /// The address of the client a program acts for, as its proxy named it.
     on_behalf_of: Option<String>,
+    via: Option<Via>,
+}
+
+/// A relay's origin, reached directly at an address of its own.
+#[derive(Debug, Clone)]
+struct Via {
+    origin: String,
+    address: String,
+    host: String,
+    scheme: String,
 }
 
 impl Client {
@@ -118,18 +128,49 @@ impl Client {
         Self::default()
     }
 
-    fn post(&self, url: impl reqwest::IntoUrl) -> RequestBuilder {
-        self.named(self.http.post(url).timeout(REQUEST))
+    fn post(&self, url: impl AsRef<str>) -> RequestBuilder {
+        self.open(Method::POST, url.as_ref()).timeout(REQUEST)
     }
 
-    fn get(&self, url: impl reqwest::IntoUrl) -> RequestBuilder {
-        self.named(self.http.get(url))
+    fn get(&self, url: impl AsRef<str>) -> RequestBuilder {
+        self.open(Method::GET, url.as_ref())
     }
 
-    fn named(&self, request: RequestBuilder) -> RequestBuilder {
-        match &self.on_behalf_of {
-            Some(address) => request.header("x-forwarded-for", address),
-            None => request,
+    fn open(&self, method: Method, url: &str) -> RequestBuilder {
+        let via = self.via.as_ref().and_then(|via| {
+            let rest = url.strip_prefix(&via.origin)?;
+            (rest.is_empty() || rest.starts_with('/')).then_some((via, rest))
+        });
+        let mut request = match via {
+            Some((via, rest)) => self
+                .http
+                .request(method, format!("{}{rest}", via.address))
+                .header("host", &via.host)
+                .header("x-forwarded-proto", &via.scheme),
+            None => self.http.request(method, url),
+        };
+        if let Some(address) = &self.on_behalf_of {
+            request = request.header("x-forwarded-for", address);
+        }
+        request
+    }
+
+    /// This client, reaching the relay at `origin`, such as
+    /// `https://agentwire.agentics.lwirth.com`, directly at `address`, such as
+    /// `http://127.0.0.1:8790` for a program on the relay's machine: the relay
+    /// still sees the origin, in `Host` and `X-Forwarded-Proto`, and makes its
+    /// links from it.
+    pub fn via(&self, origin: &str, address: &str) -> Self {
+        let origin = origin.trim_end_matches('/');
+        let (scheme, host) = origin.split_once("://").unwrap_or(("http", origin));
+        Self {
+            via: Some(Via {
+                origin: origin.to_owned(),
+                address: address.trim_end_matches('/').to_owned(),
+                host: host.to_owned(),
+                scheme: scheme.to_owned(),
+            }),
+            ..self.clone()
         }
     }
 
@@ -149,6 +190,7 @@ impl Client {
         Self {
             http,
             on_behalf_of: None,
+            via: None,
         }
     }
 

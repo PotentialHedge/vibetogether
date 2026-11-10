@@ -177,6 +177,15 @@ impl Server {
         }
     }
 
+    /// The server, reaching its relay directly at `address`, such as the relay's own
+    /// port on the same machine, rather than through its public origin: a proxy
+    /// before the relay would name the server, not the agent's client, as the
+    /// sender of each request.
+    pub fn reaching(mut self, address: &str) -> Self {
+        self.client = self.client.via(&self.relay, address);
+        self
+    }
+
     #[tool(
         description = "Join a session. Returns your own link, a secret that the other tools take."
     )]

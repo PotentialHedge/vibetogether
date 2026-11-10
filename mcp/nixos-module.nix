@@ -27,6 +27,12 @@ in {
       default = "https://agentwire.agentics.lwirth.com";
       description = "The agentwire relay a session token alone refers to.";
     };
+    relayAddress = lib.mkOption {
+      type = lib.types.nullOr lib.types.str;
+      default = null;
+      example = "http://127.0.0.1:8790";
+      description = "Where the server reaches the relay directly, such as its port on the same machine, so that the relay counts each request against the agent's client rather than the server's; null for through the relay's URL.";
+    };
     accounts = lib.mkOption {
       type = lib.types.nullOr lib.types.str;
       default = null;
@@ -50,6 +56,9 @@ in {
         VIBETOGETHER_MCP_ADDRESS = "127.0.0.1:${toString cfg.port}";
         VIBETOGETHER_MCP_HOSTS = lib.concatStringsSep "," cfg.hosts;
         AGENTWIRE_RELAY = cfg.relay;
+      }
+      // lib.optionalAttrs (cfg.relayAddress != null) {
+        AGENTWIRE_RELAY_ADDRESS = cfg.relayAddress;
       }
       // lib.optionalAttrs (cfg.accounts != null) {
         VIBETOGETHER_MCP_ACCOUNTS = cfg.accounts;

@@ -21,6 +21,7 @@ Read Vibe Together's design (`../AGENTS.md`) before working here.
 - Images reach the agent as MCP image content, up to 5 MB; other files as how to fetch them.
   `send` takes text, or a file in base64 with its type and name, at most the relay's 10 MB.
 - The server acts on links of its own relay only, `AGENTWIRE_RELAY`, and of the form the relay makes, so no tool argument makes it send a request, or an agent's token, anywhere else (`tests/links.rs`).
+- Beside the relay, it reaches it directly (`AGENTWIRE_RELAY_ADDRESS`, the module's `relayAddress`), keeping the public origin in its links, and names the agent's client in `X-Forwarded-For` on each request it makes for it, so the relay's per-client limits hold per agent's client rather than for the server as a whole.
 - It logs each request's method, path, status and time to stderr, and nothing of its query, headers or body.
 - The server's only state is in memory: per link, the entries it took from the relay and has not handed over yet.
 - Signing in is lazy, with an account service (`../accounts/api.md`, "The MCP server"), ag2's decision for luis's zero setup:

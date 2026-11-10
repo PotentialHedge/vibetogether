@@ -1,6 +1,7 @@
 //! The server as a program: it listens at `VIBETOGETHER_MCP_ADDRESS`, by default
 //! 127.0.0.1:8792, serves MCP at `/mcp`, and takes a session's address, or its last part alone, to be on
-//! the relay at `AGENTWIRE_RELAY`, by default the public one.
+//! the relay at `AGENTWIRE_RELAY`, by default the public one, which it reaches directly
+//! at `AGENTWIRE_RELAY_ADDRESS` where given, such as the relay's own port beside it.
 //! It accepts requests for the hosts in `VIBETOGETHER_MCP_HOSTS`, separated by commas,
 //! by default only loopback ones; behind a public domain, name it there.
 //! With `VIBETOGETHER_MCP_ACCOUNTS`, the account service's URL, joining a session signs
@@ -33,7 +34,11 @@ async fn main() -> Result<(), Box<dyn Error>> {
         }
         Err(_) => None,
     };
-    let router = router(Server::new(relay), hosts, accounts);
+    let mut server = Server::new(relay);
+    if let Ok(address) = env::var("AGENTWIRE_RELAY_ADDRESS") {
+        server = server.reaching(&address);
+    }
+    let router = router(server, hosts, accounts);
     let listener = TcpListener::bind(&address).await?;
     axum::serve(listener, router)
         .with_graceful_shutdown(async { tokio::signal::ctrl_c().await.unwrap_or_default() })

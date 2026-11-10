@@ -607,7 +607,12 @@ async fn send(
         .get(CONTENT_LENGTH)
         .and_then(|length| length.to_str().ok()?.parse::<usize>().ok())
         .map_or(MAX_PAYLOAD, |length| length.min(MAX_PAYLOAD));
-    relay.adds(client, counted)?;
+    // A refused payload is still read to its end, and kept nowhere, since a
+    // client may not see an answer before it has sent everything.
+    if let Err(refused) = relay.adds(client, counted) {
+        _ = read_at_most(body, 0).await;
+        return Err(refused);
+    }
     let payload = read_at_most(body, MAX_PAYLOAD)
         .await?
         .ok_or_else(|| fail(413, format!("a payload is at most {MAX_PAYLOAD} bytes")))?;
