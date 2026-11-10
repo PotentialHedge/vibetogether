@@ -13,6 +13,7 @@ use tokio::sync::oneshot;
 
 use agentwire::{Entry, JOIN, Joined, LEAVE, Presence, Received};
 
+use crate::access::Credential;
 use crate::{Fail, fail};
 
 pub const MAX_NAME: usize = 256;
@@ -98,6 +99,7 @@ const SCHEMA: &str = "
         since TEXT NOT NULL,
         token TEXT,
         account TEXT,
+        grant TEXT,
         PRIMARY KEY (session, name),
         UNIQUE (session, secret)
     );
@@ -166,10 +168,29 @@ pub struct Ticket {
     id: u64,
 }
 
+/// What the relay keeps of a participant's credential: the grant the access service gave in
+/// place of its token, or where it gave none, the token it presented.
+#[derive(Default, Clone, PartialEq, Eq, Debug)]
+pub struct Kept {
+    pub token: Option<String>,
+    pub grant: Option<String>,
+}
+
+impl Kept {
+    /// The credential to ask the access service with: the grant before the token.
+    pub fn credential(&self) -> Credential<'_> {
+        match (&self.grant, &self.token) {
+            (Some(grant), _) => Credential::Grant(grant),
+            (None, Some(token)) => Credential::Token(token),
+            (None, None) => Credential::None,
+        }
+    }
+}
+
 /// Whoever holds a name, as a join under it finds them.
 pub struct Holder {
     pub inside: bool,
-    pub token: Option<String>,
+    pub kept: Kept,
     pub account: Option<String>,
     pub live: bool,
 }
@@ -260,6 +281,13 @@ impl Sessions {
             .exists([])?
         {
             db.execute("ALTER TABLE participants ADD COLUMN account TEXT", [])?;
+        }
+        // A database from before the access service could give a grant to keep in place of a token.
+        if !db
+            .prepare("SELECT 1 FROM pragma_table_info('participants') WHERE name = 'grant'")?
+            .exists([])?
+        {
+            db.execute("ALTER TABLE participants ADD COLUMN grant TEXT", [])?;
         }
         // A database from before entries carried their sender's account.
         if !db
@@ -380,38 +408,42 @@ impl Sessions {
             .ok_or_else(|| fail(403, "this link is no participant's"))
     }
 
-    /// The caller's name, the token it joined with, and the account vouched for.
+    /// The caller's name, what is kept of its credential, and the account vouched for.
     pub fn credentials(
         &self,
         session: &str,
         secret: &str,
-    ) -> Result<(String, Option<String>, Option<String>), Fail> {
+    ) -> Result<(String, Kept, Option<String>), Fail> {
         self.db
             .prepare_cached(
-                "SELECT name, token, account FROM participants WHERE session = ? AND secret = ?",
+                "SELECT name, token, grant, account FROM participants WHERE session = ? AND secret = ?",
             )?
             .query_row([session, secret], |row| {
-                Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+                let kept = Kept {
+                    token: row.get(1)?,
+                    grant: row.get(2)?,
+                };
+                Ok((row.get(0)?, kept, row.get(3)?))
             })
             .optional()?
             .ok_or_else(|| fail(403, "this link is no participant's"))
     }
 
-    /// Keeps `token` as the one the caller presents from now on, and `account`
-    /// as the one the access service vouches for.
+    /// Keeps `kept` as the caller's credential from now on, and `account` as the one the
+    /// access service vouches for.
     pub fn vouch(
         &self,
         session: &str,
         secret: &str,
-        token: Option<&str>,
+        kept: &Kept,
         account: Option<&str>,
     ) -> Result<(), Fail> {
         self.db
             .prepare_cached(
-                "UPDATE participants SET token = coalesce(?, token), account = ?
+                "UPDATE participants SET token = ?, grant = ?, account = ?
                  WHERE session = ? AND secret = ?",
             )?
-            .execute(params![token, account, session, secret])?;
+            .execute(params![kept.token, kept.grant, account, session, secret])?;
         Ok(())
     }
 
@@ -443,7 +475,7 @@ impl Sessions {
         session: &str,
         name: Option<&str>,
         link: &str,
-        presented: Option<&str>,
+        kept: &Kept,
         account: Option<&str>,
         take_back: bool,
     ) -> Result<Joined, Fail> {
@@ -483,9 +515,9 @@ impl Sessions {
         }
         let n = self.append(session, name, JOIN, &[], None)?;
         transaction.execute(
-            "INSERT INTO participants (session, name, secret, inside, entry, read, since, token, account)
-             VALUES (?, ?, ?, TRUE, ?, 0, strftime('%Y-%m-%dT%H:%M:%SZ'), ?, ?)",
-            params![session, name, secret, n, presented, account],
+            "INSERT INTO participants (session, name, secret, inside, entry, read, since, token, grant, account)
+             VALUES (?, ?, ?, TRUE, ?, 0, strftime('%Y-%m-%dT%H:%M:%SZ'), ?, ?, ?)",
+            params![session, name, secret, n, kept.token, kept.grant, account],
         )?;
         transaction.execute(
             "UPDATE entries SET account = ? WHERE session = ? AND n = ?",
@@ -505,8 +537,8 @@ impl Sessions {
         })
     }
 
-    /// Who holds `name` in `session`, if anyone: whether it is in, the token
-    /// it joined with, the account vouched for it, and whether it is live,
+    /// Who holds `name` in `session`, if anyone: whether it is in, what is kept
+    /// of its credential, the account vouched for it, and whether it is live,
     /// receiving now or within `LIVE` of its last receive.
     pub fn holder(&self, session: &str, name: &str) -> Result<Option<Holder>, Fail> {
         let receiving = self
@@ -517,13 +549,16 @@ impl Sessions {
             .db
             .prepare_cached(
                 "SELECT inside, token, account,
-                        since > strftime('%Y-%m-%dT%H:%M:%SZ', 'now', ?3)
+                        since > strftime('%Y-%m-%dT%H:%M:%SZ', 'now', ?3), grant
                  FROM participants WHERE session = ?1 AND name = ?2",
             )?
             .query_row(params![session, name, format!("-{LIVE} seconds")], |row| {
                 Ok(Holder {
                     inside: row.get(0)?,
-                    token: row.get(1)?,
+                    kept: Kept {
+                        token: row.get(1)?,
+                        grant: row.get(4)?,
+                    },
                     account: row.get(2)?,
                     live: receiving || row.get::<_, bool>(3)?,
                 })
@@ -964,7 +999,7 @@ mod tests {
         let joined = sessions.create(false).ok().unwrap();
         assert!(
             sessions
-                .join(&joined, Some("luis"), "link", None, None, false)
+                .join(&joined, Some("luis"), "link", &Kept::default(), None, false)
                 .is_ok()
         );
         assert!(sessions.expire_after(0, 60).is_ok());
@@ -978,7 +1013,14 @@ mod tests {
         let session = sessions.create(false).ok().unwrap();
         assert!(
             sessions
-                .join(&session, Some("luis"), "link", None, None, false)
+                .join(
+                    &session,
+                    Some("luis"),
+                    "link",
+                    &Kept::default(),
+                    None,
+                    false
+                )
                 .is_ok()
         );
         let live = |sessions: &Sessions| {
@@ -1004,7 +1046,14 @@ mod tests {
         let session = sessions.create(false).ok().unwrap();
         assert!(
             sessions
-                .join(&session, Some("luis"), "link", None, None, false)
+                .join(
+                    &session,
+                    Some("luis"),
+                    "link",
+                    &Kept::default(),
+                    None,
+                    false
+                )
                 .is_ok()
         );
         assert!(sessions.expire_after(60, 60).is_ok());
@@ -1019,7 +1068,14 @@ mod tests {
         let session = sessions.create(false).ok().unwrap();
         assert!(
             sessions
-                .join(&session, Some("luis"), "link", None, None, false)
+                .join(
+                    &session,
+                    Some("luis"),
+                    "link",
+                    &Kept::default(),
+                    None,
+                    false
+                )
                 .is_ok()
         );
         let secret: String = sessions
@@ -1066,7 +1122,7 @@ mod tests {
         let mut secrets = Vec::new();
         for name in ["luis", "ben"] {
             let joined = sessions
-                .join(&session, Some(name), "link", None, None, false)
+                .join(&session, Some(name), "link", &Kept::default(), None, false)
                 .ok()
                 .unwrap();
             secrets.push(joined.link.rsplit('/').next().unwrap().to_owned());

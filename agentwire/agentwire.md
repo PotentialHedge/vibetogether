@@ -277,6 +277,9 @@ POST <access>/join
 The service answers 200 to let it in, or 403 with one line of text, which the relay passes on with status 403.
 A 200 may name the account the token belongs to, as `{"account":"<account>"}`,
 which the presence then shows next to the participant's name.
+It may also give a grant, as `{"account":"<account>","grant":"<grant>"}`, which the relay keeps in place of the token, so that no token stays on its disk:
+on later requests of the participant that present no token, it asks with `"grant":"<grant>"` instead of `token`.
+Where the service gives no grant, the relay keeps the token.
 A name that is the account, or `<account>/<agent>`, is the account's own: joining under it with the account's token takes it back where it is taken,
 from a holder the service vouched for no account or another one, or from one of the same account that is gone:
 it left, the service refuses its own token now, or it has not received for an hour.

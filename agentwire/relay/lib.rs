@@ -25,8 +25,9 @@ use http_body_util::{BodyExt, Full};
 use serde::Serialize;
 use tokio::time::{sleep, timeout};
 
-use access::{Access, Verdict};
+use access::{Access, Admitted, Credential, Verdict};
 use limits::{COST, Limits};
+use sessions::Kept;
 use sessions::{Answer, MAX_NAME, Receive, Sessions, Ticket, is_name, is_secret};
 
 /// The transport's version, the first part of every session's path: a
@@ -213,13 +214,13 @@ impl Relay {
         access: &Access,
         session: &str,
         name: &str,
-        token: Option<&str>,
+        credential: Credential<'_>,
     ) -> Result<Option<Verdict>, Fail> {
         let owned = self.sessions().owned(session)?;
-        if !owned && token.is_none() {
+        if !owned && credential.is_none() {
             return Ok(None);
         }
-        match access.ask(session, name, token, owned).await? {
+        match access.ask(session, name, credential, owned).await? {
             Verdict::Silent if owned => Err(fail(503, "the relay can't reach its access service")),
             verdict => Ok(Some(verdict)),
         }
@@ -253,14 +254,14 @@ impl Relay {
         }
         let owned = self.sessions().owned(session)?;
         Ok(matches!(
-            access.ask(session, name, holder.token.as_deref(), owned).await,
+            access.ask(session, name, holder.kept.credential(), owned).await,
             Err(refused) if refused.status == StatusCode::FORBIDDEN
         ))
     }
 
     /// Lets the caller act, if the access service lets it be in the session,
-    /// with the token it presents now or else the one it joined with; a new
-    /// token it is let in with is kept, and so is the account vouched for.
+    /// with the token it presents now or else what is kept of the one it joined
+    /// with; what it is let in with is kept, and so is the account vouched for.
     async fn admit(&self, session: &str, secret: &str, token: Option<&str>) -> Result<(), Fail> {
         let Some(access) = &self.access else {
             return Ok(());
@@ -269,24 +270,23 @@ impl Relay {
         let Ok((name, kept, vouched)) = self.sessions().credentials(session, secret) else {
             return Ok(());
         };
-        let verdict = self
-            .verdict(access, session, &name, token.or(kept.as_deref()))
-            .await;
+        let credential = token.map_or_else(|| kept.credential(), Credential::Token);
+        let verdict = self.verdict(access, session, &name, credential).await;
         // Refused, its name is no longer vouched for.
         if let Err(refused) = &verdict
             && refused.status == StatusCode::FORBIDDEN
             && vouched.is_some()
         {
-            self.sessions().vouch(session, secret, None, None)?;
+            self.sessions().vouch(session, secret, &kept, None)?;
         }
         // Without an answer, it goes on as it was.
-        let Some(Verdict::Admitted(account)) = verdict? else {
+        let Some(Verdict::Admitted(said)) = verdict? else {
             return Ok(());
         };
-        let token = token.filter(|token| Some(*token) != kept.as_deref());
-        if token.is_some() || account != vouched {
+        let now = keeps(&kept, token, &said);
+        if now != kept || said.account != vouched {
             self.sessions()
-                .vouch(session, secret, token, account.as_deref())?;
+                .vouch(session, secret, &now, said.account.as_deref())?;
         }
         Ok(())
     }
@@ -415,6 +415,23 @@ fn takes(query: &str, operation: &str, keys: &[&str]) -> Result<(), Fail> {
     }
 }
 
+/// What the relay keeps of a participant's credential once the access service let it in,
+/// having kept `kept` and been presented `token` now: the grant the service gave in place
+/// of the token, so that no token stays on the relay's disk, or else the newest token.
+fn keeps(kept: &Kept, token: Option<&str>, said: &Admitted) -> Kept {
+    match (&said.grant, token) {
+        (Some(grant), _) => Kept {
+            token: None,
+            grant: Some(grant.clone()),
+        },
+        (None, Some(token)) => Kept {
+            token: Some(token.to_owned()),
+            grant: None,
+        },
+        (None, None) => kept.clone(),
+    }
+}
+
 /// The token in an `Authorization: Bearer <token>` header.
 fn bearer(headers: &HeaderMap) -> Option<String> {
     let value = headers.get(AUTHORIZATION)?.to_str().ok()?;
@@ -524,13 +541,24 @@ async fn session(
             relay.adds(client, 0)?;
             let name = param(query, "as");
             let mut account = None;
+            let mut kept = Kept {
+                token: token.clone(),
+                grant: None,
+            };
             if let (Some(access), Some(name)) = (&relay.access, name.as_deref())
                 && is_name(name)
                 && name.len() <= MAX_NAME
-                && let Some(Verdict::Admitted(vouched)) =
-                    relay.verdict(access, id, name, token.as_deref()).await?
+                && let Some(Verdict::Admitted(said)) = relay
+                    .verdict(
+                        access,
+                        id,
+                        name,
+                        token.as_deref().map_or(Credential::None, Credential::Token),
+                    )
+                    .await?
             {
-                account = vouched;
+                kept = keeps(&Kept::default(), token.as_deref(), &said);
+                account = said.account;
             }
             let take_back = match (&relay.access, name.as_deref(), account.as_deref()) {
                 (Some(access), Some(name), Some(account)) => {
@@ -542,7 +570,7 @@ async fn session(
                 id,
                 name.as_deref(),
                 link,
-                token.as_deref(),
+                &kept,
                 account.as_deref(),
                 take_back,
             )?;

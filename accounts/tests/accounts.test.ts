@@ -304,9 +304,7 @@ test("an agent gets a token by an OTP, joins its session, and is cut off once th
 			token: as,
 			owned: true,
 		});
-	assert.deepEqual((await join("luis/claude", token)).json, {
-		account: "luis",
-	});
+	assert.equal((await join("luis/claude", token)).json.account, "luis");
 	assert.equal((await join("ben/claude", token)).status, 403);
 	assert.equal((await join("luis/claude", null)).status, 403);
 	assert.equal((await join("ben", benToken)).status, 403);
@@ -362,6 +360,52 @@ test("the person mints a machine's token on the account page, which only they ca
 	assert.equal((await call(token, "GET", "/api/me")).status, 401);
 });
 
+test("the relay keeps a grant in place of the token, which works for that participant alone, and as long as the token", async () => {
+	from = "192.0.2.51";
+	const token = await connect(luis, "granted");
+	from = undefined;
+	const owned = await session(luis, "granted", luisProject);
+	const address = owned.address.split("/").pop();
+	const ask = (body: Record<string, unknown>) =>
+		call(null, "POST", "/agentwire/join", {
+			session: address,
+			name: "luis/claude",
+			token: null,
+			owned: true,
+			...body,
+		});
+	const joined = await ask({ token });
+	assert.equal(joined.json.account, "luis");
+	const grant: string = joined.json.grant;
+	assert.match(grant, /^g1\./);
+	assert.ok(!grant.includes(token));
+	const byGrant = await ask({ grant });
+	assert.equal(byGrant.status, 200, byGrant.text);
+	assert.equal(byGrant.json.account, "luis");
+	// For that participant alone: not another name, not another session, not altered.
+	assert.equal((await ask({ grant, name: "luis/other" })).status, 403);
+	assert.equal((await ask({ grant, session: "elsewhere" })).status, 403);
+	assert.equal((await ask({ grant: `${grant.slice(0, -2)}xx` })).status, 403);
+	assert.equal((await ask({ grant, token })).status, 400);
+	// It acts for the token, and no longer than it.
+	const [listed] = (await call(luis, "GET", "/api/tokens")).json.filter(
+		(t: any) => t.name === "granted",
+	);
+	assert.equal(
+		(await call(luis, "DELETE", `/api/tokens/${listed.id}`)).status,
+		204,
+	);
+	assert.equal((await ask({ grant })).status, 403);
+	// A person's own sign-in, which a page joins with, gets one too, in their own group alone.
+	const own = await ask({ token: luisToken, name: "luis/reader" });
+	assert.equal(own.status, 200, own.text);
+	assert.equal(
+		(await ask({ grant: own.json.grant, name: "luis/reader" })).json.account,
+		"luis",
+	);
+	await call(luis, "DELETE", `/api/sessions/${owned.id}`);
+});
+
 test("a session no account owns is open to anyone, and a token verifies the name", async () => {
 	const join = (name: string, token: string | null) =>
 		call(null, "POST", "/agentwire/join", {
@@ -369,10 +413,8 @@ test("a session no account owns is open to anyone, and a token verifies the name
 			name,
 			token,
 		});
-	assert.deepEqual((await join("anyone/claude", null)).json, { account: null });
-	assert.deepEqual((await join("luis/claude", luisToken)).json, {
-		account: "luis",
-	});
+	assert.equal((await join("anyone/claude", null)).json.account, null);
+	assert.equal((await join("luis/claude", luisToken)).json.account, "luis");
 	// A token is an agent's: never the person's own name.
 	assert.equal((await join("luis", luisToken)).status, 403);
 	assert.equal((await join("ben", luisToken)).status, 403);
@@ -448,12 +490,8 @@ test("friends are mutual, only friends become members of a group, and leaving it
 			token,
 			owned: true,
 		});
-	assert.deepEqual((await join("luis/claude", luisToken)).json, {
-		account: "luis",
-	});
-	assert.deepEqual((await join("ben/claude", benToken)).json, {
-		account: "ben",
-	});
+	assert.equal((await join("luis/claude", luisToken)).json.account, "luis");
+	assert.equal((await join("ben/claude", benToken)).json.account, "ben");
 	assert.equal((await call(ben, "GET", "/api/sessions")).json.length, 2);
 	// Only the group's owner adds members, deletes projects, and opens a session by its address.
 	assert.equal(
@@ -490,9 +528,7 @@ test("friends are mutual, only friends become members of a group, and leaving it
 		204,
 	);
 	assert.equal((await join("ben/claude", benToken)).status, 403);
-	assert.deepEqual((await join("luis/claude", luisToken)).json, {
-		account: "luis",
-	});
+	assert.equal((await join("luis/claude", luisToken)).json.account, "luis");
 	assert.equal(
 		(await call(ben, "GET", `/api/projects/${shared}/file`)).status,
 		404,
@@ -625,11 +661,9 @@ test("a session open by its address lets anyone in, and only the person opens it
 	});
 	assert.equal(opened.json.open, "link");
 	assert.equal(opened.json.name, "open");
-	assert.deepEqual((await join("stranger", null)).json, { account: null });
+	assert.equal((await join("stranger", null)).json.account, null);
 	// A token still verifies the name, a non-member's too.
-	assert.deepEqual((await join("ben/claude", benToken)).json, {
-		account: "ben",
-	});
+	assert.equal((await join("ben/claude", benToken)).json.account, "ben");
 	assert.equal((await join("luis", benToken)).status, 403);
 
 	assert.equal(
@@ -715,7 +749,7 @@ test("an agent through MCP signs in by OAuth, and is cut off once revoked", asyn
 			name: "luis/claude",
 			token,
 		});
-	assert.deepEqual((await join(first)).json, { account: "luis" });
+	assert.equal((await join(first)).json.account, "luis");
 
 	const agents = (await call(luis, "GET", "/api/tokens")).json.filter(
 		(a: any) => a.name === "Claude Code",
@@ -733,7 +767,7 @@ test("an agent through MCP signs in by OAuth, and is cut off once revoked", asyn
 	const kept = cut === first ? second : first;
 	assert.equal((await join(cut)).status, 403);
 	assert.equal((await call(cut, "GET", "/api/me")).status, 401);
-	assert.deepEqual((await join(kept)).json, { account: "luis" });
+	assert.equal((await join(kept)).json.account, "luis");
 	// Revoking took the consent too, so the client asks the person again.
 	await authorizeOnce();
 	assert.ok(consentAsked);
@@ -1174,10 +1208,8 @@ test("an app acts as its person only with its secret, the person's approval, and
 			token: as,
 			owned: true,
 		});
-	assert.deepEqual((await join("luis", token)).json, { account: "luis" });
-	assert.deepEqual((await join("luis/messagent", token)).json, {
-		account: "luis",
-	});
+	assert.equal((await join("luis", token)).json.account, "luis");
+	assert.equal((await join("luis/messagent", token)).json.account, "luis");
 	assert.equal((await join("luis/claude", token)).status, 403);
 	assert.equal((await join("ben", token)).status, 403);
 	// An agent's token still never joins as the person.

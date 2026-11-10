@@ -16,14 +16,38 @@ const ADMITTED: Duration = Duration::from_secs(5);
 /// How long a session the service kept is kept before it is asked again.
 const KEPT: Duration = Duration::from_secs(60 * 60);
 
-/// A participant, by session, name and token.
+/// A participant, by session, name and credential.
 type Key = (String, String, Option<String>);
+
+/// What a participant is asked about with: the token it presents, or the grant the service
+/// gave the relay to keep in its place, or nothing.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Credential<'a> {
+    None,
+    Token(&'a str),
+    Grant(&'a str),
+}
+
+impl Credential<'_> {
+    fn key(self) -> Option<String> {
+        match self {
+            Credential::None => None,
+            Credential::Token(token) => Some(format!("token {token}")),
+            Credential::Grant(grant) => Some(format!("grant {grant}")),
+        }
+    }
+
+    pub fn is_none(self) -> bool {
+        self == Credential::None
+    }
+}
 
 pub struct Access {
     url: String,
     http: reqwest::Client,
-    /// When each participant, by session, name and token, was last let in.
-    admitted: Mutex<HashMap<Key, (Instant, Option<String>)>>,
+    /// When each participant, by session, name and credential, was last let in, and what
+    /// the service said.
+    admitted: Mutex<HashMap<Key, (Instant, Admitted)>>,
     /// When the service last kept each session.
     kept: Mutex<HashMap<String, Instant>>,
 }
@@ -33,20 +57,25 @@ struct Join<'a> {
     session: &'a str,
     name: &'a str,
     token: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    grant: Option<&'a str>,
     owned: bool,
 }
 
 /// What the service said to a participant.
 pub enum Verdict {
-    /// It may be in, with the account the service vouches for, if any.
-    Admitted(Option<String>),
+    /// It may be in.
+    Admitted(Admitted),
     /// The service gave no answer.
     Silent,
 }
 
-#[derive(Deserialize, Default)]
-struct Admitted {
-    account: Option<String>,
+/// A yes: the account the service vouches for, if any, and the grant it gives the relay to
+/// keep in place of the token, if any.
+#[derive(Deserialize, Default, Clone)]
+pub struct Admitted {
+    pub account: Option<String>,
+    pub grant: Option<String>,
 }
 
 impl Access {
@@ -60,28 +89,29 @@ impl Access {
         }
     }
 
-    /// Asks whether `name` may be in `session` with `token`: refuses with the
+    /// Asks whether `name` may be in `session` with `credential`: refuses with the
     /// service's line why, or answers what the service said, if anything.
     pub async fn ask(
         &self,
         session: &str,
         name: &str,
-        token: Option<&str>,
+        credential: Credential<'_>,
         owned: bool,
     ) -> Result<Verdict, Fail> {
-        let key = (
-            session.to_owned(),
-            name.to_owned(),
-            token.map(str::to_owned),
-        );
+        let key = (session.to_owned(), name.to_owned(), credential.key());
         let now = Instant::now();
         {
             let mut admitted = self.admitted.lock().unwrap_or_else(|e| e.into_inner());
             admitted.retain(|_, (at, _)| now.duration_since(*at) < ADMITTED);
-            if let Some((_, account)) = admitted.get(&key) {
-                return Ok(Verdict::Admitted(account.clone()));
+            if let Some((_, said)) = admitted.get(&key) {
+                return Ok(Verdict::Admitted(said.clone()));
             }
         }
+        let (token, grant) = match credential {
+            Credential::None => (None, None),
+            Credential::Token(token) => (Some(token), None),
+            Credential::Grant(grant) => (None, Some(grant)),
+        };
         let response = self
             .http
             .post(format!("{}/join", self.url))
@@ -90,6 +120,7 @@ impl Access {
                 session,
                 name,
                 token,
+                grant,
                 owned,
             })
             .send()
@@ -102,13 +133,12 @@ impl Access {
                 let Ok(body) = response.bytes().await else {
                     return Ok(Verdict::Silent);
                 };
-                let account = serde_json::from_slice::<Admitted>(&body)
-                    .unwrap_or_default()
-                    .account
-                    .filter(|account| !account.is_empty());
+                let mut said = serde_json::from_slice::<Admitted>(&body).unwrap_or_default();
+                said.account = said.account.filter(|account| !account.is_empty());
+                said.grant = said.grant.filter(|grant| !grant.is_empty());
                 let mut admitted = self.admitted.lock().unwrap_or_else(|e| e.into_inner());
-                admitted.insert(key, (Instant::now(), account.clone()));
-                Ok(Verdict::Admitted(account))
+                admitted.insert(key, (Instant::now(), said.clone()));
+                Ok(Verdict::Admitted(said))
             }
             403 => {
                 let why = response.text().await.unwrap_or_default();
