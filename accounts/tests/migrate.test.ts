@@ -55,10 +55,10 @@ test("an existing room becomes a session with the same address, open to its memb
 	migrate();
 	assert.deepEqual(
 		db
-			.prepare("SELECT id, secret, open FROM owned_session")
+			.prepare("SELECT id, secret FROM owned_session")
 			.all()
 			.map((r) => ({ ...r })),
-		[{ id: "s_1", secret: "secret", open: "members" }],
+		[{ id: "s_1", secret: "secret" }],
 	);
 	// Its members and its owner make a group, which the owner owns.
 	assert.deepEqual(

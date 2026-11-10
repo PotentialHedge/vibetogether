@@ -1,6 +1,6 @@
-//! Signing in, lazily, against a stub of the account service that is also the relay's
-//! access service: everything works without an account but joining a session, which is
-//! challenged, and a token is passed on, so that its name shows as verified.
+//! Signing in against a stub of the account service that is also the relay's access service:
+//! nothing works without an account, a token is passed on, so that its name shows as verified,
+//! and only the service's sessions are joined.
 
 use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
@@ -30,8 +30,6 @@ const METADATA: &str = "https://vibetogether.example/.well-known/oauth-protected
 #[derive(Default)]
 struct Stub {
     sessions: Mutex<HashSet<String>>,
-    /// The sessions open to anyone with their address.
-    open: Mutex<HashSet<String>>,
 }
 
 async fn me(headers: HeaderMap) -> (StatusCode, String) {
@@ -103,7 +101,6 @@ struct Join {
 
 async fn join(State(stub): State<Arc<Stub>>, Json(join): Json<Join>) -> (StatusCode, String) {
     let session = stub.sessions.lock().unwrap().contains(&join.session);
-    let open = stub.open.lock().unwrap().contains(&join.session);
     match join.token.as_deref() {
         Some("t-luis") if join.name.split('/').next() == Some("luis") => {
             let about = if session {
@@ -114,9 +111,7 @@ async fn join(State(stub): State<Arc<Stub>>, Json(join): Json<Join>) -> (StatusC
             (StatusCode::OK, format!(r#"{{"account":"luis"{about}}}"#))
         }
         Some(_) => (StatusCode::FORBIDDEN, "not your name\n".into()),
-        None if (join.owned && !open) || session => {
-            (StatusCode::FORBIDDEN, "sign in first\n".into())
-        }
+        None if join.owned || session => (StatusCode::FORBIDDEN, "sign in first\n".into()),
         None => (StatusCode::OK, r#"{"account":null}"#.into()),
     }
 }
@@ -125,9 +120,7 @@ async fn session(
     State(stub): State<Arc<Stub>>,
     Path(id): Path<String>,
 ) -> (StatusCode, &'static str) {
-    let known =
-        stub.sessions.lock().unwrap().contains(&id) || stub.open.lock().unwrap().contains(&id);
-    match known {
+    match stub.sessions.lock().unwrap().contains(&id) {
         true => (StatusCode::OK, "{}"),
         false => (StatusCode::NOT_FOUND, "no such session\n"),
     }
@@ -140,13 +133,12 @@ async fn serve(router: axum::Router) -> String {
     format!("http://{address}")
 }
 
-/// The server, signed in to the stub, with a session and a session by secret link.
+/// The server, with the stub as its account service, a session of an account, and a session
+/// of the relay's alone.
 struct World {
     mcp: String,
     session: String,
-    /// A session an account owns that is open to anyone with its address.
-    shared: String,
-    open: String,
+    plain: String,
 }
 
 async fn world() -> World {
@@ -174,15 +166,11 @@ async fn world() -> World {
     let session = client.create_owned(&relay).await.unwrap();
     let id = session.rsplit('/').next().unwrap().to_owned();
     stub.sessions.lock().unwrap().insert(id);
-    let shared = client.create_owned(&relay).await.unwrap();
-    let id = shared.rsplit('/').next().unwrap().to_owned();
-    stub.open.lock().unwrap().insert(id);
-    let open = client.create(&relay).await.unwrap();
+    let plain = client.create(&relay).await.unwrap();
     World {
         mcp: format!("{mcp}/mcp"),
         session,
-        shared,
-        open,
+        plain,
     }
 }
 
@@ -242,39 +230,32 @@ async fn post_join(mcp: &str, session: &str, token: Option<&str>) -> reqwest::Re
 }
 
 #[tokio::test]
-async fn without_an_account_a_session_by_secret_link_works() {
+async fn every_request_without_a_token_is_challenged() {
     let world = world().await;
-    let client = client(&world.mcp, None).await;
-    let joined = join_as(&client, &world.open, "luis/claude").await;
-    assert_ne!(joined.is_error, Some(true), "{joined:?}");
-    let text = text(&joined);
-    assert!(
-        text.contains(r#"{"name":"luis/claude","you":true,"verified":false,"listening":false}"#),
-        "{text}"
-    );
-}
-
-#[tokio::test]
-async fn joining_a_room_without_a_token_is_challenged() {
-    let world = world().await;
-    let answer = post_join(&world.mcp, &world.session, None).await;
-    assert_eq!(answer.status(), 401);
-    let challenge = answer.headers()["www-authenticate"].to_str().unwrap();
-    assert_eq!(
-        challenge,
-        format!(r#"Bearer resource_metadata="{METADATA}""#)
-    );
-    // A session named by its token alone, too.
-    let id = world.session.rsplit('/').next().unwrap();
-    assert_eq!(post_join(&world.mcp, id, None).await.status(), 401);
-    // The session by secret link is no session.
-    assert_ne!(post_join(&world.mcp, &world.open, None).await.status(), 401);
+    for session in [&world.session, &world.plain] {
+        let answer = post_join(&world.mcp, session, None).await;
+        assert_eq!(answer.status(), 401);
+        let challenge = answer.headers()["www-authenticate"].to_str().unwrap();
+        assert_eq!(
+            challenge,
+            format!(r#"Bearer resource_metadata="{METADATA}""#)
+        );
+    }
+    // Connecting at all, before any tool.
+    let initialize = reqwest::Client::new()
+        .post(&world.mcp)
+        .header("accept", "application/json, text/event-stream")
+        .json(&serde_json::json!({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(initialize.status(), 401);
 }
 
 #[tokio::test]
 async fn a_token_the_service_rejects_is_challenged() {
     let world = world().await;
-    let answer = post_join(&world.mcp, &world.open, Some("t-ben")).await;
+    let answer = post_join(&world.mcp, &world.session, Some("t-ben")).await;
     assert_eq!(answer.status(), 401);
     let challenge = answer.headers()["www-authenticate"].to_str().unwrap();
     assert_eq!(
@@ -287,24 +268,33 @@ async fn a_token_the_service_rejects_is_challenged() {
 async fn an_agent_joins_with_its_token_and_shows_as_verified() {
     let world = world().await;
     let client = client(&world.mcp, Some("t-luis")).await;
-    for session in [&world.session, &world.open] {
-        let joined = join_as(&client, session, "luis/claude").await;
-        assert_ne!(joined.is_error, Some(true), "{joined:?}");
-        let text = text(&joined);
-        assert!(
-            text.contains(r#""name":"luis/claude","you":true,"verified":true"#),
-            "{text}"
-        );
-        // A session of a project tells its repos, as the service says them.
-        assert_eq!(
-            text.contains(r#"The session, as Vibe Together knows it: {"project":"vibetogether","repos":["https://github.com/PotentialHedge/vibetogether"]}"#),
-            session == &world.session,
-            "{text}"
-        );
-    }
-    let refused = join_as(&client, &world.open, "ben/claude").await;
+    let joined = join_as(&client, &world.session, "luis/claude").await;
+    assert_ne!(joined.is_error, Some(true), "{joined:?}");
+    let said = text(&joined);
+    assert!(
+        said.contains(r#""name":"luis/claude","you":true,"verified":true"#),
+        "{said}"
+    );
+    // A session of a project tells its repos, as the service says them.
+    assert!(
+        said.contains(r#"The session, as Vibe Together knows it: {"project":"vibetogether","repos":["https://github.com/PotentialHedge/vibetogether"]}"#),
+        "{said}"
+    );
+    let refused = join_as(&client, &world.session, "ben/claude").await;
     assert_eq!(refused.is_error, Some(true));
     assert!(text(&refused).contains("not your name"), "{refused:?}");
+}
+
+#[tokio::test]
+async fn a_session_no_account_owns_is_no_vibe_together_session() {
+    let world = world().await;
+    let client = client(&world.mcp, Some("t-luis")).await;
+    let refused = join_as(&client, &world.plain, "luis/claude").await;
+    assert_eq!(refused.is_error, Some(true));
+    assert!(
+        text(&refused).contains("no Vibe Together session"),
+        "{refused:?}"
+    );
 }
 
 #[tokio::test]
@@ -368,16 +358,4 @@ async fn the_account_operations_are_tools_that_ask_to_sign_in_first() {
         .await
         .unwrap();
     assert_eq!(text(&renamed), r#"{"id":"s_1/../x","name":"hedge"}"#);
-}
-
-#[tokio::test]
-async fn a_room_open_by_its_address_needs_no_account() {
-    let world = world().await;
-    assert_ne!(
-        post_join(&world.mcp, &world.shared, None).await.status(),
-        401
-    );
-    let client = client(&world.mcp, None).await;
-    let joined = join_as(&client, &world.shared, "ben/claude").await;
-    assert_ne!(joined.is_error, Some(true), "{joined:?}");
 }

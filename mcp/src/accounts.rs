@@ -1,10 +1,8 @@
-//! Signing in, lazily, with an account service such as Vibe Together's.
+//! Signing in with an account service such as Vibe Together's.
 //!
-//! Everything works without an account, as zero setup needs, except joining a session and
-//! the operations on the account: such a call without a token gets MCP's challenge, a 401 that points at the
-//! server's metadata (RFC 9728), from which an MCP client gets a token through the
-//! service's OAuth and retries. The challenge has to be the HTTP answer itself, before
-//! the MCP SDK runs, since a tool's error, inside a 200, starts no sign-in.
+//! Nothing works without an account, Luis's decision (2026-11-10): every request without a
+//! token gets MCP's challenge, a 401 that points at the server's metadata (RFC 9728), from
+//! which an MCP client gets a token through the service's OAuth and retries.
 //! A token is passed on to the relay on joining, so that the presence shows its account;
 //! one the service rejects is challenged too, so that the client signs in again.
 
@@ -12,13 +10,11 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use axum::body::{Body, to_bytes};
 use axum::extract::{Request, State};
 use axum::http::header::{AUTHORIZATION, WWW_AUTHENTICATE};
-use axum::http::{HeaderMap, Method, StatusCode};
+use axum::http::{HeaderMap, StatusCode};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
-use serde_json::Value;
 
 /// How long the service's yes to a token is kept: the relay asks again on each of the
 /// participant's requests anyway, so a revoked token is cut off there.
@@ -98,39 +94,22 @@ impl Accounts {
         }
     }
 
-    /// Whether joining `session`, its address or the address's last part as `join` takes
-    /// it, as `name` without a token needs signing in: a session an account owns that the
-    /// service lets no one in without a token, such as one open to its members only.
-    /// No where the service doesn't say.
-    async fn needs_sign_in(&self, session: &str, name: &str) -> bool {
-        let session = session.trim().trim_end_matches('/');
-        let id = match session.strip_prefix(&format!("{}/v2/s/", self.relay)) {
-            Some(id) => id,
-            None if !session.contains('/') => session,
-            // A session on another relay is no account's of this service.
-            None => return false,
-        };
-        if !crate::is_token(id) {
-            return false;
-        }
+    /// Whether `session`, a session's address on the relay, is one of the service's: one an
+    /// account owns or a DM, or `None` where the service doesn't answer.
+    pub(crate) async fn knows(&self, session: &str) -> Option<bool> {
+        let id = session.rsplit('/').next().unwrap_or_default();
         let answer = self
             .http
             .get(format!("{}/agentwire/sessions/{id}", self.service))
             .timeout(ANSWER)
             .send()
-            .await;
-        if !answer.is_ok_and(|answer| answer.status().is_success()) {
-            return false;
+            .await
+            .ok()?;
+        match answer.status() {
+            StatusCode::NOT_FOUND => Some(false),
+            status if status.is_success() => Some(true),
+            _ => None,
         }
-        let join = serde_json::json!({"session": id, "name": name, "token": null, "owned": true});
-        let answer = self
-            .http
-            .post(format!("{}/agentwire/join", self.service))
-            .json(&join)
-            .timeout(ANSWER)
-            .send()
-            .await;
-        answer.is_ok_and(|answer| answer.status() == StatusCode::FORBIDDEN)
     }
 
     fn challenge(&self, invalid: bool) -> Response {
@@ -147,69 +126,20 @@ impl Accounts {
     }
 }
 
-/// Challenges a request with a token the service rejects, and a `join` into a session
-/// without a token; lets everything else through.
+/// Challenges a request without a token, or with one the service rejects.
 pub async fn check(
     State(accounts): State<Arc<Accounts>>,
     request: Request,
     next: Next,
 ) -> Response {
-    if let Some(token) = bearer(request.headers()) {
-        // Where the service doesn't answer, the relay decides.
-        if accounts.vouches(token).await == Some(false) {
-            return accounts.challenge(true);
-        }
-        return next.run(request).await;
-    }
-    if request.method() != Method::POST {
-        return next.run(request).await;
-    }
-    let (parts, body) = request.into_parts();
-    let Ok(bytes) = to_bytes(body, crate::REQUEST_MAX).await else {
-        return (StatusCode::PAYLOAD_TOO_LARGE, "the request is too large\n").into_response();
-    };
-    let calls = calls(&bytes);
-    // Every tool but the session's own is an operation on the account.
-    if calls
-        .iter()
-        .any(|(tool, _, _)| !crate::SESSION_TOOLS.contains(&tool.as_str()))
-    {
+    let Some(token) = bearer(request.headers()) else {
         return accounts.challenge(false);
-    }
-    for (tool, session, name) in &calls {
-        if tool == "join"
-            && let (Some(session), Some(name)) = (session, name)
-            && accounts.needs_sign_in(session, name).await
-        {
-            return accounts.challenge(false);
-        }
-    }
-    next.run(Request::from_parts(parts, Body::from(bytes)))
-        .await
-}
-
-/// The tools a JSON-RPC message, or a batch of them, calls, each with the session and the
-/// name it gives, if any.
-fn calls(body: &[u8]) -> Vec<(String, Option<String>, Option<String>)> {
-    let Ok(message) = serde_json::from_slice::<Value>(body) else {
-        return Vec::new();
     };
-    let messages = match message {
-        Value::Array(messages) => messages,
-        message => vec![message],
-    };
-    messages
-        .iter()
-        .filter(|message| message["method"] == "tools/call")
-        .filter_map(|message| {
-            let params = &message["params"];
-            let tool = params["name"].as_str()?.to_owned();
-            let arguments = &params["arguments"];
-            let session = arguments["session"].as_str().map(str::to_owned);
-            let name = arguments["name"].as_str().map(str::to_owned);
-            Some((tool, session, name))
-        })
-        .collect()
+    // Where the service doesn't answer, the relay decides.
+    if accounts.vouches(token).await == Some(false) {
+        return accounts.challenge(true);
+    }
+    next.run(request).await
 }
 
 /// The request's bearer token, if any.

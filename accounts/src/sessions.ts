@@ -10,7 +10,6 @@ export type SessionRow = {
 	creator: string | null;
 	secret: string | null;
 	created: string;
-	open: "members" | "link";
 	/** The app's grant that owns the session for the person, such as messagent's for a Telegram chat. */
 	app_grant: string | null;
 };
@@ -60,7 +59,6 @@ export async function createSession(
 	project: string,
 	creator: string,
 	name: string,
-	open: SessionRow["open"],
 	appGrant: string | null = null,
 ): Promise<SessionRow> {
 	const session: SessionRow = {
@@ -70,11 +68,10 @@ export async function createSession(
 		creator,
 		secret: null,
 		created: new Date().toISOString(),
-		open,
 		app_grant: appGrant,
 	};
 	db.prepare(
-		"INSERT INTO owned_session (id, name, project, creator, secret, created, open, app_grant) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+		"INSERT INTO owned_session (id, name, project, creator, secret, created, app_grant) VALUES (?, ?, ?, ?, ?, ?, ?)",
 	).run(
 		session.id,
 		session.name,
@@ -82,7 +79,6 @@ export async function createSession(
 		session.creator,
 		session.secret,
 		session.created,
-		session.open,
 		session.app_grant,
 	);
 	try {

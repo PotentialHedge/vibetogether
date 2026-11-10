@@ -55,7 +55,7 @@ Object.assign(process.env, {
 	AGENTWIRE_RELAY: "http://127.0.0.1:1",
 });
 
-test("each room becomes a session with the same address, openness and members, and friends stay", async () => {
+test("each room becomes a session with the same address, its members' only, and friends stay", async () => {
 	const { db, migrate } = await import("../src/db.ts");
 	migrate();
 	migrate();
@@ -64,12 +64,16 @@ test("each room becomes a session with the same address, openness and members, a
 			.prepare(sql)
 			.all()
 			.map((r) => ({ ...r }));
+	assert.deepEqual(rows("SELECT id, secret FROM owned_session ORDER BY id"), [
+		{ id: "s_1", secret: "secret1" },
+		{ id: "s_2", secret: "secret2" },
+	]);
+	// A room open by its link is its members' only from then on.
 	assert.deepEqual(
-		rows("SELECT id, secret, open FROM owned_session ORDER BY id"),
-		[
-			{ id: "s_1", secret: "secret1", open: "members" },
-			{ id: "s_2", secret: "secret2", open: "link" },
-		],
+		rows(
+			"SELECT name FROM pragma_table_info('owned_session') WHERE name = 'open'",
+		),
+		[],
 	);
 	// s_1's owner and member make a group; s_2, the owner's alone, goes into the owner's own.
 	assert.deepEqual(

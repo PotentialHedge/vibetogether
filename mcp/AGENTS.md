@@ -8,7 +8,6 @@ Read Vibe Together's design (`../AGENTS.md`) before working here.
 - Streamable HTTP at `/mcp`, so adding it to a harness is one URL.
 - Tools: `join`, `send`, `receive`, `status`, `participants` and `leave`, on a session, written here with their behaviour.
   With an account service, every other tool is one of its operations, generated from its OpenAPI document, Luis's decision (2026-11-10): each operation a token may call is a tool of its id, with its description and arguments, called as the same request with the agent's token (`src/operations.rs`), and the document's concepts go into the instructions. The document is read again after a minute.
-  A call of one without a token is challenged, as a join into a session open to its members is.
   `join` shows the relay's `about`, which the account service gives for a session of a project: the project and its repos.
   `status` and `participants` take over Hivemind's status and inspect, Luis's agreement (2026-11-09); `participants` reads each one's latest status from the log, so the relay stays agnostic to it.
   Every tool but `join` takes the participant's own link, which `join` returns:
@@ -27,12 +26,10 @@ Read Vibe Together's design (`../AGENTS.md`) before working here.
 - Beside the relay, it reaches it directly (`AGENTWIRE_RELAY_ADDRESS`, the module's `relayAddress`), keeping the public origin in its links, and names the agent's client in `X-Forwarded-For` on each request it makes for it, so the relay's per-client limits hold per agent's client rather than for the server as a whole.
 - It logs each request's method, path, status and time to stderr, and nothing of its query, headers or body.
 - The server's only state is in memory: per link, the entries it took from the relay and has not handed over yet.
-- Signing in is lazy, with an account service (`../accounts/api.md`, "The MCP server"), ag2's decision for luis's zero setup:
-  everything works without an account but a `join` into a session the service lets no one into without a token, such as one open to its members only, which gets MCP's 401 challenge, naming the server's metadata, which the account service serves;
-  the challenge is the HTTP answer, before the MCP SDK runs, since a tool error starts no sign-in (Anthropic's "lazy authentication").
-  A token the service rejects through `GET /api/me` is challenged too.
+- With an account service (`../accounts/api.md`, "The MCP server"), nothing works without an account, Luis's decision (2026-11-10): "always require accounts and every sessions only allows in memebers".
+  Every request without a token, or with one the service rejects through `GET /api/me`, gets MCP's 401 challenge, naming the server's metadata, which the account service serves, so the client signs in as it connects.
+  `join` takes only the service's sessions, an account's or a DM, as `GET /agentwire/sessions/<id>` says: a session of the relay's alone is no Vibe Together session.
   The server joins with the token the request carried, so the relay's presence shows the account, as `verified` next to the name.
-  `tests/accounts.rs` keeps joining by secret link without an account working.
 
 ## Running and testing
 
@@ -40,8 +37,7 @@ Read Vibe Together's design (`../AGENTS.md`) before working here.
   and `VIBETOGETHER_MCP_HOSTS`, separated by commas, the hosts it accepts, by default only loopback ones.
   A session's address, or its last part alone, is on the relay at `AGENTWIRE_RELAY`, by default the public one;
   for a local relay, run `just agentwire::dev` and set `AGENTWIRE_RELAY=http://127.0.0.1:8790`.
-  `VIBETOGETHER_MCP_ACCOUNTS`, the account service's URL, turns signing in on, with `VIBETOGETHER_MCP_RESOURCE`, the server's public URL, for the challenge;
-  whether a join needs signing in, the server asks the service as the relay would, for a session it knows.
+  `VIBETOGETHER_MCP_ACCOUNTS`, the account service's URL, turns signing in on, with `VIBETOGETHER_MCP_RESOURCE`, the server's public URL, for the challenge.
 - It speaks agentwire through the `agentwire` crate, agentwire's Rust participant library.
 - `just ci` runs its own checks.
   The tests in `tests/` run a relay in-process, from the `agentwire-relay` crate.

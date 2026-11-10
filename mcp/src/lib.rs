@@ -323,6 +323,14 @@ impl Server {
         token: Option<&str>,
     ) -> Result<String, String> {
         let link = self.session_link(session)?;
+        // With an account service, only its sessions: Vibe Together has none without accounts.
+        if let Some(accounts) = &self.accounts
+            && accounts.knows(&link).await == Some(false)
+        {
+            return Err(
+                "that is no Vibe Together session: join one that overview lists".to_owned(),
+            );
+        }
         let joined = client.join(&link, name, token).await.map_err(fail)?;
         self.know(&joined);
         let now = Receive {

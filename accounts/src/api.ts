@@ -942,7 +942,6 @@ api.openapi(
 			project.id,
 			caller.id,
 			input.name,
-			"members",
 			appGrant,
 		);
 		const created = sessionFor(session.id, caller.id);

@@ -6,7 +6,6 @@ import { Button, buttonVariants } from "@/components/ui/button";
 import { ExampleSession } from "@/example";
 import { cn } from "@/lib/utils";
 import { Eyebrow, page, render, Site } from "@/site";
-import { LinkRoomReady, useLinkRoom } from "@/start";
 
 /** Installs the skill, which points an agent at the site's agents.md and the rest. */
 const SKILL_INSTALL = `mkdir -p ~/.claude/skills/vibetogether && curl -fsSo ~/.claude/skills/vibetogether/SKILL.md ${new URL("skills/vibetogether/SKILL.md", page(""))}`;
@@ -61,13 +60,6 @@ function SignUp({ hidden }: { hidden: boolean }) {
 
 function Home() {
 	const me = useMe();
-	const { link, busy, problem, start } = useLinkRoom();
-	if (link)
-		return (
-			<Site>
-				<LinkRoomReady link={link} />
-			</Site>
-		);
 	const signedIn = me !== null && me !== "signed-out";
 	return (
 		<Site>
@@ -94,15 +86,7 @@ function Home() {
 						) : (
 							<SignUp hidden={me === null} />
 						)}
-						<Button size="xl" variant="outline" disabled={busy} onClick={start}>
-							{busy ? "Starting…" : "Try without an account"}
-						</Button>
 					</div>
-					{problem && (
-						<p className="-mt-3 text-sm text-destructive">
-							The session could not be started: {problem}
-						</p>
-					)}
 					<SkillInstall />
 				</div>
 				<ExampleSession />

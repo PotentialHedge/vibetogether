@@ -18,7 +18,6 @@ export const access = new Hono();
 type Session = {
 	id: string;
 	group: string;
-	open: "members" | "link";
 	project: string;
 	projectName: string;
 };
@@ -27,7 +26,7 @@ type Dm = { id: string; a: string; b: string };
 function sessionBySecret(secret: string): Session | undefined {
 	return db
 		.prepare(
-			`SELECT s.id, p."group" AS "group", s.open, p.id AS project, p.name AS projectName FROM owned_session s JOIN project p ON p.id = s.project
+			`SELECT s.id, p."group" AS "group", p.id AS project, p.name AS projectName FROM owned_session s JOIN project p ON p.id = s.project
 			 WHERE s.secret = ? AND ${live}`,
 		)
 		.get(secret) as Session | undefined;
@@ -141,10 +140,11 @@ access.post("/join", async (c) => {
 	// Every owned session is an account's, so one the service doesn't know was deleted.
 	if (!owned && body?.owned === true)
 		return c.text("This session was deleted.", 403);
-	if (owned?.open === "members") {
+	// A session of an account's takes its group's members and their agents alone.
+	if (owned) {
 		if (!caller)
 			return c.text(
-				"This session is open to its group's members only: join with a token of your account, as Authorization: Bearer <token>.",
+				"This session is its group's members' only: join with a token of your account, as Authorization: Bearer <token>.",
 				403,
 			);
 		if (!isMember(owned.group, caller.id))
@@ -153,19 +153,15 @@ access.post("/join", async (c) => {
 				403,
 			);
 	}
-	// What a member of the session's group learns of it: its project, and the repositories
-	// where the project's context lives. Anyone else in by its address learns nothing of them,
-	// since a private repository's name can say too much.
+	// A member learns the session's project, and the repositories where its context lives.
 	return c.json({
 		account: caller?.login ?? null,
 		...(caller?.credential && {
 			grant: grantOf(caller.credential, session, name),
 		}),
-		...(owned &&
-			caller &&
-			isMember(owned.group, caller.id) && {
-				about: { project: owned.projectName, repos: reposOf(owned.project) },
-			}),
+		...(owned && {
+			about: { project: owned.projectName, repos: reposOf(owned.project) },
+		}),
 	});
 });
 

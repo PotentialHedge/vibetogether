@@ -124,7 +124,7 @@ export function migrate(): void {
 			UNIQUE (project, repo)
 		);
 		-- "secret" is the secret part of the session's address on the relay.
-		-- "open" is who may join: its group's members only, or anyone with its address.
+		-- Only its group's members and their agents join it.
 		-- "creator" is who created it, who with the group's owner may delete it.
 		CREATE TABLE IF NOT EXISTS owned_session (
 			id TEXT PRIMARY KEY,
@@ -133,7 +133,6 @@ export function migrate(): void {
 			creator TEXT REFERENCES user(id) ON DELETE SET NULL,
 			secret TEXT UNIQUE,
 			created TEXT NOT NULL,
-			open TEXT NOT NULL DEFAULT 'members' CHECK (open IN ('members', 'link')),
 			-- The app's grant that owns the session, for the person, such as messagent's for a
 			-- Telegram chat: the app manages it, and revoking the app ends it.
 			-- A Better Auth session, which no foreign key names, since Better Auth makes its tables.
@@ -230,6 +229,10 @@ export function migrate(): void {
 		)
 		.all() as { a: string; b: string }[])
 		dmOf(a, b);
+	// Databases from before every session was its group's members' only, Luis's decision
+	// (2026-11-10): a session open to anyone with its address is its members' only from then on.
+	if (hasColumn("owned_session", "open"))
+		db.exec("ALTER TABLE owned_session DROP COLUMN open");
 }
 
 /** Whether `a` and `b` are friends: each has added the other. */

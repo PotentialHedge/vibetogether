@@ -97,7 +97,6 @@ test("every session goes into a project of a group of exactly the people who cou
 	type Placed = {
 		id: string;
 		secret: string;
-		open: string;
 		project: string;
 		projectName: string;
 		app: string | null;
@@ -107,20 +106,20 @@ test("every session goes into a project of a group of exactly the people who cou
 		own: number;
 	};
 	const placed = rows(
-		`SELECT s.id, s.secret, s.open, p.id AS project, p.name AS projectName, p.app, g.id AS "group",
+		`SELECT s.id, s.secret, p.id AS project, p.name AS projectName, p.app, g.id AS "group",
 		 g.name AS groupName, g.owner, g.own FROM owned_session s JOIN project p ON p.id = s.project
 		 JOIN "group" g ON g.id = p."group" ORDER BY s.created`,
 	) as Placed[];
 	const by = new Map(placed.map((s) => [s.id, s]));
 	assert.deepEqual(
-		placed.map((s) => [s.id, s.secret, s.open]),
+		placed.map((s) => [s.id, s.secret]),
 		[
-			["s_agents", "x1", "members"],
-			["s_vt", "x2", "members"],
-			["s_tg", "x3", "members"],
-			["s_ph", "x4", "members"],
-			["s_ph2", "x5", "link"],
-			["s_ben", "x6", "members"],
+			["s_agents", "x1"],
+			["s_vt", "x2"],
+			["s_tg", "x3"],
+			["s_ph", "x4"],
+			["s_ph2", "x5"],
+			["s_ben", "x6"],
 		],
 	);
 	// Access stays exactly as it was.
