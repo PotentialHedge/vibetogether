@@ -1,5 +1,6 @@
-/** The app: the person's groups in the rail, the open group's projects and
- * sessions in the sidebar, and the open session, live. On a phone, the
+/** The app: the person's DMs and groups in the rail, the open group's projects
+ * and sessions in the sidebar, and the open session or DM, live: a DM has no
+ * sidebar, since it is no group's. On a phone, the
  * navigation and the session take the screen in turn. */
 
 import { ArrowLeft } from "lucide-react";
@@ -7,6 +8,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Frame } from "ui/onboard";
 import {
 	api,
+	type Dm,
 	demo,
 	type Friend,
 	type Group,
@@ -17,7 +19,12 @@ import {
 	Unauthorized,
 } from "@/account/api";
 import { useActions } from "@/account/parts";
-import { CopySessionPrompt, Rail, Sidebar } from "@/account/sessions";
+import {
+	CopySessionPrompt,
+	type DmOfFriend,
+	Rail,
+	Sidebar,
+} from "@/account/sessions";
 import { SignIn } from "@/account/sign-in";
 import { Transcript } from "@/account/transcript";
 import { Button } from "@/components/ui/button";
@@ -37,34 +44,43 @@ type State = {
 	projects: Project[];
 	sessions: Session[];
 	friends: Friend[];
+	dms: Dm[];
 };
 
 async function load(): Promise<State> {
-	const [me, groups, projects, sessions, friends] = await Promise.all([
+	const [me, groups, projects, sessions, friends, dms] = await Promise.all([
 		api.me(),
 		api.groups(),
 		api.projects(),
 		api.sessions(),
 		api.friends(),
+		api.dms(),
 	]);
-	return { me, groups, projects, sessions, friends };
+	return { me, groups, projects, sessions, friends, dms };
 }
 
 /** What is open, kept in the address so that a reload or a link opens it
- * again: a session, or a group with none of its sessions open. */
-type Place = { group?: string | undefined; session?: string | undefined };
+ * again: a session, a DM by its friend's name, or a group with none of its
+ * sessions open. */
+type Place = {
+	group?: string | undefined;
+	session?: string | undefined;
+	dm?: string | undefined;
+};
 
 function placeOfAddress(): Place {
 	const query = new URLSearchParams(location.search);
 	return {
 		group: query.get("group") ?? undefined,
 		session: query.get("session") ?? undefined,
+		dm: query.get("dm") ?? undefined,
 	};
 }
 
 function go(place: Place) {
 	const query = new URLSearchParams();
 	if (place.session) query.set("session", place.session);
+	else if (place.dm) query.set("dm", place.dm);
 	else if (place.group) query.set("group", place.group);
 	const search = query.size ? `?${query}` : "";
 	history.pushState(null, "", `${location.pathname}${search}${location.hash}`);
@@ -73,41 +89,56 @@ function go(place: Place) {
 const LAST = "vibetogether last session";
 
 function App({ state, reload }: { state: State; reload: () => Promise<void> }) {
-	const { me, groups, projects, sessions, friends } = state;
+	const { me, groups, projects, sessions, friends, dms } = state;
 	const { problem, act } = useActions(reload);
 	const [place, setPlace] = useState<Place>(() => {
 		const place = placeOfAddress();
-		if (place.session || place.group) return place;
+		if (place.session || place.dm || place.group) return place;
 		const last = localStorage.getItem(LAST);
+		if (last?.startsWith("dm:")) return { dm: last.slice(3) };
 		return last && sessions.some((session) => session.id === last)
 			? { session: last }
 			: {};
 	});
 	// On a phone: whether the navigation is shown, rather than the session.
-	const [navigating, setNavigating] = useState(!place.session);
+	const [navigating, setNavigating] = useState(!place.session && !place.dm);
 	useEffect(() => {
 		const back = () => {
 			const place = placeOfAddress();
 			setPlace(place);
-			setNavigating(!place.session);
+			setNavigating(!place.session && !place.dm);
 		};
 		addEventListener("popstate", back);
 		return () => removeEventListener("popstate", back);
 	}, []);
 
-	const session = sessions.find((session) => session.id === place.session);
-	const group =
-		groups.find((group) => group.id === (session?.group.id ?? place.group)) ??
-		groups.find((group) => group.own) ??
-		groups[0];
+	// Each friend's DM, with their face, in the order friends are listed.
+	const dmsOfFriends: DmOfFriend[] = dms.flatMap((dm) => {
+		const friend = friends.find((friend) => friend.name === dm.friend);
+		return friend ? [{ dm, friend }] : [];
+	});
+	const dm = dmsOfFriends.find(({ friend }) => friend.name === place.dm);
+	const session = dm
+		? undefined
+		: sessions.find((session) => session.id === place.session);
+	const group = dm
+		? undefined
+		: (groups.find(
+				(group) => group.id === (session?.group.id ?? place.group),
+			) ??
+			groups.find((group) => group.own) ??
+			groups[0]);
 	useEffect(() => {
 		if (session) localStorage.setItem(LAST, session.id);
 	}, [session]);
+	useEffect(() => {
+		if (dm) localStorage.setItem(LAST, `dm:${dm.friend.name}`);
+	}, [dm]);
 
 	const open = (next: Place) => {
 		go(next);
 		setPlace(next);
-		setNavigating(!next.session);
+		setNavigating(!next.session && !next.dm);
 	};
 	const isOwner = session !== undefined && group?.owner === me.name;
 
@@ -121,9 +152,15 @@ function App({ state, reload }: { state: State; reload: () => Promise<void> }) {
 			>
 				<Rail
 					me={me}
+					dms={dmsOfFriends}
 					groups={groups}
-					open={group?.id}
+					open={dm?.dm.id ?? group?.id}
 					onOpen={(id) => open({ group: id })}
+					onDm={(id) =>
+						open({
+							dm: dmsOfFriends.find(({ dm }) => dm.id === id)?.friend.name,
+						})
+					}
 					reload={reload}
 				/>
 				{group && (
@@ -153,7 +190,28 @@ function App({ state, reload }: { state: State; reload: () => Promise<void> }) {
 						{problem}
 					</p>
 				)}
-				{session ? (
+				{dm ? (
+					<Transcript
+						key={dm.dm.id}
+						session={{
+							name: dm.friend.displayName || dm.friend.name,
+							address: dm.dm.address,
+						}}
+						me={me}
+						back={
+							<Button
+								variant="ghost"
+								size="icon-sm"
+								className="-ml-1 md:hidden"
+								aria-label="Back"
+								onClick={() => setNavigating(true)}
+							>
+								<ArrowLeft />
+							</Button>
+						}
+						actions={<CopySessionPrompt session={dm.dm} />}
+					/>
+				) : session ? (
 					<Transcript
 						key={session.id}
 						session={session}

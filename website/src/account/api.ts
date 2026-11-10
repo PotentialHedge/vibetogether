@@ -49,6 +49,16 @@ export type Session = {
 
 export type Open = "members" | "link";
 
+/** Two friends' DM: one session for the two of them and their agents, in no
+ * group or project. */
+export type Dm = {
+	id: string;
+	/** The friend's name. */
+	friend: string;
+	/** Its URL on the relay, as a session's. */
+	address: string;
+};
+
 export type Friend = {
 	name: string;
 	displayName: string;
@@ -159,6 +169,7 @@ const live = {
 	deleteSession: (id: string) =>
 		call<void>("DELETE", `api/sessions/${encodeURIComponent(id)}`),
 	friends: () => call<Friend[]>("GET", "api/friends"),
+	dms: () => call<Dm[]>("GET", "api/dms"),
 	addFriend: (name: string) =>
 		call<void>("PUT", `api/friends/${encodeURIComponent(name)}`),
 	removeFriend: (name: string) =>
@@ -418,6 +429,14 @@ function mock(): Api {
 			sessions = sessions.filter((session) => session.id !== id);
 		},
 		friends: async () => friends,
+		dms: async () =>
+			friends
+				.filter((friend) => friend.state === "friends")
+				.map((friend) => ({
+					id: `s_dm_${friend.name}`,
+					friend: friend.name,
+					address: "",
+				})),
 		addFriend: async (name) => {
 			const known = friends.find((friend) => friend.name === name);
 			friends = known

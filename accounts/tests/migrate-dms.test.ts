@@ -16,7 +16,10 @@ const database = join(
 const old = new DatabaseSync(database);
 old.exec("PRAGMA foreign_keys = ON");
 old.exec(
-	readFileSync(new URL("production-schema-before-dms.sql", import.meta.url), "utf8"),
+	readFileSync(
+		new URL("production-schema-before-dms.sql", import.meta.url),
+		"utf8",
+	),
 );
 const user = old.prepare(
 	`INSERT INTO user (id, name, email, emailVerified, createdAt, updatedAt, login) VALUES (?, ?, ?, 1, 0, 0, ?)`,
@@ -28,7 +31,9 @@ const token = old.prepare(
 );
 for (const login of ["luiswirth", "benedict-armstrong", "tristangabl", "dora"])
 	token.run(`t-${login}`, 9e15, `tok-${login}`, `u-${login}`);
-const friend = old.prepare(`INSERT INTO friend VALUES (?, ?, '2026-11-09T00:00:00Z')`);
+const friend = old.prepare(
+	`INSERT INTO friend VALUES (?, ?, '2026-11-09T00:00:00Z')`,
+);
 // Luis and Ben, and Luis and Tristan, are friends; Dora only asked Luis.
 for (const [a, b] of [
 	["luiswirth", "benedict-armstrong"],

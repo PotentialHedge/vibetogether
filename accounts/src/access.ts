@@ -27,9 +27,9 @@ function sessionBySecret(secret: string): Session | undefined {
 }
 
 function dmBySecret(secret: string): Dm | undefined {
-	return db
-		.prepare("SELECT id, a, b FROM dm WHERE secret = ?")
-		.get(secret) as Dm | undefined;
+	return db.prepare("SELECT id, a, b FROM dm WHERE secret = ?").get(secret) as
+		| Dm
+		| undefined;
 }
 
 /**

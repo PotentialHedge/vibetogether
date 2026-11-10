@@ -14,7 +14,10 @@ const database = join(
 const old = new DatabaseSync(database);
 old.exec("PRAGMA foreign_keys = ON");
 old.exec(
-	readFileSync(new URL("production-schema-before-groups.sql", import.meta.url), "utf8"),
+	readFileSync(
+		new URL("production-schema-before-groups.sql", import.meta.url),
+		"utf8",
+	),
 );
 const user = old.prepare(
 	`INSERT INTO user (id, name, email, emailVerified, createdAt, updatedAt, login) VALUES (?, ?, ?, 1, 0, 0, ?)`,

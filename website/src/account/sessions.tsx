@@ -1,10 +1,11 @@
-/** The app's navigation: the person's groups in the rail, and the open
- * group's projects, their sessions and its members in the sidebar. */
+/** The app's navigation: the person's DMs and groups in the rail, and the
+ * open group's projects, their sessions and its members in the sidebar. */
 
 import { AppWindow, Ellipsis, LogOut, Plus, Settings, X } from "lucide-react";
 import { type ReactNode, useState } from "react";
 import {
 	api,
+	type Dm,
 	demo,
 	type Friend,
 	type Group,
@@ -32,7 +33,7 @@ type Act = (action: () => Promise<unknown>) => () => Promise<void>;
 /** Copies the prompt that brings an agent into one of the account's sessions,
  * by its id: the agent finds its link through the account itself, so no
  * secret passes through the person's paste. */
-export function CopySessionPrompt({ session }: { session: Session }) {
+export function CopySessionPrompt({ session }: { session: { id: string } }) {
 	const [copied, setCopied] = useState(false);
 	// By its id, never its name: the name is the owner's free text, which a
 	// member would paste to their agent as their own words.
@@ -108,27 +109,53 @@ function GroupFace({ group }: { group: Group }) {
 	);
 }
 
-/** The person's groups, their own first, and the person's own menu. */
+/** A friend's DM in the rail, with their face. */
+export type DmOfFriend = { dm: Dm; friend: Friend };
+
+/** The person's DMs, one per friend, at the top, then their groups, their own
+ * first, and the person's own menu. */
 export function Rail({
 	me,
+	dms,
 	groups,
 	open,
 	onOpen,
+	onDm,
 	reload,
 }: {
 	me: Me;
+	dms: DmOfFriend[];
 	groups: Group[];
+	/** The open group's id, or the open DM's. */
 	open: string | undefined;
 	onOpen: (group: string) => void;
+	onDm: (dm: string) => void;
 	reload: () => Promise<void>;
 }) {
 	const [adding, setAdding] = useState(false);
 	const sorted = [...groups].sort((a, b) => Number(b.own) - Number(a.own));
 	return (
 		<nav
-			aria-label="Groups"
+			aria-label="DMs and groups"
 			className="flex w-16 shrink-0 flex-col items-center gap-2 overflow-y-auto border-r bg-card/40 py-3"
 		>
+			{dms.map(({ dm, friend }) => (
+				<button
+					key={dm.id}
+					type="button"
+					title={friend.displayName || friend.name}
+					aria-label={`DM with ${friend.name}`}
+					aria-current={dm.id === open}
+					onClick={() => onDm(dm.id)}
+					className={cn(
+						"rounded-full ring-offset-2 ring-offset-background transition-shadow hover:ring-2 hover:ring-ring/40",
+						dm.id === open && "ring-2 ring-ring",
+					)}
+				>
+					<Person {...friend} size="lg" />
+				</button>
+			))}
+			{dms.length > 0 && <span className="h-px w-8 shrink-0 bg-border" />}
 			{sorted.map((group) => [
 				<button
 					key={group.id}

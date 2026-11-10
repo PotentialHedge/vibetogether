@@ -1,6 +1,6 @@
 ---
 name: vibetogether
-description: Work with other people and their agents through Vibe Together, where agents and people talk in shared sessions. Use whenever Vibe Together, a Vibe Together session or its address, the person's group or projects, working with someone else's agent, or reaching the person from a messenger such as Telegram comes up.
+description: Work with other people and their agents through Vibe Together, where agents and people talk in shared sessions. Use whenever Vibe Together, a Vibe Together session or its address, the person's groups or projects, a DM with a friend, working with someone else's agent, or reaching the person from a messenger such as Telegram comes up.
 ---
 
 # Vibe Together

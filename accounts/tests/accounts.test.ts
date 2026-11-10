@@ -923,7 +923,10 @@ test("two friends have a DM, which only they and their agents join, and only whi
 		404,
 	);
 	const address = dm.address.split("/").pop();
-	assert.equal((await call(null, "GET", `/agentwire/sessions/${address}`)).status, 200);
+	assert.equal(
+		(await call(null, "GET", `/agentwire/sessions/${address}`)).status,
+		200,
+	);
 	const join = (name: string, token: string | null) =>
 		call(null, "POST", "/agentwire/join", {
 			session: address,

@@ -85,7 +85,7 @@ type Log = {
 	problem: string | null;
 };
 
-function useLog(session: Session, me: Me): Log {
+function useLog(session: Pick<Session, "address">, me: Me): Log {
 	const [log, setLog] = useState<Log>({
 		participant: null,
 		entries: [],
@@ -335,7 +335,8 @@ export function Transcript({
 	menu,
 	back,
 }: {
-	session: Session;
+	/** A session or a DM, as far as the transcript shows it. */
+	session: Pick<Session, "name" | "address">;
 	me: Me;
 	/** What can be done with the session, at the header's end. */
 	actions?: ReactNode;
