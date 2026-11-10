@@ -119,7 +119,14 @@ impl Client {
     }
 
     fn post(&self, url: impl reqwest::IntoUrl) -> RequestBuilder {
-        let request = self.http.post(url).timeout(REQUEST);
+        self.named(self.http.post(url).timeout(REQUEST))
+    }
+
+    fn get(&self, url: impl reqwest::IntoUrl) -> RequestBuilder {
+        self.named(self.http.get(url))
+    }
+
+    fn named(&self, request: RequestBuilder) -> RequestBuilder {
         match &self.on_behalf_of {
             Some(address) => request.header("x-forwarded-for", address),
             None => request,
@@ -127,9 +134,9 @@ impl Client {
     }
 
     /// This client, acting for a client of the caller's own at `address`, such
-    /// as a server's caller: what it adds, a session, a join or an entry, is
-    /// named as that client's in `X-Forwarded-For`, which a relay on the same
-    /// machine counts against that client's limits.
+    /// as a server's caller: each request is named as that client's in
+    /// `X-Forwarded-For`, which a relay on the same machine counts against that
+    /// client's limits.
     pub fn on_behalf_of(&self, address: &str) -> Self {
         Self {
             on_behalf_of: Some(address.to_owned()),
@@ -212,7 +219,7 @@ impl Client {
         }
         query.extend(receive.only.iter().map(|only| ("only", only.clone())));
         query.extend(receive.skip.iter().map(|skip| ("skip", skip.clone())));
-        let mut request = self.http.get(me).query(&query);
+        let mut request = self.get(me).query(&query);
         if let Some(wait) = receive.wait {
             request = request.timeout(wait + SLACK);
         }
@@ -221,7 +228,7 @@ impl Client {
 
     /// The payload of entry `n`, with its type and, where it has one, its file name.
     pub async fn fetch(&self, me: &str, n: u64) -> Result<Payload> {
-        let request = self.http.get(format!("{me}/{n}")).timeout(REQUEST);
+        let request = self.get(format!("{me}/{n}")).timeout(REQUEST);
         let mut response = checked(request.send().await?).await?;
         let header = |name: &str| {
             response

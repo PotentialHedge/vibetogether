@@ -3,6 +3,8 @@
 
 use std::collections::{BTreeMap, HashMap};
 use std::path::Path;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
@@ -40,6 +42,21 @@ const MAX_INLINE: usize = 64 * 1024;
 /// The entries one answer holds at most, in bytes, past which the next
 /// receive returns the rest; an answer holds at least one.
 const MAX_ANSWER: usize = 1024 * 1024;
+/// The bytes all answers not yet handed over hold at most, beyond which each
+/// holds one entry, so that many receives at once fill no memory.
+const MAX_ANSWERS: usize = 256 * 1024 * 1024;
+
+/// An answer's bytes, counted as held until it is dropped.
+pub struct Held {
+    held: Arc<AtomicUsize>,
+    bytes: usize,
+}
+
+impl Drop for Held {
+    fn drop(&mut self) {
+        self.held.fetch_sub(self.bytes, Ordering::Relaxed);
+    }
+}
 /// How long a session that nobody joined lasts, in seconds.
 const UNJOINED: i64 = 24 * 60 * 60;
 /// How long a session lasts once nobody receives in it, in seconds.
@@ -94,6 +111,8 @@ pub struct Sessions {
     /// receive, with whether each waited for presence: see `settle`.
     answered: HashMap<(String, String, u64), bool>,
     receives: u64,
+    /// The bytes the answers not yet handed over hold.
+    held: Arc<AtomicUsize>,
 }
 
 /// What a receive asks for.
@@ -134,7 +153,7 @@ struct Waiting {
 pub enum Answer {
     /// The lines, and the read position they acknowledge, which the relay sets
     /// once the access service still lets the caller in.
-    Lines(String, Option<i64>),
+    Lines(String, Option<i64>, Held),
     Replaced,
     /// Its name's account took the name back.
     TakenBack,
@@ -267,6 +286,7 @@ impl Sessions {
             waiting: HashMap::new(),
             answered: HashMap::new(),
             receives: 0,
+            held: Arc::default(),
         })
     }
 
@@ -789,7 +809,13 @@ impl Sessions {
             if let Some(waiting) = self.take(session, name) {
                 let key = (session.to_owned(), name.clone(), waiting.id);
                 self.answered.insert(key, waiting.receive.presence);
-                _ = waiting.answer.send(Answer::Lines(lines, read));
+                let bytes = lines.len();
+                self.held.fetch_add(bytes, Ordering::Relaxed);
+                let held = Held {
+                    held: self.held.clone(),
+                    bytes,
+                };
+                _ = waiting.answer.send(Answer::Lines(lines, read, held));
             }
         }
         Ok(())
@@ -815,8 +841,10 @@ impl Sessions {
             )?;
             let mut rows = entries.query(params![session, after, own, name])?;
             let mut cut = None;
+            let held = self.held.load(Ordering::Relaxed);
+            let room = MAX_ANSWER.min(MAX_ANSWERS.saturating_sub(held));
             while let Some(row) = rows.next()? {
-                if lines.len() >= MAX_ANSWER {
+                if !lines.is_empty() && lines.len() >= room {
                     cut = Some(row.get::<_, i64>(0)? - 1);
                     break;
                 }
@@ -1064,7 +1092,7 @@ mod tests {
                 .receive(&session, &secrets[0], receive)
                 .ok()
                 .unwrap();
-            let Ok(Answer::Lines(lines, read)) = answered.try_recv() else {
+            let Ok(Answer::Lines(lines, read, _)) = answered.try_recv() else {
                 panic!("a receive with entries waiting answers at once");
             };
             assert!(lines.len() <= MAX_ANSWER + 64 * 1024 + 4096);

@@ -3,8 +3,8 @@
 //!
 //! A client is the address that reached the relay, or, from the relay's own
 //! machine, the one a proxy there names last in `X-Forwarded-For`. A request
-//! from the machine that names none is the machine's own, such as a service
-//! beside the relay, and isn't limited. An IPv6 client is its /64, which one
+//! from the machine that names none, or names the machine's loopback, is the
+//! machine's own, such as a service beside the relay, and isn't limited. An IPv6 client is its /64, which one
 //! host usually holds whole.
 
 use std::collections::HashMap;
@@ -40,6 +40,13 @@ pub fn client(peer: Option<SocketAddr>, headers: &HeaderMap) -> Option<IpAddr> {
             .and_then(|value| value.rsplit(',').next())
             .and_then(|value| value.trim().parse().ok())?,
     };
+    let address = match address {
+        IpAddr::V6(v6) => v6.to_ipv4_mapped().map_or(address, IpAddr::V4),
+        v4 => v4,
+    };
+    if address.is_loopback() {
+        return None;
+    }
     Some(match address {
         IpAddr::V6(v6) => match v6.to_ipv4_mapped() {
             Some(v4) => IpAddr::V4(v4),
@@ -111,6 +118,15 @@ impl Limits {
         Ok(())
     }
 
+    /// Gives `client` back `bytes` it was counted for but didn't add.
+    pub fn give_back(&mut self, client: IpAddr, bytes: usize) {
+        let now = Instant::now();
+        if let Some(usage) = self.clients.get_mut(&client) {
+            usage.room = (usage.room(now) + bytes as f64).min(BURST);
+            usage.at = now;
+        }
+    }
+
     /// Counts a receive of `client` as waiting, unless it has too many.
     pub fn wait(&mut self, client: IpAddr) -> bool {
         let usage = self.usage(client, Instant::now());
@@ -142,6 +158,12 @@ mod tests {
         let local = Some("127.0.0.1:1".parse().unwrap());
         let remote = Some("203.0.113.9:1".parse().unwrap());
         assert_eq!(client(local, &HeaderMap::new()), None);
+        assert_eq!(client(local, &forwarded("::1")), None);
+        assert_eq!(client(local, &forwarded("::ffff:127.0.0.1")), None);
+        assert_eq!(
+            client(remote, &forwarded("::1")),
+            Some("203.0.113.9".parse().unwrap())
+        );
         assert_eq!(
             client(local, &forwarded("198.51.100.1, 203.0.113.7")),
             Some("203.0.113.7".parse().unwrap())

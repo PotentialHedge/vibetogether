@@ -13,6 +13,7 @@ use std::time::Duration;
 
 use axum::Router;
 use axum::body::Body;
+use axum::body::Bytes;
 use axum::extract::{ConnectInfo, Request, State};
 use axum::http::header::{
     AUTHORIZATION, CONTENT_DISPOSITION, CONTENT_LENGTH, CONTENT_SECURITY_POLICY, CONTENT_TYPE,
@@ -20,7 +21,7 @@ use axum::http::header::{
 };
 use axum::http::{HeaderMap, HeaderValue, Method, StatusCode};
 use axum::response::{IntoResponse, Response};
-use http_body_util::BodyExt;
+use http_body_util::{BodyExt, Full};
 use serde::Serialize;
 use tokio::time::{sleep, timeout};
 
@@ -599,19 +600,21 @@ async fn send(
         ));
     }
     relay.sessions().inside(id, secret)?;
-    // A payload of a length given up front counts before it is read, so that
-    // many sends at once hold no more of it in memory than the client may add.
-    let declared = headers
+    // A payload counts before it is read, as long as it says it is or else as
+    // the longest, so that many sends at once hold no more of it in memory than
+    // the client may add; what it falls short by is given back.
+    let counted = headers
         .get(CONTENT_LENGTH)
-        .and_then(|length| length.to_str().ok()?.parse::<usize>().ok());
-    if let Some(length) = declared {
-        relay.adds(client, length.min(MAX_PAYLOAD))?;
-    }
+        .and_then(|length| length.to_str().ok()?.parse::<usize>().ok())
+        .map_or(MAX_PAYLOAD, |length| length.min(MAX_PAYLOAD));
+    relay.adds(client, counted)?;
     let payload = read_at_most(body, MAX_PAYLOAD)
         .await?
         .ok_or_else(|| fail(413, format!("a payload is at most {MAX_PAYLOAD} bytes")))?;
-    if declared.is_none() {
-        relay.adds(client, payload.len())?;
+    if let Some(client) = client {
+        relay
+            .limits()
+            .give_back(client, counted.saturating_sub(payload.len()));
     }
     // curl sends this type unless told otherwise, which says nothing.
     let kind = headers
@@ -719,9 +722,14 @@ async fn receive(
         return Err(refused);
     }
     match answer {
-        Answer::Lines(lines, read) => {
+        Answer::Lines(lines, read, held) => {
             relay.sessions().settle(&waiting.ticket, read)?;
-            Ok(text(lines, "application/jsonl; charset=utf-8"))
+            // The answer counts as held until its body is sent, or dropped.
+            let body = Full::new(Bytes::from(lines)).map_frame(move |frame| {
+                let _ = &held;
+                frame
+            });
+            Ok(text(Body::new(body), "application/jsonl; charset=utf-8"))
         }
         Answer::Replaced => Err(fail(409, "a newer receive replaced this one")),
         Answer::TakenBack => Err(fail(403, "this name's account took it back")),

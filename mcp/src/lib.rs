@@ -66,6 +66,10 @@ const PROGRESS_EVERY: Duration = Duration::from_secs(30);
 const TASK_WAIT: Duration = Duration::from_secs(24 * 60 * 60);
 /// The largest image handed to the agent as an image; a larger one is described instead.
 const IMAGE_MAX: u64 = 5 * 1024 * 1024;
+/// The bytes of entries the server holds for one participant at most: past them, a
+/// receive returns what is pending without a ping, so that a session full of others'
+/// entries fills no memory.
+const PENDING_MAX: usize = 4 * 1024 * 1024;
 /// The largest MCP request: a payload of the relay's 10 MB, in base64, with room to spare.
 pub(crate) const REQUEST_MAX: usize = 16 * 1024 * 1024;
 /// The type of a status, as chat defines it.
@@ -209,7 +213,8 @@ impl Server {
         Parameters(args): Parameters<LinkArgs>,
     ) -> CallToolResult {
         let token = accounts::bearer(&parts.headers);
-        self.receive_handing_over(&args.link, token).await
+        let client = self.client_for(&parts);
+        self.receive_handing_over(&client, &args.link, token).await
     }
 
     #[tool(
@@ -394,10 +399,12 @@ impl Server {
         Ok("Left the session.".to_owned())
     }
 
-    /// Takes entries from the relay until one pings this participant, then returns all of
-    /// them, without acknowledging them.
+    /// Takes entries from the relay until one pings this participant, or until so many
+    /// are pending that the server holds no more for it, then returns all of them,
+    /// without acknowledging them.
     async fn receive_for(
         &self,
+        client: &Client,
         link: &str,
         token: Option<&str>,
     ) -> Result<(Vec<ContentBlock>, Handover), String> {
@@ -405,9 +412,11 @@ impl Server {
         let name = self.name_of(link, token).await?;
         loop {
             let ready = self.participant(link, |p| {
-                p.pending
+                let pinged = p
+                    .pending
                     .iter()
-                    .any(|entry| chat::pings(&entry.kind, &name))
+                    .any(|entry| chat::pings(&entry.kind, &name));
+                (pinged || pending_bytes(&p.pending) > PENDING_MAX)
                     .then(|| (std::mem::take(&mut p.pending), p.presence.clone()))
             });
             if let Some((entries, presence)) = ready {
@@ -421,7 +430,7 @@ impl Server {
                 };
                 return Ok((content, handover));
             }
-            self.pull(link).await?;
+            self.pull(client, link).await?;
         }
     }
 
@@ -489,8 +498,13 @@ impl Server {
     }
 
     /// Receives and acknowledges at once, for a client that gets the result right away.
-    async fn receive_handing_over(&self, link: &str, token: Option<&str>) -> CallToolResult {
-        match self.receive_for(link, token).await {
+    async fn receive_handing_over(
+        &self,
+        client: &Client,
+        link: &str,
+        token: Option<&str>,
+    ) -> CallToolResult {
+        match self.receive_for(client, link, token).await {
             Ok((content, handover)) => {
                 self.hand_over(handover).await;
                 CallToolResult::success(content)
@@ -519,7 +533,7 @@ impl Server {
 
     /// One receive from the relay, after what was taken, into what is pending,
     /// leaving the read position at what was handed over.
-    async fn pull(&self, link: &str) -> Result<(), String> {
+    async fn pull(&self, client: &Client, link: &str) -> Result<(), String> {
         let (taken, read, replaced) =
             self.participant(link, |p| (p.taken, p.read, p.replaced.clone()));
         // Statuses wake no one, and participants shows them, so receive leaves them out.
@@ -534,7 +548,7 @@ impl Server {
         // either tells it or makes it answer 409 first: either way, receive again. A 409
         // comes only after the relay's pause, so receiving again never spins.
         let received = tokio::select! {
-            received = self.client.receive(link, &receive) => match received {
+            received = client.receive(link, &receive) => match received {
                 Err(error) if error.status() == Some(409) => return Ok(()),
                 received => received.map_err(fail)?,
             },
@@ -561,12 +575,13 @@ impl Server {
     /// if the client asked for progress.
     async fn receive_blocking(
         &self,
+        client: &Client,
         link: &str,
         bearer: Option<&str>,
         context: &RequestContext<RoleServer>,
     ) -> CallToolResult {
         let token = context.meta.get_progress_token();
-        let receive = self.receive_handing_over(link, bearer);
+        let receive = self.receive_handing_over(client, link, bearer);
         tokio::pin!(receive);
         let mut ticks =
             tokio::time::interval_at(tokio::time::Instant::now() + PROGRESS_EVERY, PROGRESS_EVERY);
@@ -676,17 +691,17 @@ impl ServerHandler for Server {
         let LinkArgs { link } =
             serde_json::from_value(Value::Object(request.arguments.unwrap_or_default()))
                 .map_err(|error| ErrorData::invalid_params(error.to_string(), None))?;
-        let token = context
-            .extensions
-            .get::<Parts>()
+        let parts = context.extensions.get::<Parts>();
+        let token = parts
             .and_then(|parts| accounts::bearer(&parts.headers))
             .map(str::to_owned);
+        let client = parts.map_or_else(|| self.client.clone(), |parts| self.client_for(parts));
         if !context
             .client_capabilities()
             .is_some_and(|caps| caps.supports_tasks())
         {
             return Ok(CallToolResponse::Complete(
-                self.receive_blocking(&link, token.as_deref(), &context)
+                self.receive_blocking(&client, &link, token.as_deref(), &context)
                     .await,
             ));
         }
@@ -697,7 +712,7 @@ impl ServerHandler for Server {
             Box::pin(async move {
                 let received = tokio::select! {
                     _ = task.cancelled() => return Err(TaskExit::Cancelled),
-                    received = tokio::time::timeout(TASK_WAIT, server.receive_for(&link, token.as_deref())) => received,
+                    received = tokio::time::timeout(TASK_WAIT, server.receive_for(&client, &link, token.as_deref())) => received,
                 };
                 Ok(match received {
                     Ok(Ok((content, handover))) => {
@@ -827,6 +842,14 @@ struct Status {
 
 /// Each one's status, by name, from the status and join entries of the log in order:
 /// the latest, unless it was cleared, or its sender joined again since.
+/// The bytes the pending entries hold in memory, their texts most of all.
+fn pending_bytes(entries: &[Entry]) -> usize {
+    entries
+        .iter()
+        .map(|entry| 256 + entry.text.as_ref().map_or(0, String::len))
+        .sum()
+}
+
 fn statuses(entries: &[Entry]) -> HashMap<String, Status> {
     let mut statuses = HashMap::new();
     for entry in entries {
