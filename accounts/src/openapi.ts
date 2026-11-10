@@ -1,0 +1,188 @@
+/**
+ * The service's interface, defined once: every operation is a route declared here, with its
+ * arguments, answers and description for agents, and the service checks each request against it.
+ * The OpenAPI document made from these routes is the only definition of an operation:
+ * the MCP server makes its account tools from it, and the reference agents read with curl is
+ * rendered from it.
+ */
+import {
+	createRoute,
+	OpenAPIHono,
+	type RouteConfig,
+	z,
+} from "@hono/zod-openapi";
+import type { MiddlewareHandler } from "hono";
+import { recorded } from "./activity.ts";
+import { type Caller, callerOf } from "./caller.ts";
+import { config } from "./config.ts";
+import { ownGroupOf } from "./db.ts";
+
+export { z };
+
+export type Env = { Variables: { caller: Caller } };
+
+/**
+ * Who may call an operation:
+ * - `anyone`, without signing in;
+ * - `account`, the account, by a token, an app's grant or the person signed in in the browser;
+ * - `browser`, the person alone, signed in in the browser, by the cookie: a token gets 403.
+ * It sets both the operation's security in the document and the check, so the two can't differ.
+ */
+export type Who = "anyone" | "account" | "browser";
+
+const origin = new URL(config.url).origin;
+
+/**
+ * The account a request is from, or 401. A change by the person, signed in in the browser, comes
+ * from the account page alone: the session cookie is sent from every site that counts as the same
+ * site, other subdomains included.
+ */
+const signedIn: MiddlewareHandler<Env> = async (c, next) => {
+	const changes = !["GET", "HEAD", "OPTIONS"].includes(c.req.method);
+	if (
+		changes &&
+		!c.req.header("authorization") &&
+		c.req.header("origin") !== origin
+	)
+		return c.text("A change by the person comes from the account page.", 403);
+	const caller = await callerOf(c.req.raw.headers);
+	if (!caller)
+		return c.text(
+			"Sign in, or send a token as Authorization: Bearer <token>.",
+			401,
+		);
+	c.set("caller", caller);
+	// Everyone has a group of their own, from their first request on.
+	ownGroupOf(caller.id);
+	await next();
+};
+
+/** The person alone, signed in in the browser: a sign-in's own token sent as a bearer is no browser. */
+const inTheBrowser: MiddlewareHandler<Env> = async (c, next) => {
+	if (c.req.header("authorization"))
+		return c.text(
+			"Only the person does this, signed in in the browser, never with a token.",
+			403,
+		);
+	await next();
+};
+
+const securityOf: Record<Who, RouteConfig["security"]> = {
+	anyone: [],
+	account: [{ token: [] }, { browser: [] }],
+	browser: [{ browser: [] }],
+};
+
+const middlewareOf: Record<Who, MiddlewareHandler<Env>[]> = {
+	anyone: [],
+	account: [signedIn],
+	browser: [signedIn, inTheBrowser],
+};
+
+/** What every refusal is: one sentence, for whoever reads it, agent or person. */
+const refusal = {
+	content: { "text/plain": { schema: z.string() } },
+	description: "Refused, with one sentence that says why.",
+};
+
+type Operation = Omit<
+	RouteConfig,
+	"security" | "middleware" | "operationId" | "tags"
+> & {
+	/** Its name, in snake case, which the MCP server names its tool after, such as `list_groups`. */
+	id: string;
+	/** The concept it acts on, one of `tags`. */
+	tag: keyof typeof tags;
+	who: Who;
+};
+
+/**
+ * An operation: a route with its security and checks from `who`, every refusal as text, and
+ * what an agent changes with it recorded.
+ */
+export function operation<const O extends Operation>({
+	id,
+	tag,
+	who,
+	responses,
+	...route
+}: O) {
+	// Typed as the operation declares it, so that a handler's `c.req.valid` knows its request:
+	// an `Omit` of the generic loses it.
+	return createRoute({
+		...route,
+		operationId: id,
+		tags: [tag],
+		security: securityOf[who],
+		middleware: who === "anyone" ? [] : [...middlewareOf[who], recorded(id)],
+		responses: { ...responses, default: refusal },
+	} as RouteConfig) as unknown as O & {
+		responses: { default: typeof refusal };
+		getRoutingPath(): string;
+	};
+}
+
+/**
+ * The concepts, each a tag of the operations on it: the reference opens each section with its
+ * description, and the MCP server's instructions hold them, so both say the same.
+ */
+export const tags = {
+	Account:
+		"A person's name is their GitHub login in lower case, such as `luiswirth`. It is their name in agentwire, and their agents take part as `<name>/<agent>`, such as `luiswirth/claude`: a token never joins as the person.",
+	Groups:
+		"A group is people, such as Potential Hedge. Everyone has a group of their own, named after them, which holds them alone. A group's members are equal: any member adds a friend of theirs, removes anyone, and leaves on their own. What a group has is its members' alike: its projects and their sessions. A group shows only to its members: to anyone else, it and everything in it is not found.",
+	Projects:
+		"A project is a group's named set of sessions, which may point at GitHub repositories, where its work lives. A project stays in its group.",
+	Sessions:
+		"Every session is an agentwire session, and one of a project's. It lasts, with a name, and only the members of its group and their agents join it. Its address is hard to guess and identifies it: join it at its address as the transport says, with the token as `Authorization: Bearer <token>`, under one of the person's agents' names, `<name>/<agent>`. An app's sessions are the app's own, in its project of the person's own group.",
+	Friends:
+		"Friends are mutual: two people are friends once each has added the other. Only a friend of a member joins a group through them, and every two friends have a DM.",
+	DMs: "Two friends have a DM: one session with the two people and their agents alone, in no group or project. Nobody renames or deletes one.",
+	Tokens:
+		"A token connects agents to the account, and acts for the whole account, as the person does, except that only the person deletes the account. A machine's token is used by every agent on the machine; an MCP client's is that client's. A token lasts until it is revoked; a machine's also ends after 90 days unused.",
+	Apps: "An app, such as messagent's Telegram bot, acts as its person, by their approval: it carries their own messages, so it joins as the person. It reaches only the sessions it creates, and revoking it ends them.",
+} as const;
+
+/** A request's body that isn't what the operation takes: one sentence for each thing wrong. */
+export function newApi() {
+	return new OpenAPIHono<Env>({
+		defaultHook: (result, c) => {
+			if (result.success) return;
+			const wrong = result.error.issues.map((issue) =>
+				issue.path.length
+					? `${issue.path.join(".")}: ${issue.message}`
+					: issue.message,
+			);
+			return c.text(`${wrong.join("; ")}.`, 400);
+		},
+	});
+}
+
+/** The document, as the service serves it at `/api/openapi.json`. */
+export function documentOf(api: OpenAPIHono<Env>) {
+	api.openAPIRegistry.registerComponent("securitySchemes", "token", {
+		type: "http",
+		scheme: "bearer",
+		description: "A token, as `Authorization: Bearer <token>`.",
+	});
+	api.openAPIRegistry.registerComponent("securitySchemes", "browser", {
+		type: "apiKey",
+		in: "cookie",
+		name: "better-auth.session_token",
+		description: "The person, signed in in the browser.",
+	});
+	return api.getOpenAPI31Document({
+		openapi: "3.1.0",
+		info: {
+			title: "Vibe Together accounts",
+			version: "1",
+			description:
+				"The account service of Vibe Together: people sign in with GitHub, and their account holds their groups with their projects and sessions, their friends and their tokens. A person through the website and an agent through `curl` use the same requests.",
+		},
+		servers: [{ url: `${origin}/api` }],
+		tags: Object.entries(tags).map(([name, description]) => ({
+			name,
+			description,
+		})),
+	});
+}

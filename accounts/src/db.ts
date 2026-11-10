@@ -161,6 +161,26 @@ export function migrate(): void {
 		-- and their agents join it, and only while they are friends. It outlasts their friendship,
 		-- so that becoming friends again brings it back as it was.
 		-- "secret" is the secret part of its address on the relay, as a session's.
+		-- Which token minted a machine's token, as its credential ("b_<session>" or "o_<grant>"):
+		-- revoking a token revokes those it minted, so that a stolen one is cut off with its copies.
+		-- A token approved or minted in the browser has no row.
+		CREATE TABLE IF NOT EXISTS minted (
+			session TEXT PRIMARY KEY REFERENCES session(id) ON DELETE CASCADE,
+			by TEXT NOT NULL
+		);
+		-- What an agent changed in its person's account, by an operation's id and its arguments,
+		-- for the person to see, and by which the limits per hour count.
+		-- "token" and "agent" are the token's id and name as /api/tokens gives them, kept as they were.
+		CREATE TABLE IF NOT EXISTS activity (
+			id INTEGER PRIMARY KEY,
+			user TEXT NOT NULL REFERENCES user(id) ON DELETE CASCADE,
+			token TEXT NOT NULL,
+			agent TEXT NOT NULL,
+			operation TEXT NOT NULL,
+			arguments TEXT NOT NULL,
+			created TEXT NOT NULL
+		);
+		CREATE INDEX IF NOT EXISTS activity_of ON activity (user, created);
 		CREATE TABLE IF NOT EXISTS dm (
 			id TEXT PRIMARY KEY,
 			a TEXT NOT NULL REFERENCES user(id) ON DELETE CASCADE,

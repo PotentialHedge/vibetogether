@@ -243,7 +243,7 @@ test("me", async () => {
 	});
 });
 
-test("an account starts with its own group and no session, and a session is open to its group's members by default", async () => {
+test("an account starts with its own group and no session", async () => {
 	const { cookie: erin } = await person("erin");
 	assert.deepEqual((await call(erin, "GET", "/api/sessions")).json, []);
 	assert.deepEqual((await call(erin, "GET", "/api/projects")).json, []);
@@ -251,7 +251,7 @@ test("an account starts with its own group and no session, and a session is open
 	assert.deepEqual(rest, []);
 	assert.deepEqual(
 		{ ...own, id: undefined },
-		{ id: undefined, name: "erin", own: true, owner: "erin", members: [] },
+		{ id: undefined, name: "erin", own: true, members: ["erin"] },
 	);
 	const sessions = (await call(luis, "GET", "/api/sessions")).json;
 	assert.equal(sessions.length, 1);
@@ -261,7 +261,6 @@ test("an account starts with its own group and no session, and a session is open
 		name: "vibetogether",
 	});
 	assert.equal(sessions[0].group.name, "luis");
-	assert.equal(sessions[0].open, "members");
 	assert.equal(sessions[0].app, null);
 	assert.match(sessions[0].id, /^s_/);
 	assert.match(sessions[0].address, /\/v2\/s\/session-\d+$/);
@@ -321,7 +320,7 @@ test("an agent gets a token by an OTP, joins its session, and is cut off once th
 	assert.equal((await call(token, "GET", "/api/me")).status, 401);
 });
 
-test("the person mints a machine's token on the account page, which only they can", async () => {
+test("a machine's token is minted by the person or an agent, and goes with the token that minted it", async () => {
 	const minted = await call(ben, "POST", "/api/tokens", {
 		name: "ben-laptop",
 	});
@@ -335,10 +334,16 @@ test("the person mints a machine's token on the account page, which only they ca
 	assert.equal(listed.name, "ben-laptop");
 	assert.equal(listed.token, undefined);
 
-	assert.equal(
-		(await call(token, "POST", "/api/tokens", { name: "more" })).status,
-		403,
-	);
+	// An agent mints one too, which goes with the token that minted it.
+	const more = await call(token, "POST", "/api/tokens", { name: "more" });
+	assert.equal(more.status, 201, more.text);
+	const copy = await call(more.json.token, "POST", "/api/tokens", {
+		name: "copy",
+	});
+	assert.equal(copy.status, 201, copy.text);
+	assert.equal((await call(token, "DELETE", "/api/tokens/self")).status, 204);
+	assert.equal((await call(more.json.token, "GET", "/api/me")).status, 401);
+	assert.equal((await call(copy.json.token, "GET", "/api/me")).status, 401);
 	const elsewhere = await app.request("/api/tokens", {
 		method: "POST",
 		headers: {
@@ -355,7 +360,7 @@ test("the person mints a machine's token on the account page, which only they ca
 	);
 	assert.equal(
 		(await call(ben, "DELETE", `/api/tokens/${minted.json.id}`)).status,
-		204,
+		404,
 	);
 	assert.equal((await call(token, "GET", "/api/me")).status, 401);
 });
@@ -433,13 +438,13 @@ test("a session no account owns is open to anyone, and a token verifies the name
 	assert.equal(owned.status, 403);
 });
 
-test("friends are mutual, only friends become members of a group, and leaving it ends access", async () => {
+test("friends are mutual, members are equal, and leaving a group ends access", async () => {
 	const created = await call(luis, "POST", "/api/groups", {
 		name: "Potential Hedge",
 	});
 	assert.equal(created.status, 201, created.text);
 	const group = created.json.id;
-	assert.deepEqual(created.json.members, []);
+	assert.deepEqual(created.json.members, ["luis"]);
 	assert.equal(
 		(await call(luis, "PUT", `/api/groups/${group}/members/ben`)).status,
 		403,
@@ -475,8 +480,7 @@ test("friends are mutual, only friends become members of a group, and leaving it
 		404,
 	);
 	const added = await call(luis, "PUT", `/api/groups/${group}/members/ben`);
-	assert.deepEqual(added.json.members, ["ben"]);
-	assert.equal(added.json.owner, "luis");
+	assert.deepEqual(added.json.members, ["ben", "luis"]);
 
 	// A member creates projects and sessions in it, and every member joins them.
 	const shared = await project(ben, "collective", group);
@@ -493,56 +497,16 @@ test("friends are mutual, only friends become members of a group, and leaving it
 	assert.equal((await join("luis/claude", luisToken)).json.account, "luis");
 	assert.equal((await join("ben/claude", benToken)).json.account, "ben");
 	assert.equal((await call(ben, "GET", "/api/sessions")).json.length, 2);
-	// Only the group's owner adds members, deletes projects, and opens a session by its address.
-	assert.equal(
-		(await call(ben, "PUT", `/api/groups/${group}/members/luis`)).status,
-		403,
-	);
-	assert.equal(
-		(await call(ben, "DELETE", `/api/projects/${shared}`)).status,
-		403,
-	);
-	assert.equal(
-		(await call(ben, "PATCH", `/api/sessions/${owned.id}`, { open: "link" }))
-			.status,
-		403,
-	);
+	// Members are equal, and so are their agents: any of them renames and deletes.
 	assert.equal(
 		(await call(ben, "PATCH", `/api/sessions/${owned.id}`, { name: "hedging" }))
 			.json.name,
 		"hedging",
 	);
-	// The owner stays.
-	assert.equal(
-		(await call(ben, "DELETE", `/api/groups/${group}/members/luis`)).status,
-		403,
-	);
-	assert.equal(
-		(await call(luis, "DELETE", `/api/groups/${group}/members/luis`)).status,
-		403,
-	);
-
-	// Only a person in the browser deletes a session: one they created, or one in a group they own.
 	assert.equal(owned.creator, "ben");
 	const luiss = await session(luis, "luis-made", shared);
 	assert.equal(
-		(await call(ben, "DELETE", `/api/sessions/${luiss.id}`)).status,
-		403,
-	);
-	assert.equal(
-		(await call(benToken, "DELETE", `/api/sessions/${owned.id}`)).status,
-		403,
-	);
-	assert.equal(
-		(await call(luisToken, "DELETE", `/api/sessions/${luiss.id}`)).status,
-		403,
-	);
-	assert.equal(
-		(await call(luisToken, "DELETE", `/api/projects/${shared}`)).status,
-		403,
-	);
-	assert.equal(
-		(await call(luis, "DELETE", `/api/sessions/${luiss.id}`)).status,
+		(await call(benToken, "DELETE", `/api/sessions/${luiss.id}`)).status,
 		204,
 	);
 
@@ -565,17 +529,13 @@ test("friends are mutual, only friends become members of a group, and leaving it
 	);
 	assert.equal((await call(ben, "GET", "/api/sessions")).json.length, 1);
 
-	// Deleting the group, only the owner's in the browser, deletes its projects and sessions.
-	assert.equal(
-		(await call(luisToken, "DELETE", `/api/groups/${group}`)).status,
-		403,
-	);
+	// Deleting the group deletes its projects and sessions; one's own group stays.
 	assert.equal(
 		(await call(luis, "DELETE", `/api/groups/${own.id}`)).status,
 		403,
 	);
 	assert.equal(
-		(await call(luis, "DELETE", `/api/groups/${group}`)).status,
+		(await call(luisToken, "DELETE", `/api/groups/${group}`)).status,
 		204,
 	);
 	assert.equal((await join("luis/claude", luisToken)).status, 403);
@@ -693,7 +653,7 @@ test("a project points at GitHub repos, which a join into its sessions tells", a
 		(await call(ben, "PATCH", `/api/projects/${id}`, { repos: [] })).status,
 		404,
 	);
-	const { id: inProject, address } = await session(luis, "agents", id);
+	const { address } = await session(luis, "agents", id);
 	const joined = await call(null, "POST", "/agentwire/join", {
 		session: address.split("/").pop(),
 		name: "luis/claude",
@@ -705,28 +665,15 @@ test("a project points at GitHub repos, which a join into its sessions tells", a
 		project: "formoniq",
 		repos: changed.json.repos,
 	});
-	// Someone in by its address alone learns nothing of the project.
-	assert.equal(
-		(await call(luis, "PATCH", `/api/sessions/${inProject}`, { open: "link" }))
-			.status,
-		200,
-	);
-	const anonymous = await call(null, "POST", "/agentwire/join", {
-		session: address.split("/").pop(),
-		name: "someone",
-		token: null,
-		owned: true,
-	});
-	assert.equal(anonymous.status, 200, anonymous.text);
-	assert.equal(anonymous.json.about, undefined);
+	// Someone outside the group is refused, and learns nothing of the project.
 	const outsider = await call(null, "POST", "/agentwire/join", {
 		session: address.split("/").pop(),
 		name: "ben/claude",
 		token: benToken,
 		owned: true,
 	});
-	assert.equal(outsider.status, 200, outsider.text);
-	assert.equal(outsider.json.about, undefined);
+	assert.equal(outsider.status, 403, outsider.text);
+	assert.equal(outsider.text.includes("formoniq"), false);
 	// A session no account owns says nothing about itself.
 	const unowned = await call(null, "POST", "/agentwire/join", {
 		session: "unknown",
@@ -740,68 +687,6 @@ test("a project points at GitHub repos, which a join into its sessions tells", a
 			.length,
 		0,
 	);
-});
-
-test("a session open by its address lets anyone in, and only the person opens it", async () => {
-	const created = await call(luis, "POST", "/api/sessions", {
-		name: "open",
-		project: luisProject,
-	});
-	const id = created.json.id;
-	const session = created.json.address.split("/").pop();
-	const join = (name: string, token: string | null) =>
-		call(null, "POST", "/agentwire/join", {
-			session,
-			name,
-			token,
-			owned: true,
-		});
-	assert.equal((await join("stranger", null)).status, 403);
-
-	const agent = await connect(luis, "opener");
-	assert.equal(
-		(await call(agent, "PATCH", `/api/sessions/${id}`, { open: "link" }))
-			.status,
-		403,
-	);
-	assert.equal(
-		(
-			await call(agent, "POST", "/api/sessions", {
-				name: "x",
-				project: luisProject,
-				open: "link",
-			})
-		).status,
-		403,
-	);
-	// The browser is the cookie alone: the sign-in's own token as a bearer is no browser.
-	assert.equal(
-		(await call(luisToken, "PATCH", `/api/sessions/${id}`, { open: "link" }))
-			.status,
-		403,
-	);
-	assert.equal(
-		(await call(luis, "PATCH", `/api/sessions/${id}`, { open: "maybe" }))
-			.status,
-		400,
-	);
-	const opened = await call(luis, "PATCH", `/api/sessions/${id}`, {
-		open: "link",
-	});
-	assert.equal(opened.json.open, "link");
-	assert.equal(opened.json.name, "open");
-	assert.equal((await join("stranger", null)).json.account, null);
-	// A token still verifies the name, a non-member's too.
-	assert.equal((await join("ben/claude", benToken)).json.account, "ben");
-	assert.equal((await join("luis", benToken)).status, 403);
-
-	assert.equal(
-		(await call(agent, "PATCH", `/api/sessions/${id}`, { open: "members" }))
-			.json.open,
-		"members",
-	);
-	assert.equal((await join("stranger", null)).status, 403);
-	await call(luis, "DELETE", `/api/sessions/${id}`);
 });
 
 test("an agent through MCP signs in by OAuth, and is cut off once revoked", async () => {
@@ -957,43 +842,108 @@ test("a token reaches none of Better Auth's endpoints for sessions, the user, co
 	assert.equal((await call(token, "GET", "/api/me")).status, 200);
 });
 
-test("only the person adds friends and members, never an agent's token", async () => {
+test("an agent adds friends and members, which its person sees, and which are limited per hour", async () => {
 	const token = await connect(ben, "helper");
-	assert.equal((await call(token, "PUT", "/api/friends/luis")).status, 403);
-	const group = (await call(ben, "POST", "/api/groups", { name: "helpers" }))
+	const { cookie: dora } = await person("dot");
+	await call(dora, "PUT", "/api/friends/ben");
+	assert.equal((await call(token, "PUT", "/api/friends/dot")).status, 204);
+	const group = (await call(token, "POST", "/api/groups", { name: "helpers" }))
 		.json.id;
 	assert.equal(
-		(await call(token, "PUT", `/api/groups/${group}/members/luis`)).status,
-		403,
+		(await call(token, "PUT", `/api/groups/${group}/members/dot`)).status,
+		200,
 	);
-	// Nor a bearer copy of the person's own sign-in.
+	const activity = (await call(ben, "GET", "/api/activity")).json;
+	assert.deepEqual(
+		activity.slice(0, 3).map((a: any) => [a.agent, a.operation, a.arguments]),
+		[
+			["helper", "add_group_member", { id: group, name: "dot" }],
+			["helper", "create_group", { name: "helpers" }],
+			["helper", "add_friend", { name: "dot" }],
+		],
+	);
+	// The person in the browser is not recorded.
+	await call(ben, "PATCH", `/api/groups/${group}`, { name: "helping" });
 	assert.equal(
-		(await call(benToken, "PUT", `/api/groups/${group}/members/luis`)).status,
-		403,
+		(await call(ben, "GET", "/api/activity")).json.length,
+		activity.length,
 	);
-	assert.equal((await call(benToken, "PUT", "/api/friends/luis")).status, 403);
-	assert.equal((await call(ben, "DELETE", `/api/groups/${group}`)).status, 204);
-});
-
-test("unfriending takes each out of the other's groups", async () => {
-	const { cookie: carol } = await person("carol");
-	await call(luis, "PUT", "/api/friends/carol");
-	await call(carol, "PUT", "/api/friends/luis");
-	const group = (await call(luis, "POST", "/api/groups", { name: "carol" }))
-		.json.id;
+	for (let i = 0; i < 19; i++)
+		assert.equal((await call(token, "PUT", "/api/friends/dot")).status, 204);
+	assert.equal((await call(token, "PUT", "/api/friends/dot")).status, 429);
+	assert.equal((await call(ben, "PUT", "/api/friends/dot")).status, 204);
+	// Members are friends of whoever added them, and stay when the friendship ends.
+	assert.equal((await call(dora, "DELETE", "/api/friends/ben")).status, 204);
 	assert.deepEqual(
-		(await call(luis, "PUT", `/api/groups/${group}/members/carol`)).json
-			.members,
-		["carol"],
-	);
-	assert.equal((await call(carol, "DELETE", "/api/friends/luis")).status, 204);
-	assert.deepEqual(
-		(await call(luis, "GET", "/api/groups")).json.find(
+		(await call(ben, "GET", "/api/groups")).json.find(
 			(g: any) => g.id === group,
 		).members,
-		[],
+		["ben", "dot"],
 	);
-	await call(luis, "DELETE", `/api/groups/${group}`);
+	assert.equal(
+		(await call(dora, "DELETE", `/api/groups/${group}/members/dot`)).status,
+		204,
+	);
+	assert.equal(
+		(await call(ben, "DELETE", `/api/groups/${group}/members/ben`)).status,
+		204,
+	);
+	assert.equal(
+		(await call(ben, "GET", `/api/groups`)).json.some(
+			(g: any) => g.id === group,
+		),
+		false,
+	);
+});
+
+test("the account is deleted by the person alone, in the browser, with what is only theirs", async () => {
+	const { cookie: fay, token: fayToken } = await person("fay");
+	const group = (await call(fay, "POST", "/api/groups", { name: "fay's" })).json
+		.id;
+	assert.equal((await call(fayToken, "DELETE", "/api/me")).status, 403);
+	assert.equal((await call(fay, "DELETE", "/api/me")).status, 204);
+	assert.equal((await call(fay, "GET", "/api/me")).status, 401);
+	assert.equal((await call(fayToken, "GET", "/api/me")).status, 401);
+	assert.equal(
+		(await call(luis, "PUT", `/api/groups/${group}/members/luis`)).status,
+		404,
+	);
+});
+
+test("the overview holds the account, its groups with projects and sessions, DMs and friends", async () => {
+	const overview = (await call(luisToken, "GET", "/api/overview")).json;
+	assert.equal(overview.account.name, "luis");
+	const own = overview.groups[0];
+	assert.equal(own.own, true);
+	const sessions = (await call(luis, "GET", "/api/sessions")).json;
+	assert.deepEqual(
+		overview.groups.flatMap((g: any) =>
+			g.projects.flatMap((p: any) => p.sessions),
+		),
+		sessions,
+	);
+	assert.deepEqual(
+		overview.friends,
+		(await call(luis, "GET", "/api/friends")).json,
+	);
+	assert.deepEqual(overview.dms, (await call(luis, "GET", "/api/dms")).json);
+});
+
+test("every operation is in the document, which anyone reads", async () => {
+	const response = await call(null, "GET", "/api/openapi.json");
+	assert.equal(response.status, 200);
+	const ids = Object.values(response.json.paths).flatMap((path: any) =>
+		Object.values(path).map((op: any) => op.operationId),
+	);
+	assert.equal(new Set(ids).size, ids.length);
+	assert.ok(ids.includes("overview") && ids.includes("delete_account"));
+	assert.deepEqual(response.json.paths["/me"].delete.security, [
+		{ browser: [] },
+	]);
+	// A body that isn't what the operation takes is refused with what is wrong.
+	const bad = await call(luisToken, "POST", "/api/groups", { name: 7 });
+	assert.equal(bad.status, 400);
+	assert.match(bad.text, /name/);
 });
 
 test("two friends have a DM, which only they and their agents join, and only while they are friends", async () => {
@@ -1350,7 +1300,7 @@ test("an app acts as its person only with its secret, the person's approval, and
 	assert.equal((await call(token, "DELETE", "/api/tokens/self")).status, 404);
 	// Only the person revokes an app, never an agent's token.
 	assert.equal(
-		(await call(agent, "DELETE", `/api/apps/${listed.id}`)).status,
+		(await call(token, "DELETE", `/api/apps/${listed.id}`)).status,
 		403,
 	);
 	assert.equal((await call(token, "DELETE", "/api/apps/self")).status, 204);
