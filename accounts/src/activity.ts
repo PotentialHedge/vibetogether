@@ -1,5 +1,5 @@
 /**
- * What agents change in their person's account: each change by a token or an app's grant is kept,
+ * What agents change in their person's account: each change by a token or a bridge is kept,
  * as its operation's id and arguments, for the person to see what their agents did, and the
  * changes that let someone in or make tokens are limited per hour, so that an agent talked into
  * them can't spread fast. The person, signed in in the browser, is neither recorded nor limited.
@@ -17,7 +17,7 @@ const limited: Record<string, number> = {
 	create_token: 20,
 };
 
-/** The token's or app's name, as `/api/tokens` and `/api/apps` give it. */
+/** The token's or bridge's name, as `/api/tokens` and a session's bridges give it. */
 function agentOf(caller: Caller): string {
 	// A sign-in's own token, sent as a bearer by a page of the site.
 	if (!caller.token) return "a sign-in";

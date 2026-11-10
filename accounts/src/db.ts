@@ -44,16 +44,9 @@ export function migrate(): void {
 		);
 	if (hasTable("friend") && hasColumn("friend", "agents"))
 		db.exec("ALTER TABLE friend DROP COLUMN agents");
-	// Databases from before an app could own a session.
-	if (hasTable("owned_session") && !hasColumn("owned_session", "app_grant"))
-		db.exec("ALTER TABLE owned_session ADD COLUMN app_grant TEXT");
-	// Databases from before an app could act as its person.
-	if (hasTable("device_request") && !hasColumn("device_request", "person"))
-		db.exec(`
-			ALTER TABLE device_request ADD COLUMN device_code TEXT;
-			ALTER TABLE device_request ADD COLUMN person INTEGER NOT NULL DEFAULT 0;
-			ALTER TABLE device_request ADD COLUMN claim TEXT;
-		`);
+	// Databases from before bridges: an OTP lasts 15 minutes, so the ones asked for go.
+	if (hasTable("device_request") && !hasColumn("device_request", "bridge"))
+		db.exec("DROP TABLE device_request");
 	// Databases from before Vibe Together said session for room: the rows move over, their ids
 	// from r_ to s_, and the secret in each address stays, so that every address still works.
 	// They move into sessions with members of their own, which become groups below.
@@ -67,8 +60,7 @@ export function migrate(): void {
 					owner TEXT NOT NULL REFERENCES user(id) ON DELETE CASCADE,
 					secret TEXT UNIQUE,
 					created TEXT NOT NULL,
-					open TEXT NOT NULL DEFAULT 'members' CHECK (open IN ('members', 'link')),
-					app_grant TEXT
+					open TEXT NOT NULL DEFAULT 'members' CHECK (open IN ('members', 'link'))
 				);
 				CREATE TABLE IF NOT EXISTS session_member (
 					session TEXT NOT NULL REFERENCES owned_session(id) ON DELETE CASCADE,
@@ -103,16 +95,13 @@ export function migrate(): void {
 			user TEXT NOT NULL REFERENCES user(id) ON DELETE CASCADE,
 			PRIMARY KEY ("group", user)
 		);
-		-- A group's named set of sessions. "app" is the app whose sessions it holds,
-		-- by its client_id, in the person's own group: such a project holds that app's sessions alone.
+		-- A group's named set of sessions.
 		CREATE TABLE IF NOT EXISTS project (
 			id TEXT PRIMARY KEY,
 			name TEXT NOT NULL,
 			"group" TEXT NOT NULL REFERENCES "group"(id) ON DELETE CASCADE,
-			app TEXT,
 			created TEXT NOT NULL
 		);
-		CREATE UNIQUE INDEX IF NOT EXISTS project_app ON project ("group", app) WHERE app IS NOT NULL;
 		-- The GitHub repositories a project points at, where its context lives, as "owner/name",
 		-- in the order given: a pointer only, which grants no access.
 		CREATE TABLE IF NOT EXISTS project_repo (
@@ -131,22 +120,36 @@ export function migrate(): void {
 			project TEXT NOT NULL REFERENCES project(id) ON DELETE CASCADE,
 			creator TEXT REFERENCES user(id) ON DELETE SET NULL,
 			secret TEXT UNIQUE,
-			created TEXT NOT NULL,
-			-- The app's grant that owns the session, for the person, such as messagent's for a
-			-- Telegram chat: the app manages it, and revoking the app ends it.
-			-- A Better Auth session, which no foreign key names, since Better Auth makes its tables.
-			app_grant TEXT
+			created TEXT NOT NULL
 		);
 		-- Who asked for an OTP, for the person to judge before approving it.
 		-- "device_code" is the SHA-256 of the OTP's device code, by which its token is made.
-		-- "person" is whether an app asked to act as the person, and "claim" what it says it is for.
+		-- "bridge" is the bridge that asked to be added to a session, by its client_id, "claim"
+		-- what it says it bridges, and "session" the session the person picked as they approved.
+		-- "identity" is the sender's account on the bridge's messenger, such as a Telegram id, where
+		-- the chat is theirs alone, which approving links to the person; "identity_name" its name there.
 		CREATE TABLE IF NOT EXISTS device_request (
 			user_code TEXT PRIMARY KEY,
 			requested TEXT NOT NULL,
 			"from" TEXT NOT NULL,
 			device_code TEXT,
-			person INTEGER NOT NULL DEFAULT 0,
-			claim TEXT
+			bridge TEXT,
+			claim TEXT,
+			identity TEXT,
+			identity_name TEXT,
+			session TEXT
+		);
+		-- A person's account on a bridge's messenger, linked to theirs by an OTP they approved, so
+		-- that the bridge carries what they write there as them. "external" is its id there, such as
+		-- a Telegram id, and "name" what it was called as it was linked. It is one person's.
+		CREATE TABLE IF NOT EXISTS identity (
+			id TEXT PRIMARY KEY,
+			bridge TEXT NOT NULL,
+			external TEXT NOT NULL,
+			user TEXT NOT NULL REFERENCES user(id) ON DELETE CASCADE,
+			name TEXT NOT NULL,
+			created TEXT NOT NULL,
+			UNIQUE (bridge, external)
 		);
 		-- One row per side: "from" added "to". Two people are friends where both rows exist.
 		CREATE TABLE IF NOT EXISTS friend (
@@ -216,7 +219,14 @@ export function migrate(): void {
 	}[])
 		ownGroupOf(id);
 	// Databases from before groups and projects, whose sessions each had an owner and members.
-	if (hasColumn("owned_session", "owner")) intoGroups();
+	// Such a database may be from before apps too, whose columns it gets for the step below.
+	if (hasColumn("owned_session", "owner")) {
+		if (!hasColumn("owned_session", "app_grant"))
+			db.exec("ALTER TABLE owned_session ADD COLUMN app_grant TEXT");
+		if (!hasColumn("session", "person"))
+			db.exec("ALTER TABLE session ADD COLUMN person INTEGER");
+		intoGroups();
+	}
 	// Databases from before a session kept who created it.
 	if (!hasColumn("owned_session", "creator"))
 		db.exec(
@@ -234,6 +244,56 @@ export function migrate(): void {
 	// (2026-11-10): a session open to anyone with its address is its members' only from then on.
 	if (hasColumn("owned_session", "open"))
 		db.exec("ALTER TABLE owned_session DROP COLUMN open");
+	// Databases from before bridges, which replaced apps, Luis's decisions (2026-11-10):
+	// an app's grants go, and a session an app owned stays an ordinary session of its project,
+	// as one whose grant had already ended had already gone.
+	if (hasColumn("owned_session", "app_grant") || hasColumn("session", "person"))
+		withoutApps();
+	// A bridge goes with its session, and with its person's membership in the session's group.
+	// Triggers, since a session goes by a cascade too, such as with its project or group.
+	db.exec(`
+		CREATE TRIGGER IF NOT EXISTS bridge_with_session AFTER DELETE ON owned_session
+		BEGIN
+			DELETE FROM session WHERE bridge = OLD.id;
+		END;
+		CREATE TRIGGER IF NOT EXISTS bridge_with_member AFTER DELETE ON group_member
+		BEGIN
+			DELETE FROM session WHERE userId = OLD.user AND bridge IN (
+				SELECT s.id FROM owned_session s JOIN project p ON p.id = s.project
+				WHERE p."group" = OLD."group"
+			);
+		END;
+	`);
+}
+
+/** Takes out what was of apps: their grants, and their mark on sessions and projects. */
+function withoutApps(): void {
+	db.exec("BEGIN");
+	try {
+		const person = hasColumn("session", "person");
+		if (hasColumn("owned_session", "app_grant")) {
+			db.exec(
+				`DELETE FROM owned_session WHERE app_grant IS NOT NULL AND app_grant NOT IN (${
+					person ? "SELECT id FROM session WHERE person = 1" : "SELECT NULL"
+				})`,
+			);
+			db.exec("ALTER TABLE owned_session DROP COLUMN app_grant");
+		}
+		if (hasColumn("project", "app"))
+			db.exec(`
+				DROP INDEX IF EXISTS project_app;
+				ALTER TABLE project DROP COLUMN app;
+			`);
+		if (person)
+			db.exec(`
+				DELETE FROM session WHERE person = 1;
+				ALTER TABLE session DROP COLUMN person;
+			`);
+		db.exec("COMMIT");
+	} catch (error) {
+		db.exec("ROLLBACK");
+		throw error;
+	}
 }
 
 /** Whether `a` and `b` are friends: each has added the other. */
@@ -316,26 +376,12 @@ export function ownGroupOf(user: string): string {
 	return id;
 }
 
-/** The id of the project of `app`, by its client_id, in the person's own group, made where it doesn't exist yet. */
-export function appProjectOf(user: string, app: string): string {
-	const group = ownGroupOf(user);
-	const project = db
-		.prepare(`SELECT id FROM project WHERE "group" = ? AND app = ?`)
-		.get(group, app) as { id: string } | undefined;
-	if (project) return project.id;
-	const id = newId("p");
-	db.prepare(
-		`INSERT INTO project (id, name, "group", app, created) VALUES (?, ?, ?, ?, ?)`,
-	).run(id, app, group, app, new Date().toISOString());
-	return id;
-}
-
 /**
  * Moves every session into a project, keeping exactly who may join it: one of the owner's
  * alone into the owner's own group, one with members into a group of exactly its owner and its
- * members, shared by every session with the same people, and an app's into
- * its app's project. Each session but an app's gets a project of its own, named after it.
- * Its owner becomes its creator.
+ * members, shared by every session with the same people, and an app's into a project of the
+ * owner's own group named after the app. Each session but an app's gets a project of its own,
+ * named after it. Its owner becomes its creator.
  * A session of an app whose grant is gone was already ended, and goes.
  */
 function intoGroups(): void {
@@ -360,6 +406,7 @@ function intoGroups(): void {
 			)
 			.all() as Old[];
 		const groups = new Map<string, string>();
+		const appProjects = new Map<string, string>();
 		const moved: (Old & { project: string })[] = [];
 		const now = new Date().toISOString();
 		const newProject = (group: string, name: string) => {
@@ -371,11 +418,14 @@ function intoGroups(): void {
 		};
 		for (const session of sessions) {
 			if (session.app_grant) {
-				if (session.app)
-					moved.push({
-						...session,
-						project: appProjectOf(session.owner, session.app),
-					});
+				if (session.app) {
+					const key = JSON.stringify([session.owner, session.app]);
+					const project =
+						appProjects.get(key) ??
+						newProject(ownGroupOf(session.owner), session.app);
+					appProjects.set(key, project);
+					moved.push({ ...session, project });
+				}
 				continue;
 			}
 			const members = (

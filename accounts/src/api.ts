@@ -2,20 +2,11 @@
  * The service's operations under `/api/`, each declared once (`openapi.ts`).
  * An agent with its person's token does everything the person does on the website, Luis's
  * decision (2026-11-10), but deleting the account; signing in and approving an OTP are Better
- * Auth's, outside these. An app's grant reaches only the app's own sessions.
+ * Auth's, outside these. A bridge's credential reaches only the operations on itself.
  */
 import { auth } from "./auth.ts";
-import type { Caller } from "./caller.ts";
 import { config } from "./config.ts";
-import {
-	appProjectOf,
-	areFriends,
-	db,
-	dmOf,
-	isMember,
-	newId,
-	ownGroupOf,
-} from "./db.ts";
+import { areFriends, db, dmOf, isMember, newId, ownGroupOf } from "./db.ts";
 import { inviteOperations } from "./invites.ts";
 import { isNamePart } from "./names.ts";
 import { documentOf, newApi, operation, z } from "./openapi.ts";
@@ -24,7 +15,6 @@ import { maxRepos, reposOf, reposOfInput, setRepos } from "./repos.ts";
 import {
 	addressOf,
 	createSession,
-	live,
 	type SessionRow,
 	secretOf,
 } from "./sessions.ts";
@@ -82,10 +72,6 @@ const Project = z
 		id: Id("p", "project"),
 		name: z.string(),
 		group: Named("g", "group"),
-		app: z.string().nullable().meta({
-			description:
-				"The app whose sessions it holds alone, such as `messagent`.",
-		}),
 		repos: z.array(z.string()).meta({
 			description:
 				"The GitHub repositories it points at, each as its URL, however it was given.",
@@ -100,9 +86,6 @@ const Session = z
 		project: Named("p", "project"),
 		group: Named("g", "group"),
 		creator: Login.nullable(),
-		app: Named("a", "app")
-			.nullable()
-			.meta({ description: "The app that owns it for its person, if any." }),
 		address: z.string().nullable().meta({
 			description: "Its address on the relay, which joining takes.",
 		}),
@@ -145,27 +128,51 @@ const Token = z
 	})
 	.openapi("Token");
 
-const App = z
+const Bridge = z
 	.object({
-		id: Id("a", "app"),
-		name: z.string(),
-		for: z
+		id: Id("b", "bridge"),
+		name: z.string().meta({
+			description:
+				"Its name in the session, `<name>/<bridge>`, such as `luiswirth/messagent`.",
+		}),
+		bridge: z
 			.string()
-			.nullable()
-			.meta({ description: "What the app said it is for, in its own words." }),
+			.meta({ description: "Which bridge, such as `messagent`." }),
+		by: Login.meta({ description: "Who added it." }),
+		for: z.string().nullable().meta({
+			description:
+				"What the bridge said it bridges, in its own words, such as a Telegram chat.",
+		}),
+		session: Named("s", "session"),
 		created: z.string(),
 	})
-	.openapi("App");
+	.openapi("Bridge");
+
+const Identity = z
+	.object({
+		id: Id("i", "identity"),
+		bridge: z
+			.string()
+			.meta({ description: "Which bridge, such as `messagent`." }),
+		external: z.string().meta({
+			description: "Its id on the bridge's messenger, such as a Telegram id.",
+		}),
+		name: z
+			.string()
+			.meta({ description: "What it was called as it was linked." }),
+		created: z.string(),
+	})
+	.openapi("Identity");
 
 const Activity = z
 	.object({
 		agent: z.string().meta({
 			description:
-				"The name of the token or app that made it, such as the machine's or the MCP client's: every agent on a machine shares its token.",
+				"The name of the token or bridge that made it, such as the machine's or the MCP client's: every agent on a machine shares its token.",
 		}),
 		token: z.string().meta({
 			description:
-				"The id of that token or app, as `list_tokens` or `list_apps` gives it, never the token itself.",
+				"The id of that token or bridge, as `list_tokens` or `list_bridges` gives it, never the token itself.",
 		}),
 		operation: z
 			.string()
@@ -212,7 +219,6 @@ type ProjectRow = {
 	id: string;
 	name: string;
 	group: string;
-	app: string | null;
 	created: string;
 };
 
@@ -247,9 +253,9 @@ function projectFor(id: string, user: string): ProjectRow | undefined {
 
 /** The session, where `user` is in its project's group. */
 function sessionFor(id: string, user: string): SessionOfGroup | undefined {
-	const session = db
-		.prepare(`${sessionsOfGroups} WHERE s.id = ? AND ${live}`)
-		.get(id) as SessionOfGroup | undefined;
+	const session = db.prepare(`${sessionsOfGroups} WHERE s.id = ?`).get(id) as
+		| SessionOfGroup
+		| undefined;
 	return session && isMember(session.groupId, user) ? session : undefined;
 }
 
@@ -298,7 +304,6 @@ function projectJson(project: ProjectRow): z.infer<typeof Project> {
 		id: project.id,
 		name: project.name,
 		group: { id: project.group, name: group.name },
-		app: project.app,
 		repos: reposOf(project.id),
 	};
 }
@@ -306,7 +311,7 @@ function projectJson(project: ProjectRow): z.infer<typeof Project> {
 function sessionsOf(user: string): SessionOfGroup[] {
 	return db
 		.prepare(
-			`${sessionsOfGroups} JOIN group_member m ON m."group" = g.id WHERE m.user = ? AND ${live} ORDER BY s.created`,
+			`${sessionsOfGroups} JOIN group_member m ON m."group" = g.id WHERE m.user = ? ORDER BY s.created`,
 		)
 		.all(user) as SessionOfGroup[];
 }
@@ -326,18 +331,8 @@ async function sessionJson(
 		project: { id: session.project, name: session.projectName },
 		group: { id: session.groupId, name: session.groupName },
 		creator: session.creatorLogin,
-		app: appOf(session),
 		address,
 	};
-}
-
-/** The app that owns a session for the person, as `/apps` lists it, or null for the person's own. */
-function appOf(session: SessionRow): { id: string; name: string } | null {
-	if (!session.app_grant) return null;
-	const grant = db
-		.prepare("SELECT agent FROM session WHERE id = ?")
-		.get(session.app_grant) as { agent: string } | undefined;
-	return grant ? { id: `a_${session.app_grant}`, name: grant.agent } : null;
 }
 
 function friendsOf(me: string): z.infer<typeof Friend>[] {
@@ -397,21 +392,6 @@ const maxGroups = 20;
 const maxMembers = 50;
 const maxProjects = 50;
 const maxSessions = 20;
-
-/** An app acts as its person only in its own sessions: groups, projects, friends and tokens stay the person's. */
-const notForApps = "An app manages only its own sessions.";
-
-/**
- * Why the caller may not manage a session, or undefined where it may:
- * an app's session is its app's alone, and an app manages only its own.
- */
-function notManaged(session: SessionRow, caller: Caller): string | undefined {
-	if (session.app_grant)
-		return caller.token === `a_${session.app_grant}`
-			? undefined
-			: "This session is its app's: the app manages it, and revoking the app ends it.";
-	return caller.app ? notForApps : undefined;
-}
 
 const count = (sql: string, ...args: string[]) =>
 	(db.prepare(sql).get(...args) as { n: number }).n;
@@ -473,7 +453,7 @@ api.openapi(
 					...groupJson(group),
 					projects: projects.filter((p) => p.group.id === group.id),
 				})),
-				dms: c.var.caller.app ? [] : await dmsOf(me),
+				dms: await dmsOf(me),
 				friends: friendsOf(me),
 			},
 			200,
@@ -490,7 +470,7 @@ api.openapi(
 		path: "/activity",
 		summary: "List what agents changed",
 		description:
-			"What the account's agents and apps changed in it, newest first, at most the last 200: each change with the operation's id and its arguments.",
+			"What the account's agents and bridges changed in it, newest first, at most the last 200: each change with the operation's id and its arguments.",
 		responses: { 200: json(z.array(Activity), "The changes.") },
 	}),
 	(c) => {
@@ -521,7 +501,7 @@ api.openapi(
 		path: "/me",
 		summary: "Delete the account",
 		description:
-			"Deletes the account with its tokens, its apps and its DMs, and every group it is the last member of, with their projects and sessions; it leaves the other groups.",
+			"Deletes the account with its tokens, the bridges it added, its linked identities and its DMs, and every group it is the last member of, with their projects and sessions; it leaves the other groups.",
 		responses: done,
 	}),
 	(c) => {
@@ -572,8 +552,7 @@ api.openapi(
 		responses: { 201: json(Group, "The group.") },
 	}),
 	(c) => {
-		const { id: me, app } = c.var.caller;
-		if (app) return c.text(notForApps, 403);
+		const { id: me } = c.var.caller;
 		const { name } = c.req.valid("json");
 		if (
 			count(
@@ -623,7 +602,6 @@ api.openapi(
 	(c) => {
 		const group = groupFor(c.req.valid("param").id, c.var.caller.id);
 		if (!group) return c.text("No such group.", 404);
-		if (c.var.caller.app) return c.text(notForApps, 403);
 		if (group.person) return c.text("Your own group is named after you.", 403);
 		const { name } = c.req.valid("json");
 		db.prepare(`UPDATE "group" SET name = ? WHERE id = ?`).run(name, group.id);
@@ -647,7 +625,6 @@ api.openapi(
 	(c) => {
 		const group = groupFor(c.req.valid("param").id, c.var.caller.id);
 		if (!group) return c.text("No such group.", 404);
-		if (c.var.caller.app) return c.text(notForApps, 403);
 		if (group.person)
 			return c.text("Your own group stays as long as you do.", 403);
 		db.prepare(`DELETE FROM "group" WHERE id = ?`).run(group.id);
@@ -670,7 +647,6 @@ api.openapi(
 	}),
 	(c) => {
 		const { id, name } = c.req.valid("param");
-		if (c.var.caller.app) return c.text(notForApps, 403);
 		const group = groupFor(id, c.var.caller.id);
 		if (!group) return c.text("No such group.", 404);
 		if (group.person) return c.text("Your own group holds you alone.", 403);
@@ -713,7 +689,6 @@ api.openapi(
 	(c) => {
 		const { id, name } = c.req.valid("param");
 		const me = c.var.caller.id;
-		if (c.var.caller.app) return c.text(notForApps, 403);
 		const group = groupFor(id, me);
 		if (!group) return c.text("No such group.", 404);
 		const person = personByLogin(name);
@@ -775,8 +750,7 @@ api.openapi(
 		responses: { 201: json(Project, "The project.") },
 	}),
 	(c) => {
-		const { id: me, app } = c.var.caller;
-		if (app) return c.text(notForApps, 403);
+		const { id: me } = c.var.caller;
 		const input = c.req.valid("json");
 		const repos = reposOfInput(input.repos ?? []);
 		if (!repos)
@@ -798,7 +772,6 @@ api.openapi(
 			id: newId("p"),
 			name: input.name,
 			group: group.id,
-			app: null,
 			created: new Date().toISOString(),
 		};
 		db.prepare(
@@ -828,12 +801,6 @@ api.openapi(
 	(c) => {
 		const project = projectFor(c.req.valid("param").id, c.var.caller.id);
 		if (!project) return c.text("No such project.", 404);
-		if (c.var.caller.app) return c.text(notForApps, 403);
-		if (project.app)
-			return c.text(
-				"This project holds its app's sessions, named after it.",
-				403,
-			);
 		const input = c.req.valid("json");
 		const repos = input.repos && reposOfInput(input.repos);
 		if (input.repos && !repos)
@@ -867,12 +834,6 @@ api.openapi(
 	(c) => {
 		const project = projectFor(c.req.valid("param").id, c.var.caller.id);
 		if (!project) return c.text("No such project.", 404);
-		if (c.var.caller.app) return c.text(notForApps, 403);
-		if (project.app)
-			return c.text(
-				"This project holds its app's sessions: revoking the app ends them.",
-				403,
-			);
 		db.prepare("DELETE FROM project WHERE id = ?").run(project.id);
 		return c.body(null, 204);
 	},
@@ -907,11 +868,11 @@ api.openapi(
 		path: "/sessions",
 		summary: "Create a session",
 		description:
-			"Creates a session in a project, for the members of its group and their agents. An app leaves `project` out: its sessions go into its own project.",
+			"Creates a session in a project, for the members of its group and their agents.",
 		request: body(
 			z.object({
 				name: Name,
-				project: Id("p", "project").optional(),
+				project: Id("p", "project"),
 			}),
 		),
 		responses: { 201: json(Session, "The session.") },
@@ -919,23 +880,11 @@ api.openapi(
 	async (c) => {
 		const caller = c.var.caller;
 		const input = c.req.valid("json");
-		// An app's sessions go into its project, which it neither names nor sees.
-		let project: ProjectRow | undefined;
-		if (caller.app) {
-			if (input.project)
-				return c.text("An app's sessions go into its own project.", 403);
-			project = projectFor(appProjectOf(caller.id, caller.app), caller.id);
-		} else {
-			if (!input.project) return c.text("project: give the project's id.", 400);
-			project = projectFor(input.project, caller.id);
-			if (!project) return c.text("No such project.", 404);
-			if (project.app)
-				return c.text("This project holds its app's sessions alone.", 403);
-		}
+		const project = projectFor(input.project, caller.id);
 		if (!project) return c.text("No such project.", 404);
 		if (
 			count(
-				`SELECT count(*) AS n FROM owned_session WHERE project = ? AND ${live}`,
+				`SELECT count(*) AS n FROM owned_session WHERE project = ?`,
 				project.id,
 			) >= maxSessions
 		)
@@ -943,13 +892,7 @@ api.openapi(
 				`A project has at most ${maxSessions} sessions: delete one first.`,
 				403,
 			);
-		const appGrant = caller.app && caller.token ? caller.token.slice(2) : null;
-		const session = await createSession(
-			project.id,
-			caller.id,
-			input.name,
-			appGrant,
-		);
+		const session = await createSession(project.id, caller.id, input.name);
 		const created = sessionFor(session.id, caller.id);
 		if (!created) return c.text("The session went at once.", 500);
 		return c.json(await sessionJson(created), 201);
@@ -964,8 +907,7 @@ api.openapi(
 		method: "patch",
 		path: "/sessions/{id}",
 		summary: "Rename a session",
-		description:
-			"Renames a session. Any member of its group does this, but an app's session is the app's alone.",
+		description: "Renames a session. Any member of its group does this.",
 		request: {
 			...path({ id: Id("s", "session") }),
 			...body(z.object({ name: Name })),
@@ -975,8 +917,6 @@ api.openapi(
 	async (c) => {
 		const session = sessionFor(c.req.valid("param").id, c.var.caller.id);
 		if (!session) return c.text("No such session.", 404);
-		const notYours = notManaged(session, c.var.caller);
-		if (notYours) return c.text(notYours, 403);
 		const changed = { ...session, name: c.req.valid("json").name };
 		db.prepare("UPDATE owned_session SET name = ? WHERE id = ?").run(
 			changed.name,
@@ -995,7 +935,7 @@ api.openapi(
 		path: "/sessions/{id}",
 		summary: "Delete a session",
 		description:
-			"Deletes a session: nobody joins it any more, and the relay deletes it once nobody is in it. Any member of its group does this. An app's session is the app's alone.",
+			"Deletes a session: nobody joins it any more, and the relay deletes it once nobody is in it. Any member of its group does this, and its bridges go with it.",
 		request: path({ id: Id("s", "session") }),
 		responses: done,
 	}),
@@ -1003,8 +943,6 @@ api.openapi(
 		const { caller } = c.var;
 		const session = sessionFor(c.req.valid("param").id, caller.id);
 		if (!session) return c.text("No such session.", 404);
-		const notYours = notManaged(session, caller);
-		if (notYours) return c.text(notYours, 403);
 		db.prepare("DELETE FROM owned_session WHERE id = ?").run(session.id);
 		return c.body(null, 204);
 	},
@@ -1040,8 +978,7 @@ api.openapi(
 		responses: done,
 	}),
 	(c) => {
-		const { id: me, app } = c.var.caller;
-		if (app) return c.text(notForApps, 403);
+		const { id: me } = c.var.caller;
 		const person = personByLogin(c.req.valid("param").name);
 		if (!person) return c.text("No such person.", 404);
 		if (person.id === me)
@@ -1069,8 +1006,7 @@ api.openapi(
 		responses: done,
 	}),
 	(c) => {
-		const { id: me, app } = c.var.caller;
-		if (app) return c.text(notForApps, 403);
+		const { id: me } = c.var.caller;
 		const person = personByLogin(c.req.valid("param").name);
 		if (!person) return c.text("No such person.", 404);
 		db.prepare(
@@ -1083,7 +1019,6 @@ api.openapi(
 // DMs: one session per pair of friends, with the two people and their agents alone, and no
 // group or project: to its people it is a DM, Luis's decision (2026-11-10). Unfriending ends
 // access to it, and becoming friends again brings it back. Nobody renames or deletes one.
-// An app reaches none, since it is no agent of the person's.
 
 api.openapi(
 	operation({
@@ -1097,7 +1032,6 @@ api.openapi(
 		responses: { 200: json(z.array(Dm), "The DMs.") },
 	}),
 	async (c) => {
-		if (c.var.caller.app) return c.text(notForApps, 403);
 		return c.json(await dmsOf(c.var.caller.id), 200);
 	},
 );
@@ -1135,7 +1069,7 @@ api.openapi(
 		const me = c.var.caller.id;
 		const sessions = db
 			.prepare(
-				"SELECT id, agent, createdAt FROM session WHERE userId = ? AND agent IS NOT NULL AND person IS NOT 1 AND expiresAt > ?",
+				"SELECT id, agent, createdAt FROM session WHERE userId = ? AND agent IS NOT NULL AND bridge IS NULL AND expiresAt > ?",
 			)
 			.all(me, Date.now()) as AgentSession[];
 		const grants = db
@@ -1194,8 +1128,7 @@ api.openapi(
 		},
 	}),
 	async (c) => {
-		const { id: me, app, credential, token } = c.var.caller;
-		if (app) return c.text(notForApps, 403);
+		const { id: me, credential, token } = c.var.caller;
 		// A sign-in's own token would mint tokens that outlive signing out.
 		if (credential && !token)
 			return c.text(
@@ -1246,7 +1179,7 @@ function revokeToken(me: string, id: string): boolean {
 		return (
 			db
 				.prepare(
-					"DELETE FROM session WHERE id = ? AND userId = ? AND agent IS NOT NULL AND person IS NOT 1",
+					"DELETE FROM session WHERE id = ? AND userId = ? AND agent IS NOT NULL AND bridge IS NULL",
 				)
 				.run(id.slice(2), me).changes > 0
 		);
@@ -1292,8 +1225,8 @@ api.openapi(
 		responses: done,
 	}),
 	(c) => {
-		const { id, token, app } = c.var.caller;
-		if (!token || app) return c.text("The request carries no token.", 404);
+		const { id, token } = c.var.caller;
+		if (!token) return c.text("The request carries no token.", 404);
 		return revokeToken(id, token)
 			? c.body(null, 204)
 			: c.text("No such token.", 404);
@@ -1314,106 +1247,195 @@ api.openapi(
 		responses: done,
 	}),
 	(c) => {
-		if (c.var.caller.app) return c.text(notForApps, 403);
 		return revokeToken(c.var.caller.id, c.req.valid("param").id)
 			? c.body(null, 204)
 			: c.text("No such token.", 404);
 	},
 );
 
-// Apps: each acts as its person, by a grant the person approved with an OTP, a Better Auth
-// session marked as the person's. An app's grant is no token: tokens only connect agents.
-// An app owns the sessions it creates, and revoking it ends them.
+// Bridges: each a credential of Better Auth's, which a member approved with an OTP for one
+// session, and which the session's deletion, the member leaving its group, or removing it ends.
+// An identity is a person's account on a bridge's messenger, linked by an OTP from a chat of
+// theirs alone, through which the bridge carries what they write as them.
 
-type AppGrant = {
+type BridgeRow = {
 	id: string;
 	agent: string;
+	bridge: string;
 	claim: string | null;
 	createdAt: string | number;
+	login: string;
+	sessionName: string;
 };
+
+const bridges = `SELECT b.id, b.agent, b.bridge, b.claim, b.createdAt, u.login, s.name AS sessionName
+	FROM session b JOIN user u ON u.id = b.userId JOIN owned_session s ON s.id = b.bridge
+	WHERE b.bridge IS NOT NULL AND b.expiresAt > ?`;
+
+function bridgeJson(row: BridgeRow): z.infer<typeof Bridge> {
+	return {
+		id: `b_${row.id}`,
+		name: `${row.login}/${row.agent}`,
+		bridge: row.agent,
+		by: row.login,
+		for: row.claim,
+		session: { id: row.bridge, name: row.sessionName },
+		created: iso(row.createdAt),
+	};
+}
 
 api.openapi(
 	operation({
-		id: "list_apps",
-		tag: "Apps",
+		id: "list_bridges",
+		tag: "Bridges",
 		who: "account",
 		method: "get",
-		path: "/apps",
-		summary: "List the apps",
-		description: "The apps that act as the person, oldest first.",
-		responses: { 200: json(z.array(App), "The apps.") },
+		path: "/sessions/{id}/bridges",
+		summary: "List a session's bridges",
+		description: "The bridges added to a session, oldest first.",
+		request: path({ id: Id("s", "session") }),
+		responses: { 200: json(z.array(Bridge), "The bridges.") },
 	}),
 	(c) => {
-		const grants = db
-			.prepare(
-				"SELECT id, agent, claim, createdAt FROM session WHERE userId = ? AND person = 1 AND expiresAt > ? ORDER BY createdAt",
-			)
-			.all(c.var.caller.id, Date.now()) as AppGrant[];
+		const session = sessionFor(c.req.valid("param").id, c.var.caller.id);
+		if (!session) return c.text("No such session.", 404);
+		const rows = db
+			.prepare(`${bridges} AND b.bridge = ? ORDER BY b.createdAt`)
+			.all(Date.now(), session.id) as BridgeRow[];
+		return c.json(rows.map(bridgeJson), 200);
+	},
+);
+
+api.openapi(
+	operation({
+		id: "remove_bridge",
+		tag: "Bridges",
+		who: "account",
+		method: "delete",
+		path: "/sessions/{id}/bridges/{bridge}",
+		summary: "Remove a bridge from a session",
+		description:
+			"Removes a bridge from a session: the relay cuts it off within a few seconds, and it leaves the room it bridged. Any member of the session's group does this.",
+		request: path({ id: Id("s", "session"), bridge: Id("b", "bridge") }),
+		responses: done,
+	}),
+	(c) => {
+		const { id, bridge } = c.req.valid("param");
+		const session = sessionFor(id, c.var.caller.id);
+		if (!session) return c.text("No such session.", 404);
+		const removed = db
+			.prepare("DELETE FROM session WHERE id = ? AND bridge = ?")
+			.run(bridge.slice(2), session.id).changes;
+		return bridge.startsWith("b_") && removed
+			? c.body(null, 204)
+			: c.text("No such bridge.", 404);
+	},
+);
+
+api.openapi(
+	operation({
+		id: "show_own_bridge",
+		tag: "Bridges",
+		who: "bridge",
+		method: "get",
+		path: "/bridges/self",
+		summary: "Show the bridge in use",
+		description:
+			"The bridge whose credential the request carries, with the session it was added to and its address. For bridges only.",
+		responses: {
+			200: json(
+				Bridge.extend({ session: Session }),
+				"The bridge and its session.",
+			),
+		},
+	}),
+	async (c) => {
+		const { id, token, bridge } = c.var.caller;
+		const row = db
+			.prepare(`${bridges} AND b.id = ?`)
+			.get(Date.now(), token?.slice(2) ?? "") as BridgeRow | undefined;
+		const session = bridge && sessionFor(bridge.session, id);
+		if (!row || !session) return c.text("No such bridge.", 404);
 		return c.json(
-			grants.map((g) => ({
-				id: `a_${g.id}`,
-				name: g.agent,
-				for: g.claim,
-				created: iso(g.createdAt),
-			})),
+			{ ...bridgeJson(row), session: await sessionJson(session) },
 			200,
 		);
 	},
 );
 
-/** Revokes `me`'s app grant `id`, as `/apps` lists it; whether there was one. */
-function revokeApp(me: string, id: string): boolean {
-	if (!id.startsWith("a_")) return false;
-	const revoked =
-		db
-			.prepare("DELETE FROM session WHERE id = ? AND userId = ? AND person = 1")
-			.run(id.slice(2), me).changes > 0;
-	// Its sessions end with it.
-	if (revoked)
-		db.prepare("DELETE FROM owned_session WHERE app_grant = ?").run(
-			id.slice(2),
-		);
-	return revoked;
-}
-
 api.openapi(
 	operation({
-		id: "unlink_app",
-		tag: "Apps",
-		who: "account",
+		id: "remove_own_bridge",
+		tag: "Bridges",
+		who: "bridge",
 		method: "delete",
-		path: "/apps/self",
-		summary: "Unlink the app in use",
+		path: "/bridges/self",
+		summary: "Remove the bridge in use",
 		description:
-			"Revokes the app's grant the request carries, as an app unlinks itself. For apps only.",
+			"Removes the bridge whose credential the request carries from its session, as a bridge does once its room is gone or asks it to stop. For bridges only.",
 		responses: done,
 	}),
 	(c) => {
 		const { id, token } = c.var.caller;
-		return token && revokeApp(id, token)
-			? c.body(null, 204)
-			: c.text("The request carries no app's grant.", 404);
+		const removed = db
+			.prepare(
+				"DELETE FROM session WHERE id = ? AND userId = ? AND bridge IS NOT NULL",
+			)
+			.run(token?.slice(2) ?? "", id).changes;
+		return removed ? c.body(null, 204) : c.text("No such bridge.", 404);
 	},
+);
+
+type IdentityRow = {
+	id: string;
+	bridge: string;
+	external: string;
+	name: string;
+	created: string;
+};
+
+api.openapi(
+	operation({
+		id: "list_identities",
+		tag: "Bridges",
+		who: "account",
+		method: "get",
+		path: "/identities",
+		summary: "List the linked identities",
+		description:
+			"The person's accounts on bridges' messengers, such as their Telegram account, which the bridges carry as them, oldest first.",
+		responses: { 200: json(z.array(Identity), "The identities.") },
+	}),
+	(c) =>
+		c.json(
+			db
+				.prepare(
+					"SELECT id, bridge, external, name, created FROM identity WHERE user = ? ORDER BY created",
+				)
+				.all(c.var.caller.id) as IdentityRow[],
+			200,
+		),
 );
 
 api.openapi(
 	operation({
-		id: "revoke_app",
-		tag: "Apps",
+		id: "unlink_identity",
+		tag: "Bridges",
 		who: "account",
 		method: "delete",
-		path: "/apps/{id}",
-		summary: "Revoke an app",
-		description: "Revokes an app's grant, which ends its sessions.",
-		request: path({ id: Id("a", "app") }),
+		path: "/identities/{id}",
+		summary: "Unlink an identity",
+		description:
+			"Unlinks one of the person's accounts on a bridge's messenger: the bridges carry what it writes as anyone else's, unverified, from then on.",
+		request: path({ id: Id("i", "identity") }),
 		responses: done,
 	}),
-	(c) => {
-		if (c.var.caller.app) return c.text(notForApps, 403);
-		return revokeApp(c.var.caller.id, c.req.valid("param").id)
+	(c) =>
+		db
+			.prepare("DELETE FROM identity WHERE id = ? AND user = ?")
+			.run(c.req.valid("param").id, c.var.caller.id).changes
 			? c.body(null, 204)
-			: c.text("No such app.", 404);
-	},
+			: c.text("No such identity.", 404),
 );
 
 inviteOperations(api, config.url);

@@ -5,7 +5,6 @@ import { config } from "./config.ts";
 import { areFriends, db, isMember } from "./db.ts";
 import { isAgentOf } from "./names.ts";
 import { reposOf } from "./repos.ts";
-import { live } from "./sessions.ts";
 
 /**
  * The relay's access service: whether a name may join a session, with a token or without,
@@ -27,7 +26,7 @@ function sessionBySecret(secret: string): Session | undefined {
 	return db
 		.prepare(
 			`SELECT s.id, p."group" AS "group", p.id AS project, p.name AS projectName FROM owned_session s JOIN project p ON p.id = s.project
-			 WHERE s.secret = ? AND ${live}`,
+			 WHERE s.secret = ?`,
 		)
 		.get(secret) as Session | undefined;
 }
@@ -101,18 +100,17 @@ access.post("/join", async (c) => {
 			"The token is no valid token: it was revoked, or it expired.",
 			403,
 		);
-	// An app that acts as its person joins as the person, or as itself for its own notices,
-	// and an agent's token never as the person.
-	if (
-		caller?.app &&
-		name !== caller.login &&
-		name !== `${caller.login}/${caller.app}`
-	)
-		return c.text(
-			`The token acts as ${caller.login}, so it joins only as ${caller.login} or ${caller.login}/${caller.app}.`,
-			403,
+	if (caller?.bridge) {
+		const [answer, status] = bridgeJoin(
+			{ ...caller, bridge: caller.bridge },
+			session,
+			name,
 		);
-	if (caller && !caller.app && !isAgentOf(name, caller.login))
+		return typeof answer === "string"
+			? c.text(answer, status)
+			: c.json(answer, status);
+	}
+	if (caller && !isAgentOf(name, caller.login))
 		return c.text(
 			`The token is ${caller.login}'s, so it joins only as ${caller.login}/<agent>.`,
 			403,
@@ -120,7 +118,7 @@ access.post("/join", async (c) => {
 	// A DM takes its two friends' agents alone, and only while they are friends.
 	const dm = dmBySecret(session);
 	if (dm) {
-		if (!caller || caller.app)
+		if (!caller)
 			return c.text(
 				"This is a DM of two friends: join with a token of one of them, as Authorization: Bearer <token>.",
 				403,
@@ -189,6 +187,8 @@ access.post("/read", async (c) => {
 			"The token is no valid token: it was revoked, or it expired.",
 			403,
 		);
+	if (caller?.bridge)
+		return c.text("A bridge joins its session, and reads nothing apart.", 403);
 	const dm = dmBySecret(session);
 	if (dm) {
 		if (!caller || (caller.id !== dm.a && caller.id !== dm.b))
@@ -207,6 +207,48 @@ access.post("/read", async (c) => {
 		);
 	return c.json({ account: caller?.login ?? null });
 });
+
+/**
+ * Whether a bridge's credential lets it in, which only its own session does, while the person who
+ * added it is a member of the session's group: under its own name, `<person>/<bridge>`, or as a
+ * member of the group who linked their identity on the bridge's messenger, whose messages it
+ * carries as theirs. As a JSON body and status.
+ */
+function bridgeJoin(
+	caller: Caller & { bridge: NonNullable<Caller["bridge"]> },
+	session: string,
+	name: string,
+): [object | string, 200 | 403] {
+	const owned = sessionBySecret(session);
+	if (!owned || owned.id !== caller.bridge.session)
+		return ["This bridge was added to another session.", 403];
+	if (!isMember(owned.group, caller.id))
+		return [`${caller.login} is no member of this session's group.`, 403];
+	let account = caller.login;
+	if (name !== `${caller.login}/${caller.bridge.name}`) {
+		const person = db
+			.prepare(
+				"SELECT u.id FROM identity i JOIN user u ON u.id = i.user WHERE i.bridge = ? AND u.login = ?",
+			)
+			.get(caller.bridge.name, name) as { id: string } | undefined;
+		if (!person || !isMember(owned.group, person.id))
+			return [
+				`This bridge joins as ${caller.login}/${caller.bridge.name}, or as a member of the session's group who linked their identity on it.`,
+				403,
+			];
+		account = name;
+	}
+	return [
+		{
+			account,
+			...(caller.credential && {
+				grant: grantOf(caller.credential, session, name),
+			}),
+			about: { project: owned.projectName, repos: reposOf(owned.project) },
+		},
+		200,
+	];
+}
 
 access.get("/sessions/:session", (c) =>
 	sessionBySecret(c.req.param("session")) || dmBySecret(c.req.param("session"))

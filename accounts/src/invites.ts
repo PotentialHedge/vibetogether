@@ -53,13 +53,12 @@ type ProjectOf = {
 	name: string;
 	group: string;
 	groupName: string;
-	app: string | null;
 };
 
 function projectOf(id: string): ProjectOf | undefined {
 	return db
 		.prepare(
-			`SELECT p.id, p.name, p.app, g.id AS "group", g.name AS groupName, g.person IS NOT NULL AS own
+			`SELECT p.id, p.name, g.id AS "group", g.name AS groupName, g.person IS NOT NULL AS own
 			 FROM project p JOIN "group" g ON g.id = p."group" WHERE p.id = ?`,
 		)
 		.get(id) as ProjectOf | undefined;
@@ -67,11 +66,10 @@ function projectOf(id: string): ProjectOf | undefined {
 
 /**
  * Who may invite to a project: any member of its group, since groups are flat, Luis's decision
- * (2026-11-10, "let's go flat"); never into a person's own group, which is them alone, nor an
- * app's project.
+ * (2026-11-10, "let's go flat"); never into a person's own group, which is them alone.
  */
 export function mayInviteTo(project: ProjectOf, user: string): boolean {
-	return isMember(project.group, user) && !project.own && project.app === null;
+	return isMember(project.group, user) && !project.own;
 }
 
 export type Invite = {
@@ -126,7 +124,7 @@ export function createInvite(
 			throw new Refused("No such project.", 404);
 		if (!mayInviteTo(p, inviter))
 			throw new Refused(
-				"A project of your own group, or of an app, takes no one else: invite to be friends instead.",
+				"A project of your own group takes no one else: invite to be friends instead.",
 				403,
 			);
 	}
@@ -462,7 +460,6 @@ export function inviteOperations(
 			responses: { 201: json(inviteSchema, "The invite.") },
 		}),
 		(c) => {
-			if (c.var.caller.app) return c.text("An app makes no invites.", 403);
 			try {
 				const body = c.req.valid("json") as { project?: string } | undefined;
 				return c.json(createInvite(c.var.caller.id, body?.project, url), 201);

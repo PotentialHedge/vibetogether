@@ -99,13 +99,12 @@ test("every session goes into a project of a group of exactly the people who cou
 		secret: string;
 		project: string;
 		projectName: string;
-		app: string | null;
 		group: string;
 		groupName: string;
 		person: string | null;
 	};
 	const placed = rows(
-		`SELECT s.id, s.secret, p.id AS project, p.name AS projectName, p.app, g.id AS "group",
+		`SELECT s.id, s.secret, p.id AS project, p.name AS projectName, g.id AS "group",
 		 g.name AS groupName, g.person FROM owned_session s JOIN project p ON p.id = s.project
 		 JOIN "group" g ON g.id = p."group" ORDER BY s.created`,
 	) as Placed[];
@@ -133,8 +132,12 @@ test("every session goes into a project of a group of exactly the people who cou
 	assert.equal(get("s_vt").person, "u-luiswirth");
 	assert.equal(get("s_vt").projectName, "lwirth-vt");
 	assert.equal(get("s_tg").group, get("s_vt").group);
-	assert.equal(get("s_tg").app, "messagent");
+	// An app's session stays, as an ordinary one of a project named after the app, and the
+	// app's grant goes, as apps did.
 	assert.equal(get("s_tg").projectName, "messagent");
+	assert.deepEqual(rows("SELECT id FROM session ORDER BY id"), [
+		{ id: "laptop" },
+	]);
 	assert.equal(get("s_ph").person, null);
 	assert.equal(get("s_ph").groupName, "potentialhedge");
 	assert.equal(get("s_ph").projectName, "potentialhedge");

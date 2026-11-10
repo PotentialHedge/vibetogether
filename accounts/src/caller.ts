@@ -2,14 +2,15 @@ import { auth, oauthAccessTokenPrefix, tokenHash } from "./auth.ts";
 import { db } from "./db.ts";
 
 /**
- * An account, as a request is from it. `app` is set for an app's grant that acts as the person,
- * the app's `client_id`, which only an app the service knows gets. `token` is the id of the token
- * or grant it carries, as `/api/tokens` or `/api/apps` lists it.
+ * An account, as a request is from it. `bridge` is set for a bridge's credential, which a person
+ * approved for one session of theirs: the bridge's `client_id`, which only a bridge the service
+ * knows gets, and the session's id. `token` is the id of the token or bridge it carries, as
+ * `/api/tokens` or a session's bridges list it.
  */
 export type Caller = {
 	id: string;
 	login: string;
-	app?: string;
+	bridge?: { name: string; session: string };
 	token?: string;
 	/** What a bearer acts by, a Better Auth session as `b_<id>` or an OAuth grant as `o_…`, which
 	 * the relay's grant names in place of the bearer itself (`callerOfCredential`). */
@@ -48,16 +49,16 @@ export async function callerOf(headers: Headers): Promise<Caller | undefined> {
 	if (bearer?.startsWith(oauthAccessTokenPrefix)) return oauthCaller(bearer);
 	const session = await auth.api.getSession({ headers });
 	if (!session) return undefined;
-	const { agent, person } = session.session as {
+	const { agent, bridge } = session.session as {
 		agent?: string | null;
-		person?: boolean | null;
+		bridge?: string | null;
 	};
 	return {
 		id: session.user.id,
 		login: (session.user as { login: string }).login,
-		...(person === true && agent && { app: agent }),
+		...(bridge && agent && { bridge: { name: agent, session: bridge } }),
 		...(agent && {
-			token: `${person === true ? "a" : "t"}_${session.session.id}`,
+			token: `${bridge ? "b" : "t"}_${session.session.id}`,
 		}),
 		...(bearer && { credential: `b_${session.session.id}` }),
 	};
@@ -71,7 +72,7 @@ export function callerOfCredential(credential: string): Caller | undefined {
 	if (credential.startsWith("b_")) {
 		const row = db
 			.prepare(
-				`SELECT u.id, u.login, s.agent, s.person FROM session s JOIN user u ON u.id = s.userId
+				`SELECT u.id, u.login, s.agent, s.bridge FROM session s JOIN user u ON u.id = s.userId
 				 WHERE s.id = ? AND s.expiresAt > ?`,
 			)
 			.get(credential.slice(2), Date.now()) as
@@ -79,17 +80,17 @@ export function callerOfCredential(credential: string): Caller | undefined {
 					id: string;
 					login: string;
 					agent: string | null;
-					person: number | null;
+					bridge: string | null;
 			  }
 			| undefined;
 		if (!row) return undefined;
-		const app = row.person === 1 && row.agent ? row.agent : undefined;
 		return {
 			id: row.id,
 			login: row.login,
-			...(app && { app }),
+			...(row.bridge &&
+				row.agent && { bridge: { name: row.agent, session: row.bridge } }),
 			...(row.agent && {
-				token: `${row.person === 1 ? "a" : "t"}_${credential.slice(2)}`,
+				token: `${row.bridge ? "b" : "t"}_${credential.slice(2)}`,
 			}),
 			credential,
 		};

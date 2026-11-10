@@ -30,27 +30,29 @@ function signingKey(): string {
 }
 
 /**
- * The apps that may act as their person, such as messagent's shared bot: each by its `client_id`,
- * with the SHA-256 of its secret in hex. One app per line, `<client_id> <sha256>`, from systemd's
- * credential `apps`, else `ACCOUNTS_APPS`; none where neither is set.
+ * The bridges known to the service, such as messagent's Telegram bot: each by its `client_id`,
+ * with the SHA-256 of its secret in hex. One bridge per line, `<client_id> <sha256>`, from
+ * systemd's credential `bridges`, else `ACCOUNTS_BRIDGES`; none where neither is set.
  */
-function apps(): Map<string, string> {
+function bridges(): Map<string, string> {
 	const file =
 		process.env.CREDENTIALS_DIRECTORY &&
-		`${process.env.CREDENTIALS_DIRECTORY}/apps`;
+		`${process.env.CREDENTIALS_DIRECTORY}/bridges`;
 	const text =
 		file && existsSync(file)
 			? readFileSync(file, "utf8")
-			: (process.env.ACCOUNTS_APPS ?? "");
-	const apps = new Map<string, string>();
+			: (process.env.ACCOUNTS_BRIDGES ?? "");
+	const bridges = new Map<string, string>();
 	for (const line of text.split("\n")) {
 		const [id, hash, ...rest] = line.trim().split(/\s+/);
 		if (!id) continue;
 		if (!hash || rest.length || !/^[0-9a-f]{64}$/.test(hash))
-			throw new Error(`apps: "${id}" is no line "<client_id> <sha256 in hex>"`);
-		apps.set(id, hash);
+			throw new Error(
+				`bridges: "${id}" is no line "<client_id> <sha256 in hex>"`,
+			);
+		bridges.set(id, hash);
 	}
-	return apps;
+	return bridges;
 }
 
 export const config = {
@@ -63,8 +65,8 @@ export const config = {
 		clientId: required("GITHUB_CLIENT_ID"),
 		clientSecret: secret("GITHUB_CLIENT_SECRET", "github"),
 	},
-	/** The apps that may act as their person, by `client_id`, each with its secret's SHA-256 in hex. */
-	apps: apps(),
+	/** The bridges known to the service, by `client_id`, each with its secret's SHA-256 in hex. */
+	bridges: bridges(),
 	/** The relay the sessions live on, as its participants reach it. */
 	relay: required("AGENTWIRE_RELAY").replace(/\/$/, ""),
 };

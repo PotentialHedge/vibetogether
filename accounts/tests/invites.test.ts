@@ -32,7 +32,7 @@ Object.assign(process.env, {
 	GITHUB_CLIENT_SECRET: "test",
 	AGENTWIRE_RELAY: relayUrl,
 	// messagent's secret is "a-secret-of-the-bot".
-	ACCOUNTS_APPS:
+	ACCOUNTS_BRIDGES:
 		"messagent 6ab53bae0eef33d30015a3069604e5f1ca5f9a5d71b53554cc0e2c8b164a4ce2\n",
 });
 

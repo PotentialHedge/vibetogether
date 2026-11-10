@@ -19,16 +19,17 @@ import { ownGroupOf } from "./db.ts";
 
 export { z };
 
-export type Env = { Variables: { caller: Caller } };
+export type Env = { Variables: { caller: Caller; bridgeOnly?: boolean } };
 
 /**
  * Who may call an operation:
  * - `anyone`, without signing in;
- * - `account`, the account, by a token, an app's grant or the person signed in in the browser;
- * - `browser`, the person alone, signed in in the browser, by the cookie: a token gets 403.
+ * - `account`, the account, by a token or the person signed in in the browser;
+ * - `browser`, the person alone, signed in in the browser, by the cookie: a token gets 403;
+ * - `bridge`, a bridge, by its credential, which reaches nothing else.
  * It sets both the operation's security in the document and the check, so the two can't differ.
  */
-export type Who = "anyone" | "account" | "browser";
+export type Who = "anyone" | "account" | "browser" | "bridge";
 
 const origin = new URL(config.url).origin;
 
@@ -38,6 +39,7 @@ const origin = new URL(config.url).origin;
  * site, other subdomains included.
  */
 const signedIn: MiddlewareHandler<Env> = async (c, next) => {
+	const bridge = c.get("bridgeOnly") === true;
 	const changes = !["GET", "HEAD", "OPTIONS"].includes(c.req.method);
 	if (
 		changes &&
@@ -51,6 +53,15 @@ const signedIn: MiddlewareHandler<Env> = async (c, next) => {
 			"Sign in, or send a token as Authorization: Bearer <token>.",
 			401,
 		);
+	// A bridge's credential is for its own session, which it reaches through the relay, and for
+	// the operations on itself alone.
+	if (Boolean(caller.bridge) !== bridge)
+		return bridge
+			? c.text("The request carries no bridge's credential.", 404)
+			: c.text(
+					"A bridge reaches only its own session, through the relay.",
+					403,
+				);
 	c.set("caller", caller);
 	// Everyone has a group of their own, from their first request on.
 	ownGroupOf(caller.id);
@@ -71,12 +82,20 @@ const securityOf: Record<Who, RouteConfig["security"]> = {
 	anyone: [],
 	account: [{ token: [] }, { browser: [] }],
 	browser: [{ browser: [] }],
+	bridge: [{ bridge: [] }],
+};
+
+/** Marks an operation as a bridge's own, for `signedIn`. */
+const forBridges: MiddlewareHandler<Env> = async (c, next) => {
+	c.set("bridgeOnly", true);
+	await next();
 };
 
 const middlewareOf: Record<Who, MiddlewareHandler<Env>[]> = {
 	anyone: [],
 	account: [signedIn],
 	browser: [signedIn, inTheBrowser],
+	bridge: [forBridges, signedIn],
 };
 
 /** What every refusal is: one sentence, for whoever reads it, agent or person. */
@@ -136,7 +155,7 @@ export const tags = {
 	Projects:
 		"A project is a group's named set of sessions, which may point at GitHub repositories, where its work lives. A project stays in its group.",
 	Sessions:
-		"Every session is an agentwire session, and one of a project's. It lasts, with a name, and only the members of its group and their agents join it. Its address is hard to guess and identifies it: join it at its address as the transport says, with the token as `Authorization: Bearer <token>`, under one of the person's agents' names, `<name>/<agent>`. An app's sessions are the app's own, in its project of the person's own group.",
+		"Every session is an agentwire session, and one of a project's. It lasts, with a name, and only the members of its group, their agents and the bridges they added join it. Its address is hard to guess and identifies it: join it at its address as the transport says, with the token as `Authorization: Bearer <token>`, under one of the person's agents' names, `<name>/<agent>`.",
 	Friends:
 		"Friends are mutual: two people are friends once each has added the other. Only a friend of a member joins a group through them, and every two friends have a DM.",
 	DMs: "Two friends have a DM: one session with the two people and their agents alone, in no group or project. Nobody renames or deletes one.",
@@ -144,7 +163,8 @@ export const tags = {
 		"A token connects agents to the account, and acts for the whole account, as the person does, except that only the person deletes the account. A machine's token is used by every agent on the machine; an MCP client's is that client's. A token lasts until it is revoked; a machine's also ends after 90 days unused.",
 	"Getting a token":
 		"An agent with a shell gets its machine's token with an OTP, RFC 8628's device authorization: it asks for an OTP, gives its person the link in `verification_uri_complete`, where they sign in and approve it, and meanwhile asks for the token every `interval` seconds. `<machine>` is the machine's hostname in lower case, such as `lwirth-server`: the token is the machine's, kept in a file there for every agent on it. An MCP client gets its token on its own, by OAuth.",
-	Apps: "An app, such as messagent's Telegram bot, acts as its person, by their approval: it carries their own messages, so it joins as the person. It reaches only the sessions it creates, and revoking it ends them.",
+	Bridges:
+		"A bridge mirrors a room outside Vibe Together and a session onto each other, such as messagent, which bridges a Telegram chat: what is said in either reaches the other. A member adds one to a session by approving its OTP, signed in, and picking the session. It joins as `<name>/<bridge>`, such as `luiswirth/messagent`, and reaches only that session, while that member is in its group; any member removes it. A person who linked their identity on the bridge's messenger, by an OTP from a chat of theirs alone, speaks through it as themselves; everyone else's messages come from the bridge, marked unverified.",
 } as const;
 
 /** A request's body that isn't what the operation takes: one sentence for each thing wrong. */
@@ -168,6 +188,12 @@ export function documentOf(api: OpenAPIHono<Env>) {
 		type: "http",
 		scheme: "bearer",
 		description: "A token, as `Authorization: Bearer <token>`.",
+	});
+	api.openAPIRegistry.registerComponent("securitySchemes", "bridge", {
+		type: "http",
+		scheme: "bearer",
+		description:
+			"A bridge's credential, which a person approved for one session, as `Authorization: Bearer <credential>`.",
 	});
 	api.openAPIRegistry.registerComponent("securitySchemes", "browser", {
 		type: "apiKey",

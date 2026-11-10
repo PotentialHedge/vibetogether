@@ -19,18 +19,18 @@ export const oauthAccessTokenPrefix = "vt_at_";
 const day = 24 * 60 * 60;
 
 /**
- * The header by which the service tells Better Auth that it checked a request's app by its secret:
- * it is removed from every request that arrives, and set only to this process's own mark.
+ * The header by which the service tells Better Auth that it checked a request's bridge by its
+ * secret: it is removed from every request that arrives, and set only to this process's own mark.
  */
-export const appHeader = "x-vibetogether-app";
-export const appMark = randomBytes(32).toString("base64url");
+export const bridgeHeader = "x-vibetogether-bridge";
+export const bridgeMark = randomBytes(32).toString("base64url");
 
 /**
- * An OTP's limit per address, where a checked app goes unlimited: an app, such as the shared bot,
- * asks for everyone it serves from one address, and only those holding its secret are it.
+ * An OTP's limit per address, where a checked bridge goes unlimited: a bridge, such as the
+ * Telegram bot, asks for everyone it serves from one address, and only those holding its secret are it.
  */
-const unlessApp = (window: number, max: number) => (request: Request) =>
-	request.headers.get(appHeader) === appMark ? false : { window, max };
+const unlessBridge = (window: number, max: number) => (request: Request) =>
+	request.headers.get(bridgeHeader) === bridgeMark ? false : { window, max };
 
 const options = {
 	baseURL: config.url,
@@ -44,8 +44,8 @@ const options = {
 		window: 60,
 		max: 100,
 		customRules: {
-			"/device/code": unlessApp(60, 10),
-			"/device/token": unlessApp(60, 100),
+			"/device/code": unlessBridge(60, 10),
+			"/device/token": unlessBridge(60, 100),
 			"/oauth2/register": { window: 3600, max: 20 },
 			"/sign-in/social": { window: 60, max: 10 },
 		},
@@ -72,8 +72,9 @@ const options = {
 		updateAge: day,
 		additionalFields: {
 			agent: { type: "string", required: false, input: false },
-			// An app's token that acts as the person, and what the app said it is for.
-			person: { type: "boolean", required: false, input: false },
+			// A bridge's credential: the session it was added to, by its id, and what the bridge
+			// said it bridges, such as a Telegram chat.
+			bridge: { type: "string", required: false, input: false },
 			claim: { type: "string", required: false, input: false },
 		},
 	},
@@ -84,19 +85,26 @@ const options = {
 					if (ctx?.path !== "/device/token") return;
 					const asked = db
 						.prepare(
-							"SELECT person, claim FROM device_request WHERE device_code = ?",
+							"SELECT bridge, session, claim FROM device_request WHERE device_code = ?",
 						)
 						.get(tokenHash(String(ctx.body.device_code))) as
-						| { person: number; claim: string | null }
+						| {
+								bridge: string | null;
+								session: string | null;
+								claim: string | null;
+						  }
 						| undefined;
-					if (!asked?.person)
+					if (!asked?.bridge)
 						return { data: { ...session, agent: ctx.body.client_id } };
-					// It lasts until it is unlinked, Luis's agreement (2026-11-09).
+					// Approved without a session picked, which only the service's own approval
+					// prevents: such a bridge gets nothing.
+					if (!asked.session) return false;
+					// It lasts until it is removed, as a link lasted, Luis's agreement (2026-11-09).
 					return {
 						data: {
 							...session,
 							agent: ctx.body.client_id,
-							person: true,
+							bridge: asked.session,
 							claim: asked.claim,
 							expiresAt: new Date("9999-12-31T00:00:00Z"),
 						},

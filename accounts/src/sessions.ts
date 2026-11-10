@@ -10,16 +10,7 @@ export type SessionRow = {
 	creator: string | null;
 	secret: string | null;
 	created: string;
-	/** The app's grant that owns the session for the person, such as messagent's for a Telegram chat. */
-	app_grant: string | null;
 };
-
-/**
- * The condition that an owned session still is: one an app owns ends with the app's grant,
- * however the grant ends, revoked or by Better Auth.
- */
-export const live =
-	"(app_grant IS NULL OR app_grant IN (SELECT id FROM session WHERE person = 1))";
 
 /** A new owned session on the relay, so that the relay asks this service about it, and the secret in its address. */
 async function createOnRelay(): Promise<string> {
@@ -59,7 +50,6 @@ export async function createSession(
 	project: string,
 	creator: string,
 	name: string,
-	appGrant: string | null = null,
 ): Promise<SessionRow> {
 	const session: SessionRow = {
 		id: newId("s"),
@@ -68,10 +58,9 @@ export async function createSession(
 		creator,
 		secret: null,
 		created: new Date().toISOString(),
-		app_grant: appGrant,
 	};
 	db.prepare(
-		"INSERT INTO owned_session (id, name, project, creator, secret, created, app_grant) VALUES (?, ?, ?, ?, ?, ?, ?)",
+		"INSERT INTO owned_session (id, name, project, creator, secret, created) VALUES (?, ?, ?, ?, ?, ?)",
 	).run(
 		session.id,
 		session.name,
@@ -79,7 +68,6 @@ export async function createSession(
 		session.creator,
 		session.secret,
 		session.created,
-		session.app_grant,
 	);
 	try {
 		session.secret = await secretOf(session);

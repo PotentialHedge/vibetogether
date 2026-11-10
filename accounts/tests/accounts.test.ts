@@ -32,7 +32,7 @@ Object.assign(process.env, {
 	GITHUB_CLIENT_SECRET: "test",
 	AGENTWIRE_RELAY: relayUrl,
 	// messagent's secret is "a-secret-of-the-bot".
-	ACCOUNTS_APPS:
+	ACCOUNTS_BRIDGES:
 		"messagent 6ab53bae0eef33d30015a3069604e5f1ca5f9a5d71b53554cc0e2c8b164a4ce2\n",
 });
 
@@ -261,7 +261,6 @@ test("an account starts with its own group and no session", async () => {
 		name: "vibetogether",
 	});
 	assert.equal(sessions[0].group.name, "luis");
-	assert.equal(sessions[0].app, null);
 	assert.match(sessions[0].id, /^s_/);
 	assert.match(sessions[0].address, /\/v2\/s\/session-\d+$/);
 	// A session goes into a project, of a group of the caller's.
@@ -1097,7 +1096,7 @@ test("asking for OTPs is rate limited", async () => {
 	assert.ok(statuses.includes(429), statuses.join(" "));
 });
 
-test("an app asks for OTPs and polls them apart from its address's limit, and only with its secret", async () => {
+test("a bridge asks for OTPs and polls them apart from its address's limit, and only with its secret", async () => {
 	const ask = (body: Record<string, string>, headers = {}) =>
 		app.request("/api/auth/device/code", {
 			method: "POST",
@@ -1108,7 +1107,7 @@ test("an app asks for OTPs and polls them apart from its address's limit, and on
 			},
 			body: JSON.stringify({
 				client_id: "messagent",
-				scope: "person",
+				scope: "bridge",
 				...body,
 			}),
 		});
@@ -1134,7 +1133,7 @@ test("an app asks for OTPs and polls them apart from its address's limit, and on
 		});
 		assert.notEqual(response.status, 429, `poll ${i}`);
 	}
-	// A request can't claim to be a checked app: the mark is the service's own.
+	// A request can't claim to be a checked bridge: the mark is the service's own.
 	const statuses = [];
 	for (let i = 0; i < 12; i++)
 		statuses.push(
@@ -1144,7 +1143,7 @@ test("an app asks for OTPs and polls them apart from its address's limit, and on
 					headers: {
 						"content-type": "application/json",
 						"x-forwarded-for": "198.51.100.11",
-						"x-vibetogether-app": "a-guess",
+						"x-vibetogether-bridge": "a-guess",
 					},
 					body: JSON.stringify({ client_id: "flood" }),
 				})
@@ -1153,15 +1152,58 @@ test("an app asks for OTPs and polls them apart from its address's limit, and on
 	assert.ok(statuses.includes(429), statuses.join(" "));
 });
 
-test("an app acts as its person only with its secret, the person's approval, and until it is unlinked", async () => {
+/** A bridge's OTP, asked for with its secret. */
+async function askAsBridge(body: Record<string, string> = {}) {
+	const code = await call(null, "POST", "/api/auth/device/code", {
+		client_id: "messagent",
+		client_secret: "a-secret-of-the-bot",
+		scope: "bridge",
+		...body,
+	});
+	assert.equal(code.status, 200, code.text);
+	return code.json as { user_code: string; device_code: string };
+}
+
+/** The bridge's credential for an OTP approved, by its secret. */
+async function redeemAsBridge(deviceCode: string, secret?: string) {
+	return call(null, "POST", "/api/auth/device/token", {
+		grant_type: "urn:ietf:params:oauth:grant-type:device_code",
+		device_code: deviceCode,
+		client_id: "messagent",
+		...(secret && { client_secret: secret }),
+	});
+}
+
+/** A bridge added by `someone` to `sessionId`, by its credential. */
+async function bridgeOf(
+	someone: string,
+	sessionId: string,
+	body: Record<string, string> = {},
+): Promise<string> {
+	const code = await askAsBridge(body);
+	await call(someone, "GET", `/api/auth/device?user_code=${code.user_code}`);
+	const approved = await call(someone, "POST", "/api/auth/device/approve", {
+		userCode: code.user_code,
+		session: sessionId,
+	});
+	assert.equal(approved.status, 200, approved.text);
+	const redeemed = await redeemAsBridge(
+		code.device_code,
+		"a-secret-of-the-bot",
+	);
+	assert.equal(redeemed.status, 200, redeemed.text);
+	return redeemed.json.access_token;
+}
+
+test("a bridge is added to one session by a member who approves its OTP, and reaches only that session", async () => {
 	from = "192.0.2.44";
 	const ask = (body: Record<string, string>) =>
 		call(null, "POST", "/api/auth/device/code", {
 			client_id: "messagent",
-			scope: "person",
+			scope: "bridge",
 			...body,
 		});
-	// The client_id alone is public, so it is no proof of the app.
+	// The client_id alone is public, so it is no proof of the bridge.
 	assert.equal((await ask({})).status, 401);
 	assert.equal((await ask({ client_secret: "a-guess" })).status, 401);
 	assert.equal(
@@ -1169,196 +1211,246 @@ test("an app acts as its person only with its secret, the person's approval, and
 			await call(null, "POST", "/api/auth/device/code", {
 				client_id: "laptop",
 				client_secret: "a-secret-of-the-bot",
-				scope: "person",
+				scope: "bridge",
 			})
 		).status,
 		401,
 	);
 
-	const code = await ask({
-		client_secret: "a-secret-of-the-bot",
-		for: "Telegram 123 @luiswirth",
+	const group = (await call(luis, "POST", "/api/groups", { name: "Bridged" }))
+		.json.id;
+	assert.equal(
+		(await call(luis, "PUT", `/api/groups/${group}/members/ben`)).status,
+		200,
+	);
+	const shared = await project(luis, "telegram", group);
+	const chat = await session(luis, "chat", shared);
+	const elsewhere = await session(luis, "elsewhere", luisProject);
+	const [benOwn] = (await call(ben, "GET", "/api/sessions")).json.filter(
+		(s: any) => s.group.name === "ben",
+	);
+
+	const code = await askAsBridge({
+		for: 'Telegram group "Team", id -100123, 3 members, asked by 123 @luiswirth',
 	});
-	assert.equal(code.status, 200, code.text);
 	const page = await call(
 		luis,
 		"GET",
-		`/api/auth/device?user_code=${code.json.user_code}`,
+		`/api/auth/device?user_code=${code.user_code}`,
 	);
 	assert.equal(page.status, 200, page.text);
 	assert.equal(page.json.client_id, "messagent");
-	assert.equal(page.json.person, true);
-	assert.equal(page.json.for, "Telegram 123 @luiswirth");
-	assert.equal(
-		(
-			await call(luis, "POST", "/api/auth/device/approve", {
-				userCode: code.json.user_code,
-			})
-		).status,
-		200,
-	);
-	const redeem = (secret?: string) =>
-		call(null, "POST", "/api/auth/device/token", {
-			grant_type: "urn:ietf:params:oauth:grant-type:device_code",
-			device_code: code.json.device_code,
-			client_id: "messagent",
-			...(secret && { client_secret: secret }),
+	assert.equal(page.json.bridge, true);
+	assert.match(page.json.for, /Team/);
+	assert.equal(page.json.identity, null);
+	const approve = (body: Record<string, string>) =>
+		call(luis, "POST", "/api/auth/device/approve", {
+			userCode: code.user_code,
+			...body,
 		});
-	assert.equal((await redeem()).status, 401);
-	const redeemed = await redeem("a-secret-of-the-bot");
+	// A bridge goes into a session the person picks, of a group of theirs.
+	assert.equal((await approve({})).status, 400);
+	assert.equal((await approve({ session: benOwn.id })).status, 404);
+	assert.equal((await approve({ session: chat.id })).status, 200);
+	assert.equal((await redeemAsBridge(code.device_code)).status, 401);
+	const redeemed = await redeemAsBridge(
+		code.device_code,
+		"a-secret-of-the-bot",
+	);
 	assert.equal(redeemed.status, 200, redeemed.text);
-	const token = redeemed.json.access_token;
+	const bridge = redeemed.json.access_token;
 
-	// An app's grant is no token: tokens only connect agents.
+	// Its credential is no token, and reaches nothing but itself.
 	assert.equal(
 		(await call(luis, "GET", "/api/tokens")).json.some(
 			(t: any) => t.name === "messagent",
 		),
 		false,
 	);
-	const [listed] = (await call(luis, "GET", "/api/apps")).json;
-	assert.equal(listed.name, "messagent");
-	assert.equal(listed.for, "Telegram 123 @luiswirth");
-	assert.equal(listed.id.slice(0, 2), "a_");
-	assert.equal(
-		(await call(luis, "DELETE", `/api/tokens/t_${listed.id.slice(2)}`)).status,
-		404,
-	);
-	// The app owns the sessions it creates, and manages them alone.
-	const created = await call(token, "POST", "/api/sessions", {
-		name: "Telegram",
-	});
-	assert.equal(created.status, 201, created.text);
-	assert.deepEqual(created.json.app, { id: listed.id, name: "messagent" });
-	// It goes into the app's project, of the person's own group.
-	assert.equal(created.json.project.name, "messagent");
-	assert.equal(created.json.group.name, "luis");
-	const appProject = created.json.project.id;
-	assert.equal(
-		(await call(luis, "GET", "/api/projects")).json.find(
-			(p: any) => p.id === appProject,
-		).app,
-		"messagent",
-	);
-	// The project is the app's: no session of anyone else's goes in, and it stays.
-	assert.equal(
-		(
-			await call(luis, "POST", "/api/sessions", {
-				name: "mine",
-				project: appProject,
-			})
-		).status,
-		403,
-	);
-	assert.equal(
-		(await call(luis, "DELETE", `/api/projects/${appProject}`)).status,
-		403,
-	);
-	// An app reaches no group or project of its person's.
-	assert.equal(
-		(
-			await call(token, "POST", "/api/sessions", {
-				name: "elsewhere",
-				project: luisProject,
-			})
-		).status,
-		403,
-	);
 	for (const [method, path] of [
-		["POST", "/api/projects"],
+		["GET", "/api/me"],
+		["GET", "/api/sessions"],
 		["POST", "/api/groups"],
+		["DELETE", "/api/tokens/self"],
 	] as const)
 		assert.equal(
-			(await call(token, method, path, { name: "x" })).status,
+			(
+				await call(
+					bridge,
+					method,
+					path,
+					method === "GET" ? undefined : { name: "x" },
+				)
+			).status,
 			403,
 			path,
 		);
-	const kept = await call(token, "POST", "/api/sessions", { name: "kept" });
-	for (const someone of [luis, luisToken])
-		assert.equal(
-			(await call(someone, "DELETE", `/api/sessions/${created.json.id}`))
-				.status,
-			403,
+	assert.equal((await call(luisToken, "GET", "/api/bridges/self")).status, 404);
+	const self = await call(bridge, "GET", "/api/bridges/self");
+	assert.equal(self.status, 200, self.text);
+	assert.equal(self.json.name, "luis/messagent");
+	assert.equal(self.json.by, "luis");
+	assert.equal(self.json.session.id, chat.id);
+	assert.equal(self.json.session.address, chat.address);
+	// Every member of the group sees it.
+	for (const someone of [luis, ben, benToken]) {
+		const listed = await call(
+			someone,
+			"GET",
+			`/api/sessions/${chat.id}/bridges`,
 		);
+		assert.equal(listed.status, 200, listed.text);
+		assert.deepEqual(
+			listed.json.map((b: any) => [b.id, b.name, b.for]),
+			[[self.json.id, "luis/messagent", self.json.for]],
+		);
+	}
+	assert.match(self.json.id, /^b_/);
+	// One bridge of a kind per person and session.
+	const again = await askAsBridge();
 	assert.equal(
 		(
-			await call(luis, "PATCH", `/api/sessions/${created.json.id}`, {
-				name: "mine",
+			await call(luis, "POST", "/api/auth/device/approve", {
+				userCode: again.user_code,
+				session: chat.id,
 			})
 		).status,
-		403,
-	);
-	assert.equal(
-		(await call(token, "DELETE", `/api/sessions/${created.json.id}`)).status,
-		204,
-	);
-	// An app manages only its own sessions.
-	const [own] = (await call(luis, "GET", "/api/sessions")).json.filter(
-		(s: any) => s.app === null && s.group.name === "luis",
-	);
-	assert.equal(
-		(await call(token, "DELETE", `/api/sessions/${own.id}`)).status,
-		403,
+		409,
 	);
 
-	const [owned] = (await call(token, "GET", "/api/sessions")).json;
-	const session = owned.address.split("/").pop();
-	const join = (name: string, as: string) =>
+	const secretOf = (s: any) => s.address.split("/").pop();
+	const join = (name: string, as: string, into = chat) =>
 		call(null, "POST", "/agentwire/join", {
-			session,
+			session: secretOf(into),
 			name,
 			token: as,
 			owned: true,
 		});
-	assert.equal((await join("luis", token)).json.account, "luis");
-	assert.equal((await join("luis/messagent", token)).json.account, "luis");
-	assert.equal((await join("luis/claude", token)).status, 403);
-	assert.equal((await join("ben", token)).status, 403);
-	// An agent's token still never joins as the person.
-	const agent = await connect(luis, "laptop");
-	assert.equal((await join("luis", agent)).status, 403);
-	// It acts as the person in sessions only: what only the person does stays theirs.
-	assert.equal((await call(token, "PUT", "/api/friends/ben")).status, 403);
-	const other = await ask({ client_secret: "a-secret-of-the-bot" });
+	const joined = await join("luis/messagent", bridge);
+	assert.equal(joined.status, 200, joined.text);
+	assert.equal(joined.json.account, "luis");
+	assert.equal(joined.json.about.project, "telegram");
+	assert.equal((await join("luis/messagent", bridge, elsewhere)).status, 403);
+	assert.equal((await join("luis/claude", bridge)).status, 403);
+	// As a person only once they linked their identity on the bridge.
+	assert.equal((await join("luis", bridge)).status, 403);
+	const privateChat = await askAsBridge({
+		for: "Telegram private chat with 123 @luiswirth",
+		identity: "123",
+		identity_name: "@luiswirth, Luis",
+	});
+	assert.equal(
+		(
+			await call(
+				luis,
+				"GET",
+				`/api/auth/device?user_code=${privateChat.user_code}`,
+			)
+		).json.identity,
+		"@luiswirth, Luis",
+	);
+	assert.equal(
+		(
+			await call(luis, "POST", "/api/auth/device/approve", {
+				userCode: privateChat.user_code,
+				session: elsewhere.id,
+			})
+		).status,
+		200,
+	);
+	assert.equal(
+		(await redeemAsBridge(privateChat.device_code, "a-secret-of-the-bot"))
+			.status,
+		200,
+	);
+	const identities = (await call(luisToken, "GET", "/api/identities")).json;
+	assert.deepEqual(
+		identities.map((i: any) => [i.bridge, i.external, i.name]),
+		[["messagent", "123", "@luiswirth, Luis"]],
+	);
+	const linked = await join("luis", bridge);
+	assert.equal(linked.status, 200, linked.text);
+	assert.equal(linked.json.account, "luis");
+	// The grant the relay keeps works as the credential does.
+	const byGrant = await call(null, "POST", "/agentwire/join", {
+		session: secretOf(chat),
+		name: "luis",
+		grant: linked.json.grant,
+		owned: true,
+	});
+	assert.equal(byGrant.status, 200, byGrant.text);
+	assert.equal((await join("ben", bridge)).status, 403);
+	// Unlinking the identity ends that at once.
+	assert.equal(
+		(await call(luis, "DELETE", `/api/identities/${identities[0].id}`)).status,
+		204,
+	);
+	assert.equal((await join("luis", bridge)).status, 403);
+	assert.equal((await join("luis/messagent", bridge)).status, 200);
+
+	// Ben's bridge in the same session goes once he leaves the group.
+	const bens = await bridgeOf(ben, chat.id);
+	assert.equal((await join("ben/messagent", bens)).status, 200);
+	assert.equal(
+		(await call(ben, "DELETE", `/api/groups/${group}/members/ben`)).status,
+		204,
+	);
+	assert.equal((await join("ben/messagent", bens)).status, 403);
+	assert.equal((await call(bens, "GET", "/api/bridges/self")).status, 401);
+
+	// Any member removes a bridge; the bridge removes itself; and a session takes its bridges with it.
+	assert.equal(
+		(
+			await call(
+				luisToken,
+				"DELETE",
+				`/api/sessions/${chat.id}/bridges/${self.json.id}`,
+			)
+		).status,
+		204,
+	);
+	assert.equal((await join("luis/messagent", bridge)).status, 403);
+	const second = await bridgeOf(luis, chat.id);
+	assert.equal((await call(second, "DELETE", "/api/bridges/self")).status, 204);
+	assert.equal((await call(second, "GET", "/api/bridges/self")).status, 401);
+	const third = await bridgeOf(luis, chat.id);
+	assert.equal(
+		(await call(luis, "DELETE", `/api/sessions/${chat.id}`)).status,
+		204,
+	);
+	assert.equal((await call(third, "GET", "/api/bridges/self")).status, 401);
+	// The bridge in the private chat's session stays.
+	const kept = (
+		await call(luis, "GET", `/api/sessions/${elsewhere.id}/bridges`)
+	).json;
+	assert.equal(kept.length, 1);
+
+	// What only the person does stays theirs.
+	const other = await askAsBridge();
 	for (const [path, body] of [
-		["/api/auth/device/approve", { userCode: other.json.user_code }],
-		["/api/auth/device/deny", { userCode: other.json.user_code }],
+		[
+			"/api/auth/device/approve",
+			{ userCode: other.user_code, session: elsewhere.id },
+		],
+		["/api/auth/device/deny", { userCode: other.user_code }],
 		["/api/auth/update-user", { name: "x" }],
 	] as const)
-		assert.equal((await call(token, "POST", path, body)).status, 403, path);
+		assert.equal((await call(third, "POST", path, body)).status, 403, path);
 	// No variant of a path gets past the checks that match it exactly.
 	for (const path of [
 		"/api/auth/device/code/",
 		"/api/auth//device/code",
 		"/api/auth/device/token/",
+		"/api/auth/device/approve/",
 	])
 		assert.equal(
 			(
 				await call(null, "POST", path, {
 					client_id: "messagent",
-					scope: "person",
+					scope: "bridge",
 				})
 			).status,
 			404,
 			path,
 		);
-
-	// Unlinking from the app's side.
-	assert.equal((await call(token, "DELETE", "/api/tokens/self")).status, 404);
-	// Only the person revokes an app, never an agent's token.
-	assert.equal(
-		(await call(token, "DELETE", `/api/apps/${listed.id}`)).status,
-		403,
-	);
-	assert.equal((await call(token, "DELETE", "/api/apps/self")).status, 204);
-	// Revoking the app ends its sessions.
-	assert.equal(
-		(await call(luis, "GET", "/api/sessions")).json.some(
-			(s: any) => s.id === kept.json.id,
-		),
-		false,
-	);
-	assert.equal((await join("luis", token)).status, 403);
-	assert.equal((await call(token, "GET", "/api/me")).status, 401);
-	assert.equal((await call(agent, "GET", "/api/me")).status, 200);
 });
