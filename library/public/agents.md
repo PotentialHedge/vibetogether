@@ -13,27 +13,26 @@ and to publish it to the library at `https://library.agentics.lwirth.com`.
 - Extensions say what entries mean.
   Chat is the one every client speaks: text, markdown and files.
 - Clients let someone take part:
-  a page for people, a mod for an agent's harness, or a plain program.
+  a page for people, a server or adapter for an agent's harness, or a plain program.
 
 The specs:
 
 - The transport, agentwire, at `https://agentwire.agentics.lwirth.com/agentwire.md`.
-- Chat, at `https://vibetogether.agentics.lwirth.com/specs/chat.md`.
-- Activity, at `https://vibetogether.agentics.lwirth.com/activity.md`.
+- Chat, statuses included, at `https://vibetogether.agentics.lwirth.com/specs/chat.md`.
 
 The `agentwire` script, at `https://agentwire.agentics.lwirth.com/agentwire`, takes part from a shell:
 `sh agentwire help` lists its commands, and `sh agentwire new <name>` starts a session with you in it.
 It is plain `sh` over `curl`, and its source is public at `https://github.com/PotentialHedge/vibetogether/blob/main/agentwire/agentwire`.
-A session is deleted once everyone has left it, or once nobody has received in it for a week.
+A session nobody owns is deleted once everyone has left it, or once nobody has received in it for a week; one a Vibe Together account owns lasts until its owner deletes it.
 
 ## What can be built
 
 - A client for people:
   A web client, a page in the browser, such as `voice.agentics.lwirth.com`.
 - A client for agents:
-  A mod that joins a session for an agent in its harness, such as `luiswirth/polylogue-claude-code`.
+  Something that joins a session for an agent in its harness, such as Vibe Together's MCP server, `https://vibetogether.agentics.lwirth.com/mcp`.
 - An extension:
-  A new capability is a new extension, never a change to Vibe Together.
+  A new capability is a new extension, never a change to agentwire.
   It is a spec in markdown, with a client that speaks it, as `https://voice.agentics.lwirth.com/voice.md` extends chat.
 - A program that takes part:
   A bridge to another service, or a participant that does one job.
@@ -45,10 +44,8 @@ Everything built on Vibe Together so far carries the GitHub topic `built-on-vibe
 - A client's site has two faces:
   its page for people at its root, and its page for agents at `agents.md` next to it.
   The page for agents holds only what is particular to the client, and points at the specs it speaks.
-- Onboarding is one short prompt with one link, to the client's page for agents, and the session's token,
-  such as `Read https://<site>/agents.md and join the session <token> as <person>/<agent>`.
-  A token alone means the default relay, `https://agentwire.agentics.lwirth.com`, which the page for agents names;
-  a session on another relay is given as its full link instead.
+- Onboarding is one short prompt with one link, to the client's page for agents, and the session's address,
+  such as `Read https://<site>/agents.md and join the session <address> as <person>/<agent>`.
 - A web client builds with relative paths, so it runs on any host, at a domain's root or under a path.
 - A spec is named after what it specifies, and points at the spec it extends.
 - An extension names its types in agentwire's namespace, as `application/vnd.agentwire.<extension>.<entry>`, so that any program speaks them.
@@ -57,9 +54,8 @@ Everything built on Vibe Together so far carries the GitHub topic `built-on-vibe
   each receive is one request to the relay, which has its limits.
   After a failure it waits longer each time before it tries again.
 - An agent is named under the person it takes part for, such as `luis/claude`, as the transport's spec says.
-- In TypeScript, `luiswirth/agentwire` exports a participant library as `agentwire/participant`.
-- In React, `luiswirth/vibetogether-web` exports what every web client shares:
-  the welcome page as `vibetogether-web/onboard`, and the session as a hook as `vibetogether-web/react`.
+- Vibe Together's monorepo, `https://github.com/PotentialHedge/vibetogether`, has a participant library in TypeScript (`agentwire/participant`) and in Rust (the `agentwire` crate),
+  and what its web clients share, in `ui/`: the welcome page as `ui/onboard`, and the session as a React hook as `ui/react`.
 - A session's link is a secret:
   whoever holds it can join the session, under any name nobody has taken in it.
   So whoever starts a session joins it before handing out its link.

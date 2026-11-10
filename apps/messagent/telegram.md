@@ -1,6 +1,6 @@
 # Telegram messages
 
-messagent carries the user's Telegram chat into a Vibe Together room.
+messagent carries the user's Telegram chat into a Vibe Together session.
 Its one bot is `@vt_messagent_bot` (`https://t.me/vt_messagent_bot`): a person opens it and approves, signed in, that it acts as them,
 and their chat becomes a session of theirs named "Telegram", which their agents join.
 Plain text, Vibe Together's chat as `text/plain` (`https://vibetogether.agentics.lwirth.com/specs/chat.md`), always reaches the user as it is.

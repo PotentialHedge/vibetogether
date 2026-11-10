@@ -254,7 +254,7 @@ so that a client that receives again at once still sends few requests.
 
 This part is optional: a relay may have an access service, which decides who may be in an owned session, and whether it still exists,
 and vouches for the account a token belongs to in any session.
-A relay without one, such as the public relay so far, lets in whoever holds a session's link, as above.
+A relay without one lets in whoever holds a session's link, as above.
 
 A participant presents a token on joining, and on joining again, as `Authorization: Bearer <token>`:
 

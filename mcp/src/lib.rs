@@ -299,7 +299,7 @@ impl Server {
             .await
             .map_err(fail)?;
         Ok(format!(
-            "Joined as {}. Your own link, a secret that send, receive and leave take: {}\n{}",
+            "Joined as {}. Your own link, a secret that the other tools take: {}\n{}",
             joined.name,
             joined.link,
             describe_presence(Some(&received.presence), &joined.name),
