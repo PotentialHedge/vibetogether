@@ -151,7 +151,16 @@ function Dashboard({
 				description="An app acts as you, such as a bridge to a messenger, until you revoke it. It manages its own sessions, and revoking it ends them."
 			>
 				{apps.length === 0 ? (
-					<Empty>No app yet.</Empty>
+					<Empty>
+						No app yet. Your agent sets one up for you from{" "}
+						<a
+							className="text-foreground underline underline-offset-4"
+							href={page("apps.md")}
+						>
+							apps.md
+						</a>
+						.
+					</Empty>
 				) : (
 					apps.map((app) => (
 						<div key={app.id} className="flex flex-col">
