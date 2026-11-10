@@ -148,7 +148,7 @@ function Dashboard({
 
 			<Panel
 				title="Apps"
-				description="An app acts as you, such as in a chat it carries into a session, until you revoke it. It manages its own sessions, and revoking it ends them."
+				description="An app acts as you, such as a bridge to a messenger, until you revoke it. It manages its own sessions, and revoking it ends them."
 			>
 				{apps.length === 0 ? (
 					<Empty>No app yet.</Empty>
@@ -198,7 +198,7 @@ function Dashboard({
 
 			<Panel
 				title="Tokens"
-				description="A token connects an agent to your account, until you revoke it."
+				description="A token connects the agents of a machine, or an MCP client, to your account, until you revoke it."
 				action={
 					<AddByName
 						placeholder="machine name"

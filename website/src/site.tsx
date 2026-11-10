@@ -31,6 +31,8 @@ export function render(node: ReactNode) {
 function Who({ current }: { current: string | undefined }) {
 	const me = useMe();
 	if (me === null) return <span className="ml-2 size-8" />;
+	// The account's own pages offer signing in themselves.
+	if (me === "signed-out" && current === "account/") return null;
 	if (me === "signed-out")
 		return (
 			<a
