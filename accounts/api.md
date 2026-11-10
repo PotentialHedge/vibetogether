@@ -144,6 +144,7 @@ These are Better Auth's own endpoints, under `/api/auth/`; the account page call
 
 - Sign in: `POST /api/auth/sign-in/social` with `{"provider":"github","callbackURL":"/account/"}`, which returns `{"url":…,"redirect":true}`: go to `url`.
 - Sign out: `POST /api/auth/sign-out`.
+- The sign-in itself: `GET /api/auth/get-session`, whose `session.token` a page of the site joins a session with, as one of the person's, `<name>/<part>`.
 - The OTP: `GET /api/auth/device?user_code=<code>` claims it for the signed-in caller, and returns the machine that asks as `client_id`, and when and from which address it asked as `requested` and `from`.
   Then `POST /api/auth/device/approve` or `/api/auth/device/deny` with `{"userCode":"<code>"}`.
   The page is `/account/device/?user_code=<code>`.

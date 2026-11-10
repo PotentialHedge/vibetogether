@@ -4,6 +4,7 @@
 import { useState } from "react";
 import {
 	api,
+	demo,
 	type Friend,
 	type Me,
 	type Open,
@@ -168,7 +169,15 @@ export function Sessions({
 					>
 						<span className="flex min-w-0 flex-col gap-2">
 							<span className="flex items-baseline gap-2">
-								<span className="truncate font-mono">{session.name}</span>
+								<a
+									href={page(
+										`account/session/?id=${encodeURIComponent(session.id)}${demo ? "#demo" : ""}`,
+									)}
+									title="Read the session"
+									className="truncate font-mono underline-offset-4 hover:underline"
+								>
+									{session.name}
+								</a>
 								{!own && (
 									<span className="text-sm text-muted-foreground">
 										by {session.owner}

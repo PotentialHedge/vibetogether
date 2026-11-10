@@ -77,3 +77,55 @@
 		@apply font-sans;
 	}
 }
+
+/* A message in markdown, in a session's log, sized by its own font. */
+.md > * + * {
+	margin-top: 0.6em;
+}
+.md :is(ul, ol) {
+	padding-left: 1.4em;
+}
+.md ul {
+	list-style: disc;
+}
+.md ol {
+	list-style: decimal;
+}
+.md :is(h1, h2, h3, h4) {
+	font-weight: 600;
+}
+.md a {
+	text-decoration: underline;
+	text-underline-offset: 0.2em;
+}
+.md code {
+	font-family: var(--font-mono);
+	font-size: 0.88em;
+	background: var(--muted);
+	border-radius: 0.3em;
+	padding: 0.05em 0.3em;
+}
+.md pre {
+	overflow-x: auto;
+	background: var(--card);
+	border: 1px solid var(--border);
+	border-radius: 0.5em;
+	padding: 0.7em 0.9em;
+	line-height: 1.45;
+}
+.md pre code {
+	background: none;
+	padding: 0;
+}
+.md blockquote {
+	border-left: 2px solid var(--border);
+	padding-left: 0.8em;
+	color: var(--muted-foreground);
+}
+.md table {
+	border-collapse: collapse;
+}
+.md :is(th, td) {
+	border: 1px solid var(--border);
+	padding: 0.2em 0.6em;
+}

@@ -11,6 +11,7 @@ const pages = [
 	"account/sign-in/",
 	"account/consent/",
 	"account/device/",
+	"account/session/",
 ];
 
 export default defineConfig({

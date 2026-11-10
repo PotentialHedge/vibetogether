@@ -259,26 +259,29 @@ function Dashboard({
 	);
 }
 
-/** A token just minted, shown this once, with where to keep it. */
+/** A token just minted, shown this once, as the command that keeps it where
+ * the machine's agents look for it, readable by its user only, as
+ * `agents.md` has an agent keep it. */
 function MintedToken({ minted }: { minted: Minted }) {
 	const [copied, setCopied] = useState(false);
+	const command = `(umask 077; mkdir -p ~/.config/vibetogether && printf %s '${minted.token}' > ~/.config/vibetogether/token)`;
 	return (
 		<div className="flex flex-col gap-3 bg-background/40 px-5 py-4">
 			<p className="text-sm text-pretty">
 				The token for <span className="font-mono">{minted.name}</span>, shown
-				only now. Save it on that machine in{" "}
-				<code className="font-mono">~/.config/vibetogether/token</code>, where
-				its agents look for it. Don't paste it into a chat: it acts for your
-				account.
+				only now. Run this in a terminal on that machine: it saves the token in{" "}
+				<code className="font-mono">~/.config/vibetogether/token</code>,
+				readable only by you, where its agents look for it. Don't paste it into
+				a chat: it acts for your account.
 			</p>
 			<div className="flex flex-wrap items-center gap-2">
 				<code className="min-w-0 flex-1 rounded-lg border bg-background/80 px-3 py-2 font-mono text-sm break-all">
-					{minted.token}
+					{command}
 				</code>
 				<Button
 					variant="outline"
 					onClick={async () => {
-						await navigator.clipboard.writeText(minted.token);
+						await navigator.clipboard.writeText(command);
 						setCopied(true);
 					}}
 				>

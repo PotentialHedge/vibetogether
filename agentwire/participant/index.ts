@@ -68,6 +68,9 @@ export class Session {
 	 * and every later request goes to it. Keep it to join again as the same
 	 * participant, as after a reload: the name is taken for anyone else. */
 	me: string | null;
+	/** The token presented on joining, as `Authorization: Bearer <token>`, on
+	 * a relay with an access service. */
+	readonly token: string | null;
 	/** Every entry received so far, the participant's own included, in
 	 * order. */
 	readonly log: Entry[] = [];
@@ -78,10 +81,16 @@ export class Session {
 	#closed = false;
 
 	/** `me`, if given, is the participant's own link from an earlier join. */
-	constructor(link: string, name: string, me: string | null = null) {
+	constructor(
+		link: string,
+		name: string,
+		me: string | null = null,
+		token: string | null = null,
+	) {
 		this.link = link.replace(/\/$/, "");
 		this.name = name;
 		this.me = me;
+		this.token = token;
 	}
 
 	/** Joins, again with the own link if it has one, and starts receiving.
@@ -91,7 +100,10 @@ export class Session {
 		const url = this.me
 			? `${this.me}/join`
 			: `${this.link}/join?as=${encodeURIComponent(this.name)}`;
-		const response = await fetch(url, { method: "POST" });
+		const response = await fetch(url, {
+			method: "POST",
+			headers: this.token ? { Authorization: `Bearer ${this.token}` } : {},
+		});
 		const { n, link } = (await (await checked(response)).json()) as {
 			n: number;
 			link: string;

@@ -148,6 +148,11 @@ const live = {
 			})
 		).url,
 	signOut: () => call<void>("POST", "api/auth/sign-out", {}),
+	/** The token of the page's own sign-in, with which a page joins a session
+	 * as one of the person's, `<name>/<part>`, exactly where the person may. */
+	pageToken: async () =>
+		(await call<{ session: { token: string } }>("GET", "api/auth/get-session"))
+			.session.token,
 	device: (code: string) =>
 		call<Device>(
 			"GET",
@@ -353,6 +358,7 @@ function mock(): Api {
 		},
 		signIn: async () => `${page("account/")}#demo`,
 		signOut: done,
+		pageToken: async () => "made-up-token-for-the-demo",
 		device: async (code) => ({
 			user_code: code,
 			client_id: "lwirth-macbook",
