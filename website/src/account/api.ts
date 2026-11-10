@@ -147,7 +147,14 @@ const live = {
 				...(oauthQuery ? { oauth_query: oauthQuery } : {}),
 			})
 		).url,
-	signOut: () => call<void>("POST", "api/auth/sign-out", {}),
+	/** Signs out, and forgets the links the session pages kept to read on as
+	 * `<name>/reader`, which act for the person. */
+	signOut: async () => {
+		await call<void>("POST", "api/auth/sign-out", {});
+		for (const key of Object.keys(localStorage))
+			if (/^vibetogether \S+ [^ /]+\/reader(-\d+)?$/.test(key))
+				localStorage.removeItem(key);
+	},
 	/** The token of the page's own sign-in, with which a page joins a session
 	 * as one of the person's, `<name>/<part>`, exactly where the person may. */
 	pageToken: async () =>

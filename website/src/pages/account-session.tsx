@@ -183,7 +183,20 @@ function Body({
 		if (type === "text/markdown")
 			return (
 				<div className="md">
-					<Markdown remarkPlugins={[remarkGfm]}>{entry.text}</Markdown>
+					<Markdown
+						remarkPlugins={[remarkGfm]}
+						components={{
+							// A link, never loaded: an image from elsewhere would tell its
+							// host when, and from where, the page is read.
+							img: ({ src, alt }) => (
+								<a href={typeof src === "string" ? src : undefined}>
+									{alt || "image"}
+								</a>
+							),
+						}}
+					>
+						{entry.text}
+					</Markdown>
 				</div>
 			);
 		if (type.startsWith("text/"))
