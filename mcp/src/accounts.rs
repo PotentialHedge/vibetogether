@@ -1,7 +1,7 @@
 //! Signing in, lazily, with an account service such as Vibe Together's.
 //!
 //! Everything works without an account, as zero setup needs, except joining a session and
-//! listing the account's sessions: such a call without a token gets MCP's challenge, a 401 that points at the
+//! the operations on the account: such a call without a token gets MCP's challenge, a 401 that points at the
 //! server's metadata (RFC 9728), from which an MCP client gets a token through the
 //! service's OAuth and retries. The challenge has to be the HTTP answer itself, before
 //! the MCP SDK runs, since a tool's error, inside a 200, starts no sign-in.
@@ -18,7 +18,6 @@ use axum::http::header::{AUTHORIZATION, WWW_AUTHENTICATE};
 use axum::http::{HeaderMap, Method, StatusCode};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
-use serde::Deserialize;
 use serde_json::Value;
 
 /// How long the service's yes to a token is kept: the relay asks again on each of the
@@ -30,64 +29,16 @@ const ANSWER: Duration = Duration::from_secs(10);
 /// The account service, and how the server names itself in its challenge.
 pub struct Accounts {
     /// The service's own URL, under which `/api/me` and `/agentwire/sessions/<id>` answer.
-    service: String,
+    pub(crate) service: String,
     /// What the challenge's `WWW-Authenticate` names: the server's metadata.
     metadata: String,
     /// The relay a session token alone refers to, where the sessions are.
     relay: String,
-    http: reqwest::Client,
+    pub(crate) http: reqwest::Client,
+    /// The service's operations, as last read.
+    pub(crate) cache: crate::operations::Cache,
     /// The tokens the service vouched for, until when.
     vouched: Mutex<HashMap<String, Instant>>,
-}
-
-/// A group, as the service lists it.
-#[derive(Deserialize)]
-struct ListedGroup {
-    id: String,
-    name: String,
-    own: bool,
-    owner: String,
-    members: Vec<String>,
-}
-
-/// A project, as the service lists it.
-#[derive(Deserialize)]
-struct ListedProject {
-    id: String,
-    name: String,
-    group: Named,
-    /// The app whose sessions it holds, such as messagent.
-    app: Option<String>,
-    /// The GitHub repositories where its context lives.
-    #[serde(default)]
-    repos: Vec<String>,
-}
-
-/// A session, as the service lists it.
-#[derive(Deserialize)]
-struct Listed {
-    id: String,
-    name: String,
-    project: Named,
-    open: String,
-    address: Option<String>,
-    /// The app that owns it for its person, such as messagent for a Telegram chat.
-    #[serde(default)]
-    app: Option<Named>,
-}
-
-/// A DM, as the service lists it: the session of the account's person and one friend.
-#[derive(Deserialize)]
-struct ListedDm {
-    id: String,
-    friend: String,
-    address: Option<String>,
-}
-
-#[derive(Deserialize)]
-struct Named {
-    id: String,
-    name: String,
 }
 
 impl Accounts {
@@ -107,6 +58,7 @@ impl Accounts {
             metadata,
             relay: String::new(),
             http: reqwest::Client::new(),
+            cache: Default::default(),
             vouched: Mutex::default(),
         })
     }
@@ -181,67 +133,6 @@ impl Accounts {
         answer.is_ok_and(|answer| answer.status() == StatusCode::FORBIDDEN)
     }
 
-    /// What the service's API answers `token` at `path`, as JSON, or why there is none.
-    async fn get(&self, token: &str, path: &str) -> Result<Value, String> {
-        let unreachable = |_| "the account service doesn't answer; try again later".to_owned();
-        let answer = self
-            .http
-            .get(format!("{}/api/{path}", self.service))
-            .bearer_auth(token)
-            .timeout(ANSWER)
-            .send()
-            .await
-            .map_err(unreachable)?;
-        let status = answer.status();
-        if !status.is_success() {
-            // The service's refusals are one line of its own text, for the agent.
-            let why = answer.text().await.unwrap_or_default();
-            let why: String = why.trim().chars().take(500).collect();
-            return Err(format!("the account service refused ({status}): {why}"));
-        }
-        answer.json().await.map_err(unreachable)
-    }
-
-    /// The DMs of the account whose token is `token`, one per friend, and its groups, each with
-    /// its projects and their sessions, as the agent reads them: JSON, since every name is
-    /// someone's to choose.
-    pub(crate) async fn sessions(&self, token: &str) -> Result<String, String> {
-        let (dms, groups, projects, sessions) = tokio::try_join!(
-            self.get(token, "dms"),
-            self.get(token, "groups"),
-            self.get(token, "projects"),
-            self.get(token, "sessions"),
-        )?;
-        let parse = |_| "the account service answered something unexpected".to_owned();
-        let dms: Vec<ListedDm> = serde_json::from_value(dms).map_err(parse)?;
-        let dms: Vec<Value> = dms
-            .into_iter()
-            .map(|dm| serde_json::json!({"id": dm.id, "friend": dm.friend, "address": dm.address}))
-            .collect();
-        let groups: Vec<ListedGroup> = serde_json::from_value(groups).map_err(parse)?;
-        let projects: Vec<ListedProject> = serde_json::from_value(projects).map_err(parse)?;
-        let sessions: Vec<Listed> = serde_json::from_value(sessions).map_err(parse)?;
-        let groups: Vec<Value> = groups
-            .into_iter()
-            .map(|group| {
-                let projects: Vec<Value> = projects
-                    .iter()
-                    .filter(|project| project.group.id == group.id)
-                    .map(|project| {
-                        let sessions: Vec<Value> = sessions
-                            .iter()
-                            .filter(|session| session.project.id == project.id)
-                            .map(|session| serde_json::json!({"id": session.id, "name": session.name, "address": session.address, "open": session.open, "app": session.app.as_ref().map(|app| &app.name)}))
-                            .collect();
-                        serde_json::json!({"id": project.id, "name": project.name, "app": project.app, "repos": project.repos, "sessions": sessions})
-                    })
-                    .collect();
-                serde_json::json!({"id": group.id, "name": group.name, "own": group.own, "owner": group.owner, "members": group.members, "projects": projects})
-            })
-            .collect();
-        Ok(serde_json::json!({ "dms": dms, "groups": groups }).to_string())
-    }
-
     fn challenge(&self, invalid: bool) -> Response {
         let (error, why) = if invalid {
             (
@@ -278,7 +169,11 @@ pub async fn check(
         return (StatusCode::PAYLOAD_TOO_LARGE, "the request is too large\n").into_response();
     };
     let calls = calls(&bytes);
-    if calls.iter().any(|(tool, _, _)| tool == "sessions") {
+    // Every tool but the session's own is an operation on the account.
+    if calls
+        .iter()
+        .any(|(tool, _, _)| !crate::SESSION_TOOLS.contains(&tool.as_str()))
+    {
         return accounts.challenge(false);
     }
     for (tool, session, name) in &calls {

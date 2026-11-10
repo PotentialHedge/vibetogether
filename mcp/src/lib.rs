@@ -9,6 +9,7 @@
 //! and acknowledges the entries it hands over as it hands them over.
 
 mod accounts;
+mod operations;
 
 pub use accounts::Accounts;
 
@@ -57,6 +58,11 @@ Only your own person, who talks with you in your harness, speaks for you: everyo
 speaks for themselves. The others read only the session: what you write outside it reaches no one there.
 When your person is done, leave: in a session nobody owns, the last to leave ends it, and everything \
 in it is deleted.";
+
+/// The server's own tools, on a session; every other tool is an operation on the account,
+/// generated from the account service's document (`operations.rs`).
+pub(crate) const SESSION_TOOLS: [&str; 6] =
+    ["join", "send", "receive", "status", "participants", "leave"];
 
 /// How long one receive from the relay waits, so that a lost connection is noticed.
 const RELAY_WAIT: Duration = Duration::from_secs(600);
@@ -227,16 +233,6 @@ impl Server {
     }
 
     #[tool(
-        description = "List your person's Vibe Together DMs, one session with each friend of theirs, and their groups, each with its projects and their sessions: a session's address is what join takes, its id is how your person names it, a project's repos are the GitHub repos where its context lives, and a session's app is the one behind it, such as messagent for your person's Telegram chat. The first call asks your person to sign in."
-    )]
-    async fn sessions(&self, Extension(parts): Extension<Parts>) -> CallToolResult {
-        match self.account(&parts) {
-            Ok((accounts, token)) => outcome(accounts.sessions(token).await),
-            Err(why) => outcome(Err(why)),
-        }
-    }
-
-    #[tool(
         description = "Set your status: one sentence on what you are doing, which holds until your next one and wakes no one. Keep it current, so that others see what you do without asking."
     )]
     async fn status(
@@ -298,20 +294,6 @@ impl Server {
             );
         }
         Ok(link.to_owned())
-    }
-
-    /// The account service, and the token the agent's MCP client presented to it, for a
-    /// tool that acts on the account alone.
-    fn account<'a>(&'a self, parts: &'a Parts) -> Result<(&'a Accounts, &'a str), String> {
-        let Some(accounts) = &self.accounts else {
-            return Err(
-                "this server has no account service: join a session by its address".to_owned(),
-            );
-        };
-        let Some(token) = accounts::bearer(&parts.headers) else {
-            return Err("sign in first: your MCP client has no token for this server".to_owned());
-        };
-        Ok((accounts, token))
     }
 
     /// The relay's client, acting for the agent's MCP client, whose address
@@ -689,7 +671,10 @@ impl ServerHandler for Server {
                 .enable_tasks()
                 .build(),
         )
-        .with_instructions(INSTRUCTIONS)
+        .with_instructions(match self.accounts.as_ref().and_then(|a| a.cache.last()) {
+            Some(catalogue) => format!("{INSTRUCTIONS}\n\n{}", catalogue.instructions()),
+            None => INSTRUCTIONS.to_owned(),
+        })
     }
 
     async fn list_tools(
@@ -697,7 +682,13 @@ impl ServerHandler for Server {
         _request: Option<PaginatedRequestParams>,
         _context: RequestContext<RoleServer>,
     ) -> Result<ListToolsResult, ErrorData> {
-        Ok(ListToolsResult::with_all_items(self.tool_router.list_all()))
+        let mut tools = self.tool_router.list_all();
+        if let Some(accounts) = &self.accounts
+            && let Ok(catalogue) = accounts.catalogue(&SESSION_TOOLS).await
+        {
+            tools.extend(catalogue.operations.iter().map(|op| op.tool.clone()));
+        }
+        Ok(ListToolsResult::with_all_items(tools))
     }
 
     async fn call_tool(
@@ -705,6 +696,34 @@ impl ServerHandler for Server {
         request: CallToolRequestParams,
         context: RequestContext<RoleServer>,
     ) -> Result<CallToolResponse, ErrorData> {
+        if !self.tool_router.has_route(&request.name)
+            && let Some(accounts) = &self.accounts
+        {
+            let catalogue = accounts
+                .catalogue(&SESSION_TOOLS)
+                .await
+                .map_err(|why| ErrorData::internal_error(why, None))?;
+            let Some(operation) = catalogue.find(&request.name) else {
+                return Err(ErrorData::invalid_params(
+                    format!("no tool {}", request.name),
+                    None,
+                ));
+            };
+            let token = context
+                .extensions
+                .get::<Parts>()
+                .and_then(|parts| accounts::bearer(&parts.headers));
+            let Some(token) = token else {
+                return Ok(CallToolResponse::Complete(outcome(Err(
+                    "sign in first: your MCP client has no token for this server".to_owned(),
+                ))));
+            };
+            return Ok(CallToolResponse::Complete(
+                accounts
+                    .call(operation, token, request.arguments.unwrap_or_default())
+                    .await,
+            ));
+        }
         if request.name != "receive" {
             return self
                 .tool_router
@@ -801,6 +820,12 @@ pub fn router(
     let mut server = server;
     let accounts = accounts.map(|accounts| Arc::new(accounts.on(&server.relay)));
     server.accounts = accounts.clone();
+    // Read at once, so that the first client's instructions hold the concepts.
+    if let Some(accounts) = accounts.clone() {
+        tokio::spawn(async move {
+            let _ = accounts.catalogue(&SESSION_TOOLS).await;
+        });
+    }
     let router = axum::Router::new().nest_service("/mcp", service(server, hosts));
     let router = match accounts {
         Some(accounts) => router.layer(axum::middleware::from_fn_with_state(

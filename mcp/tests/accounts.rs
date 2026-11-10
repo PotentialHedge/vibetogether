@@ -49,29 +49,45 @@ fn for_luis(headers: &HeaderMap, answer: &str) -> (StatusCode, String) {
     }
 }
 
-async fn groups(headers: HeaderMap) -> (StatusCode, String) {
-    for_luis(
-        &headers,
-        r#"[{"id":"g_1","name":"luis","own":true,"owner":"luis","members":[]},{"id":"g_2","name":"Potential Hedge","own":false,"owner":"luis","members":["ben"]}]"#,
-    )
-}
-
-async fn projects(headers: HeaderMap) -> (StatusCode, String) {
-    for_luis(
-        &headers,
-        r#"[{"id":"p_1","name":"vibetogether","group":{"id":"g_2","name":"Potential Hedge"},"app":null,"repos":["https://github.com/PotentialHedge/vibetogether"]},{"id":"p_2","name":"messagent","group":{"id":"g_1","name":"luis"},"app":"messagent","repos":[]}]"#,
-    )
-}
-
-async fn dms(headers: HeaderMap) -> (StatusCode, String) {
-    for_luis(&headers, r#"[{"id":"s_3","friend":"ben","address":"D"}]"#)
+/// A document of three operations: two a token may call, and one for the browser alone.
+async fn document() -> Json<serde_json::Value> {
+    Json(serde_json::json!({
+        "openapi": "3.1.0",
+        "tags": [{"name": "Sessions", "description": "Every session is one of a project's."}],
+        "components": {"schemas": {"Name": {"type": "string", "description": "A name."}}},
+        "paths": {
+            "/sessions": {"get": {
+                "operationId": "list_sessions", "summary": "List the sessions",
+                "description": "The sessions of the caller's groups.",
+                "security": [{"token": []}, {"browser": []}],
+            }},
+            "/sessions/{id}": {"patch": {
+                "operationId": "rename_session", "summary": "Rename a session",
+                "description": "Renames a session.",
+                "security": [{"token": []}, {"browser": []}],
+                "parameters": [{"in": "path", "name": "id", "required": true, "schema": {"type": "string"}}],
+                "requestBody": {"content": {"application/json": {"schema": {
+                    "type": "object", "properties": {"name": {"$ref": "#/components/schemas/Name"}}, "required": ["name"],
+                }}}},
+            }},
+            "/me": {"delete": {
+                "operationId": "delete_account", "description": "Deletes the account.",
+                "security": [{"browser": []}],
+            }},
+        },
+    }))
 }
 
 async fn sessions(headers: HeaderMap) -> (StatusCode, String) {
-    for_luis(
-        &headers,
-        r#"[{"id":"s_1","name":"agents","project":{"id":"p_1","name":"vibetogether"},"group":{"id":"g_2","name":"Potential Hedge"},"open":"members","address":"L","app":null},{"id":"s_2","name":"Telegram","project":{"id":"p_2","name":"messagent"},"group":{"id":"g_1","name":"luis"},"open":"members","address":"T","app":{"id":"a_1","name":"messagent"}}]"#,
-    )
+    for_luis(&headers, r#"[{"id":"s_1","name":"agents"}]"#)
+}
+
+async fn rename(
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    Json(body): Json<serde_json::Value>,
+) -> (StatusCode, String) {
+    for_luis(&headers, &format!(r#"{{"id":{id:?},"name":{}}}"#, body["name"]))
 }
 
 #[derive(Deserialize)]
@@ -135,10 +151,9 @@ async fn world() -> World {
     let service = serve(
         axum::Router::new()
             .route("/api/me", get(me))
-            .route("/api/dms", get(dms))
-            .route("/api/groups", get(groups))
-            .route("/api/projects", get(projects))
+            .route("/api/openapi.json", get(document))
             .route("/api/sessions", get(sessions))
+            .route("/api/sessions/{id}", axum::routing::patch(rename))
             .route("/agentwire/join", post(join))
             .route("/agentwire/sessions/{id}", get(session))
             .with_state(stub.clone()),
@@ -290,11 +305,11 @@ async fn an_agent_joins_with_its_token_and_shows_as_verified() {
 }
 
 #[tokio::test]
-async fn listing_the_rooms_asks_to_sign_in_first() {
+async fn the_account_operations_are_tools_that_ask_to_sign_in_first() {
     let world = world().await;
     let call = serde_json::json!({
         "jsonrpc": "2.0", "id": 1, "method": "tools/call",
-        "params": {"name": "sessions", "arguments": {}},
+        "params": {"name": "list_sessions", "arguments": {}},
     });
     let answer = reqwest::Client::new()
         .post(&world.mcp)
@@ -306,14 +321,36 @@ async fn listing_the_rooms_asks_to_sign_in_first() {
     assert_eq!(answer.status(), 401);
 
     let client = client(&world.mcp, Some("t-luis")).await;
+    let tools = client.list_all_tools().await.unwrap();
+    let names: Vec<&str> = tools.iter().map(|tool| tool.name.as_ref()).collect();
+    assert!(names.contains(&"list_sessions") && names.contains(&"rename_session"), "{names:?}");
+    // What only the person does in the browser is no tool.
+    assert!(!names.contains(&"delete_account"), "{names:?}");
+    let rename = tools.iter().find(|tool| tool.name == "rename_session").unwrap();
+    assert_eq!(rename.description.as_deref(), Some("Renames a session."));
+    assert_eq!(
+        serde_json::Value::Object((*rename.input_schema).clone()),
+        serde_json::json!({"type": "object", "properties": {
+            "id": {"type": "string"}, "name": {"type": "string", "description": "A name."},
+        }, "required": ["id", "name"]}),
+    );
+    let instructions = client.peer_info().unwrap().instructions.clone().unwrap_or_default();
+    assert!(instructions.contains("Sessions: Every session is one of a project's."), "{instructions}");
+
     let listed = client
-        .call_tool(CallToolRequestParams::new("sessions"))
+        .call_tool(CallToolRequestParams::new("list_sessions"))
         .await
         .unwrap();
-    assert_eq!(
-        text(&listed),
-        r#"{"dms":[{"id":"s_3","friend":"ben","address":"D"}],"groups":[{"id":"g_1","name":"luis","own":true,"owner":"luis","members":[],"projects":[{"id":"p_2","name":"messagent","app":"messagent","repos":[],"sessions":[{"id":"s_2","name":"Telegram","address":"T","open":"members","app":"messagent"}]}]},{"id":"g_2","name":"Potential Hedge","own":false,"owner":"luis","members":["ben"],"projects":[{"id":"p_1","name":"vibetogether","app":null,"repos":["https://github.com/PotentialHedge/vibetogether"],"sessions":[{"id":"s_1","name":"agents","address":"L","open":"members","app":null}]}]}]}"#
-    );
+    assert_eq!(text(&listed), r#"[{"id":"s_1","name":"agents"}]"#);
+    // A path argument stays one segment, whatever it holds.
+    let renamed = client
+        .call_tool(
+            CallToolRequestParams::new("rename_session")
+                .with_arguments(object!({"id": "s_1/../x", "name": "hedge"})),
+        )
+        .await
+        .unwrap();
+    assert_eq!(text(&renamed), r#"{"id":"s_1/../x","name":"hedge"}"#);
 }
 
 #[tokio::test]
