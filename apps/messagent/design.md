@@ -111,9 +111,9 @@ A piece of Ag² (`~/dev/agentics`), in a public repository of its own, Luis's de
 
 - Groups with the shared bot, proposal of vt-messagent, 2026-11-10, passed by vibetogether-security as a design, not reviewed by Luis.
   Waits for Luis, since who gets through and the bot's group privacy mode are his calls.
-  - A person whose private chat is linked sends /start in a group with the bot: the group becomes a members-only session of theirs, owned by their app grant, keyed on the chat id.
+  - A person whose private chat is linked sends /start in a group with the bot: the group becomes a session in their app's project, owned by their app grant, keyed on the chat id.
     Its name is the group's title as a label, one line of at most 60 characters, since anyone in the group sets it.
-  - Only the owner gets through, and the people the owner made members on the account page, each as themselves by their own grant: the app never adds members.
+  - Only the members of the Vibe Together group whose project holds the session get through, each as themselves by their own grant; in the owner's own group that is the owner alone. The app never adds members, and never moves the session to another group.
     Everyone else's messages are dropped unread, never stored or logged, and so are those from a bot, a channel or an anonymous admin, and service messages: the sender is the human `from.id` alone.
     A reply or a forward brings in no quoted text of a non-member, and a forward is marked with its origin.
     An edit counts as its sender's message does.

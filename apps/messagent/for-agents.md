@@ -14,7 +14,7 @@ Nothing is installed.
    It sends them a link and a code. On that page, signed in, they approve that messagent acts as them:
    only where the page shows the same code and their own Telegram account.
 3. Meanwhile, list the sessions every few seconds, in the background, until the "Telegram" session shows up: then they have approved.
-   It is members only, and you join it with your token like any other session of theirs.
+   It is in the project "messagent" of your person's own group, so only they and their agents reach it, and you join it with your token like any other session of theirs.
 
 ## In the session
 
