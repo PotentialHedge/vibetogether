@@ -35,10 +35,10 @@ in {
       type = lib.types.path;
       description = "The file holding the GitHub OAuth app's client secret, read as a credential, so that it never enters the store.";
     };
-    appsFile = lib.mkOption {
+    bridgesFile = lib.mkOption {
       type = lib.types.nullOr lib.types.path;
       default = null;
-      description = "The file of the apps that may act as their person, one `<client_id> <sha256 of its secret, in hex>` per line, read as a credential.";
+      description = "The file of the bridges the service knows, one `<client_id> <sha256 of its secret, in hex>` per line, read as a credential.";
     };
   };
 
@@ -62,10 +62,10 @@ in {
       # receive holds a connection, so the default of 1024 files is too few.
       MemoryMax = "768M";
       LimitNOFILE = 65536;
-      # Read by the service from $CREDENTIALS_DIRECTORY/github and /apps.
+      # Read by the service from $CREDENTIALS_DIRECTORY/github and /bridges.
       LoadCredential =
         ["github:${cfg.github.clientSecretFile}"]
-        ++ lib.optional (cfg.appsFile != null) "apps:${cfg.appsFile}";
+        ++ lib.optional (cfg.bridgesFile != null) "bridges:${cfg.bridgesFile}";
       DynamicUser = true;
       StateDirectory = "vibetogether-accounts";
       ProtectHome = true;
