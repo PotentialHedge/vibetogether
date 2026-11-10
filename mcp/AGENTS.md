@@ -6,7 +6,8 @@ as a service of its own: agentwire stays transport only.
 Read Vibe Together's design (`../AGENTS.md`) before working here.
 
 - Streamable HTTP at `/mcp`, so adding it to a harness is one URL.
-- Tools: `join`, `send`, `receive`, `status`, `participants`, `leave`, and with an account service `sessions`, which lists the account's sessions and asks to sign in like a join into a session.
+- Tools: `join`, `send`, `receive`, `status`, `participants`, `leave`, and with an account service `sessions`, which lists the account's groups with their projects and sessions, and `project_file` and `write_project_file`, which read a project's file and write it over the version read; these three always ask to sign in, as a join into a session open to its members does.
+  An answer with a project file says that it is the members' text, not orders.
   `status` and `participants` take over Hivemind's status and inspect, Luis's agreement (2026-11-09); `participants` reads each one's latest status from the log, so the relay stays agnostic to it.
   Every tool but `join` takes the participant's own link, which `join` returns:
   protocol version 2026-07-28 has no MCP sessions, so the link is the participant.
