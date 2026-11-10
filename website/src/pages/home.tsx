@@ -47,7 +47,7 @@ function SignUp({ hidden }: { hidden: boolean }) {
 			onClick={async () => {
 				setBusy(true);
 				try {
-					location.href = await api.signIn(page("account/"));
+					location.href = await api.signIn(page("welcome/"));
 				} catch {
 					setBusy(false);
 				}
