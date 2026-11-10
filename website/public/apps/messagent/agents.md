@@ -1,1 +1,1 @@
-../../../../apps/messagent/agents.md
+../../../../apps/messagent/for-agents.md
