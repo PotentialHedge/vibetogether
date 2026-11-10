@@ -156,7 +156,11 @@ impl Accounts {
         let status = answer.status();
         let text = answer.text().await.unwrap_or_default();
         if status.is_success() {
-            let text = if text.is_empty() { "Done.".to_owned() } else { text };
+            let text = if text.is_empty() {
+                "Done.".to_owned()
+            } else {
+                text
+            };
             CallToolResult::success(vec![ContentBlock::text(text)])
         } else {
             // The service's refusals are one sentence of its own, for the agent.
@@ -181,11 +185,14 @@ fn read(document: &Value, reserved: &[&str]) -> Catalogue {
             // A token may call it where it needs nothing, or takes a token.
             let callable = op["security"].as_array().is_none_or(|ways| {
                 ways.is_empty()
-                    || ways
-                        .iter()
-                        .any(|way| way.as_object().is_some_and(|w| w.is_empty() || w.contains_key("token")))
+                    || ways.iter().any(|way| {
+                        way.as_object()
+                            .is_some_and(|w| w.is_empty() || w.contains_key("token"))
+                    })
             });
-            if !callable || reserved.contains(&id) {
+            // An operation the document marks as no tool, such as getting a token by OTP,
+            // which an MCP client does by OAuth instead.
+            if !callable || reserved.contains(&id) || op["x-tool"] == false {
                 continue;
             }
             let mut properties = Map::new();
@@ -248,7 +255,12 @@ fn read(document: &Value, reserved: &[&str]) -> Catalogue {
         .as_array()
         .into_iter()
         .flatten()
-        .filter_map(|tag| Some((tag["name"].as_str()?.to_owned(), tag["description"].as_str()?.to_owned())))
+        .filter_map(|tag| {
+            Some((
+                tag["name"].as_str()?.to_owned(),
+                tag["description"].as_str()?.to_owned(),
+            ))
+        })
         .collect();
     Catalogue {
         operations,
@@ -266,7 +278,11 @@ fn resolve(document: &Value, value: &Value, depth: usize) -> Value {
             if let Some(reference) = object.get("$ref").and_then(Value::as_str)
                 && let Some(pointer) = reference.strip_prefix('#')
             {
-                return resolve(document, document.pointer(pointer).unwrap_or(&Value::Null), depth + 1);
+                return resolve(
+                    document,
+                    document.pointer(pointer).unwrap_or(&Value::Null),
+                    depth + 1,
+                );
             }
             Value::Object(
                 object

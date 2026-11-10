@@ -913,6 +913,14 @@ test("the account is deleted by the person alone, in the browser, with what is o
 	const { cookie: fay, token: fayToken } = await person("fay");
 	const group = (await call(fay, "POST", "/api/groups", { name: "fay's" })).json
 		.id;
+	await call(fay, "PUT", "/api/friends/luis");
+	await call(luis, "PUT", "/api/friends/fay");
+	const shared = (await call(fay, "POST", "/api/groups", { name: "shared" }))
+		.json.id;
+	assert.equal(
+		(await call(fay, "PUT", `/api/groups/${shared}/members/luis`)).status,
+		200,
+	);
 	assert.equal((await call(fayToken, "DELETE", "/api/me")).status, 403);
 	assert.equal((await call(fay, "DELETE", "/api/me")).status, 204);
 	assert.equal((await call(fay, "GET", "/api/me")).status, 401);
@@ -920,6 +928,13 @@ test("the account is deleted by the person alone, in the browser, with what is o
 	assert.equal(
 		(await call(luis, "PUT", `/api/groups/${group}/members/luis`)).status,
 		404,
+	);
+	// A group with others in it outlives the account.
+	assert.deepEqual(
+		(await call(luis, "GET", "/api/groups")).json.find(
+			(g: any) => g.id === shared,
+		)?.members,
+		["luis"],
 	);
 });
 
@@ -953,6 +968,15 @@ test("every operation is in the document, which anyone reads", async () => {
 	assert.deepEqual(response.json.paths["/me"].delete.security, [
 		{ browser: [] },
 	]);
+	// The reference is rendered from it, word for word.
+	const reference = await call(null, "GET", "/api/reference.md");
+	assert.equal(reference.status, 200);
+	assert.ok(
+		reference.text.includes(response.json.paths["/groups"].post.description),
+	);
+	assert.ok(
+		reference.text.includes("`POST /api/auth/device/code` (`request_otp`)"),
+	);
 	// A body that isn't what the operation takes is refused with what is wrong.
 	const bad = await call(luisToken, "POST", "/api/groups", { name: 7 });
 	assert.equal(bad.status, 400);

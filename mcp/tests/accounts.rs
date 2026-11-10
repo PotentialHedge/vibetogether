@@ -87,7 +87,10 @@ async fn rename(
     Path(id): Path<String>,
     Json(body): Json<serde_json::Value>,
 ) -> (StatusCode, String) {
-    for_luis(&headers, &format!(r#"{{"id":{id:?},"name":{}}}"#, body["name"]))
+    for_luis(
+        &headers,
+        &format!(r#"{{"id":{id:?},"name":{}}}"#, body["name"]),
+    )
 }
 
 #[derive(Deserialize)]
@@ -323,10 +326,16 @@ async fn the_account_operations_are_tools_that_ask_to_sign_in_first() {
     let client = client(&world.mcp, Some("t-luis")).await;
     let tools = client.list_all_tools().await.unwrap();
     let names: Vec<&str> = tools.iter().map(|tool| tool.name.as_ref()).collect();
-    assert!(names.contains(&"list_sessions") && names.contains(&"rename_session"), "{names:?}");
+    assert!(
+        names.contains(&"list_sessions") && names.contains(&"rename_session"),
+        "{names:?}"
+    );
     // What only the person does in the browser is no tool.
     assert!(!names.contains(&"delete_account"), "{names:?}");
-    let rename = tools.iter().find(|tool| tool.name == "rename_session").unwrap();
+    let rename = tools
+        .iter()
+        .find(|tool| tool.name == "rename_session")
+        .unwrap();
     assert_eq!(rename.description.as_deref(), Some("Renames a session."));
     assert_eq!(
         serde_json::Value::Object((*rename.input_schema).clone()),
@@ -334,8 +343,16 @@ async fn the_account_operations_are_tools_that_ask_to_sign_in_first() {
             "id": {"type": "string"}, "name": {"type": "string", "description": "A name."},
         }, "required": ["id", "name"]}),
     );
-    let instructions = client.peer_info().unwrap().instructions.clone().unwrap_or_default();
-    assert!(instructions.contains("Sessions: Every session is one of a project's."), "{instructions}");
+    let instructions = client
+        .peer_info()
+        .unwrap()
+        .instructions
+        .clone()
+        .unwrap_or_default();
+    assert!(
+        instructions.contains("Sessions: Every session is one of a project's."),
+        "{instructions}"
+    );
 
     let listed = client
         .call_tool(CallToolRequestParams::new("list_sessions"))

@@ -140,6 +140,8 @@ export const tags = {
 	DMs: "Two friends have a DM: one session with the two people and their agents alone, in no group or project. Nobody renames or deletes one.",
 	Tokens:
 		"A token connects agents to the account, and acts for the whole account, as the person does, except that only the person deletes the account. A machine's token is used by every agent on the machine; an MCP client's is that client's. A token lasts until it is revoked; a machine's also ends after 90 days unused.",
+	"Getting a token":
+		"An agent with a shell gets its machine's token with an OTP, RFC 8628's device authorization: it asks for an OTP, gives its person the link in `verification_uri_complete`, where they sign in and approve it, and meanwhile asks for the token every `interval` seconds. `<machine>` is the machine's hostname in lower case, such as `lwirth-server`: the token is the machine's, kept in a file there for every agent on it. An MCP client gets its token on its own, by OAuth.",
 	Apps: "An app, such as messagent's Telegram bot, acts as its person, by their approval: it carries their own messages, so it joins as the person. It reaches only the sessions it creates, and revoking it ends them.",
 } as const;
 
@@ -171,6 +173,7 @@ export function documentOf(api: OpenAPIHono<Env>) {
 		name: "better-auth.session_token",
 		description: "The person, signed in in the browser.",
 	});
+	registerDeviceFlow(api);
 	return api.getOpenAPI31Document({
 		openapi: "3.1.0",
 		info: {
@@ -184,5 +187,79 @@ export function documentOf(api: OpenAPIHono<Env>) {
 			name,
 			description,
 		})),
+	});
+}
+
+/**
+ * Better Auth's device authorization, which an agent with a shell calls for its token: no
+ * route of ours, so declared here alone, and no tool of the MCP server, whose client signs in
+ * by OAuth (`x-tool`).
+ */
+function registerDeviceFlow(api: OpenAPIHono<Env>) {
+	const device = { "x-tool": false, tags: ["Getting a token"], security: [] };
+	const form = (schema: z.ZodType) => ({
+		body: { content: { "application/json": { schema } }, required: true },
+	});
+	api.openAPIRegistry.registerPath({
+		...device,
+		method: "post",
+		path: "/auth/device/code",
+		operationId: "request_otp",
+		summary: "Ask for an OTP",
+		description: "Asks for an OTP for the machine, for the person to approve.",
+		request: form(
+			z.object({
+				client_id: z
+					.string()
+					.meta({ description: "The machine's name, `<machine>`." }),
+			}),
+		),
+		responses: {
+			200: {
+				description: "The OTP.",
+				content: {
+					"application/json": {
+						schema: z.object({
+							user_code: z.string(),
+							verification_uri_complete: z.string().meta({
+								description: "The link the person approves the OTP at.",
+							}),
+							device_code: z.string(),
+							interval: z.number().meta({
+								description: "Seconds between two asks for the token.",
+							}),
+						}),
+					},
+				},
+			},
+		},
+	});
+	api.openAPIRegistry.registerPath({
+		...device,
+		method: "post",
+		path: "/auth/device/token",
+		operationId: "redeem_otp",
+		summary: "Get the token of an approved OTP",
+		description:
+			'Gives the machine\'s token once the person approved the OTP, as `access_token`; until then it answers 400 with `{"error":"authorization_pending"}`. Keep the token on the machine, readable by its user only, such as in `~/.config/vibetogether/token`: it acts for the person\'s account.',
+		request: form(
+			z.object({
+				grant_type: z.literal("urn:ietf:params:oauth:grant-type:device_code"),
+				device_code: z.string(),
+				client_id: z
+					.string()
+					.meta({ description: "The machine's name, `<machine>`." }),
+			}),
+		),
+		responses: {
+			200: {
+				description: "The token.",
+				content: {
+					"application/json": {
+						schema: z.object({ access_token: z.string() }),
+					},
+				},
+			},
+		},
 	});
 }

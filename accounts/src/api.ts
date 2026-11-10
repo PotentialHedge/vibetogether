@@ -17,6 +17,7 @@ import {
 } from "./db.ts";
 import { isNamePart } from "./names.ts";
 import { documentOf, newApi, operation, z } from "./openapi.ts";
+import { referenceOf } from "./reference.ts";
 import { maxRepos, reposOf, reposOfInput, setRepos } from "./repos.ts";
 import {
 	addressOf,
@@ -516,11 +517,18 @@ api.openapi(
 		path: "/me",
 		summary: "Delete the account",
 		description:
-			"Deletes the account with its tokens and apps, the groups it owns with their projects and sessions, and its DMs; it leaves the others' groups. Only the person does this, signed in in the browser.",
+			"Deletes the account with its tokens, its apps and its DMs, and every group it is the last member of, with their projects and sessions; it leaves the other groups.",
 		responses: done,
 	}),
 	(c) => {
-		db.prepare("DELETE FROM user WHERE id = ?").run(c.var.caller.id);
+		const me = c.var.caller.id;
+		// A group's `owner` is only who created it now, which the group outlives: deleting the
+		// account would delete the group with it, so another member takes it over.
+		db.prepare(
+			`UPDATE "group" SET owner = (SELECT m.user FROM group_member m WHERE m."group" = "group".id AND m.user != ? LIMIT 1)
+			 WHERE owner = ? AND own = 0 AND EXISTS (SELECT 1 FROM group_member m WHERE m."group" = "group".id AND m.user != ?)`,
+		).run(me, me, me);
+		db.prepare("DELETE FROM user WHERE id = ?").run(me);
 		return c.body(null, 204);
 	},
 );
@@ -1398,9 +1406,20 @@ api.openapi(
 	},
 );
 
-// The document, once every operation is declared, made at the first request.
+// The document, once every operation is declared, made at the first request, and the
+// reference rendered from it.
 let document: ReturnType<typeof documentOf> | undefined;
+let reference: string | undefined;
 api.get("/openapi.json", (c) => {
 	document ??= documentOf(api);
 	return c.json(document);
+});
+api.get("/reference.md", (c) => {
+	document ??= documentOf(api);
+	reference ??= referenceOf(
+		document as unknown as Parameters<typeof referenceOf>[0],
+	);
+	return c.body(reference, 200, {
+		"content-type": "text/markdown; charset=utf-8",
+	});
 });

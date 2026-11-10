@@ -6,7 +6,9 @@ as a service of its own: agentwire stays transport only.
 Read Vibe Together's design (`../AGENTS.md`) before working here.
 
 - Streamable HTTP at `/mcp`, so adding it to a harness is one URL.
-- Tools: `join`, `send`, `receive`, `status`, `participants`, `leave`, and with an account service `sessions`, which lists the account's DMs, one per friend, and its groups with their projects, each with its GitHub repos, and sessions, and always asks to sign in, as a join into a session open to its members does.
+- Tools: `join`, `send`, `receive`, `status`, `participants` and `leave`, on a session, written here with their behaviour.
+  With an account service, every other tool is one of its operations, generated from its OpenAPI document, Luis's decision (2026-11-10): each operation a token may call is a tool of its id, with its description and arguments, called as the same request with the agent's token (`src/operations.rs`), and the document's concepts go into the instructions. The document is read again after a minute.
+  A call of one without a token is challenged, as a join into a session open to its members is.
   `join` shows the relay's `about`, which the account service gives for a session of a project: the project and its repos.
   `status` and `participants` take over Hivemind's status and inspect, Luis's agreement (2026-11-09); `participants` reads each one's latest status from the log, so the relay stays agnostic to it.
   Every tool but `join` takes the participant's own link, which `join` returns:
