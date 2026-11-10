@@ -140,7 +140,7 @@
         pnpmDeps = pkgs.fetchPnpmDeps {
           inherit (finalAttrs) pname version src pnpmWorkspaces;
           fetcherVersion = 4;
-          hash = "sha256-WSz+rd4814NsCadY+OGbQL0hxqHT1MnJXoQWfWA4nyg=";
+          hash = "sha256-3h49EP8QwMYLBEJOSHrB0Y77DmyoT9xO7V1lKm/nWiE=";
           # pnpm leaves an empty `links` in its store on Darwin only, which
           # fetchPnpmDeps keeps, so the hash would differ between platforms.
           preFixup = "rm -rf $storePath/v11/links";
