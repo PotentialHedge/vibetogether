@@ -53,14 +53,13 @@ type ProjectOf = {
 	name: string;
 	group: string;
 	groupName: string;
-	owner: string;
 	app: string | null;
 };
 
 function projectOf(id: string): ProjectOf | undefined {
 	return db
 		.prepare(
-			`SELECT p.id, p.name, p.app, g.id AS "group", g.name AS groupName, g.owner, g.own
+			`SELECT p.id, p.name, p.app, g.id AS "group", g.name AS groupName, g.own
 			 FROM project p JOIN "group" g ON g.id = p."group" WHERE p.id = ?`,
 		)
 		.get(id) as ProjectOf | undefined;
@@ -431,7 +430,7 @@ export function inviteOperations(
 			path: "/invites",
 			summary: "Create an invite",
 			description:
-				"Creates a link that invites one person, new to Vibe Together or not, to be the caller's friend, or with `project` to join that project's group too: only the group's owner invites to a project. The link works once, for 7 days, until it is revoked. Opening it, the person signs in with GitHub and accepts, and then gets the prompt for their own agent. Give the `link` to your person to send.",
+				"Creates a link that invites one person, new to Vibe Together or not, to be the caller's friend, or with `project` to join that project's group too: any member invites to a project of a group, never of their own group. The link works once, for 7 days, until it is revoked. Opening it, the person signs in with GitHub and accepts, and then gets the prompt for their own agent. Give the `link` to your person to send.",
 			request: {
 				body: {
 					required: false,
