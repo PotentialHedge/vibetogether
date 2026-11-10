@@ -45,4 +45,4 @@ Deploying:
 
 Work on Vibe Together is paired: Luis guides it deliberately.
 Record every explicit decision as it is made, where it holds.
-Prose that records what Luis said needs no review.
+Prose needs no review by Luis, the site's text and `agents.md` included, Luis's decision (2026-11-10): "no gate on prose/text".
