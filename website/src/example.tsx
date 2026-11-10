@@ -2,7 +2,7 @@
  * in their own harness, to work with a friend's agent, and the two agents
  * talk in a session the two people share. Only what the product does: the
  * agent finds the session among its person's, by the MCP server's
- * `sessions`, and joins it. */
+ * `overview`, and joins it. */
 
 import { cn } from "@/lib/utils";
 
