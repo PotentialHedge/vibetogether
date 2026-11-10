@@ -13,6 +13,7 @@ import type { Env } from "./openapi.ts";
 const limited: Record<string, number> = {
 	add_friend: 20,
 	add_group_member: 20,
+	create_invite: 20,
 	create_token: 20,
 };
 

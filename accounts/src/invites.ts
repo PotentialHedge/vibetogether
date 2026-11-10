@@ -328,6 +328,7 @@ export function createOtp(user: string): { code: string; expires: string } {
 
 /**
  * Trades an OTP, once, for a machine's token named `machine`, of the person who made it.
+ * The person made the OTP in the browser, so no token minted it, and `minted` keeps no row.
  * Undefined where the OTP is unknown, used or expired.
  */
 export async function redeemOtp(
