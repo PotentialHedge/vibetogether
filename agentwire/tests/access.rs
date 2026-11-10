@@ -68,6 +68,19 @@ async fn join(State(stub): State<Arc<Stub>>, Json(join): Json<Join>) -> (StatusC
     }
 }
 
+#[derive(Deserialize)]
+struct Read {
+    token: Option<String>,
+}
+
+/// Lets luis read, and no one else.
+async fn read(Json(read): Json<Read>) -> (StatusCode, String) {
+    match read.token.as_deref() {
+        Some("t-luis") => (StatusCode::OK, r#"{"account":"luis"}"#.into()),
+        _ => (StatusCode::FORBIDDEN, "members only\n".into()),
+    }
+}
+
 async fn session(
     State(stub): State<Arc<Stub>>,
     Path(id): Path<String>,
@@ -93,6 +106,7 @@ async fn world() -> (Arc<Stub>, String) {
         .insert("t-luis".into(), "luis".into());
     let service = Router::new()
         .route("/agentwire/join", post(join))
+        .route("/agentwire/read", post(read))
         .route("/agentwire/sessions/{id}", get(session))
         .with_state(stub.clone());
     let access = serve(service).await;
@@ -526,4 +540,58 @@ async fn the_join_answer_passes_on_what_the_service_says_about_the_session() {
     let open = client.create(&relay).await.unwrap();
     let plain = client.join(&open, "ben", None).await.unwrap();
     assert_eq!(plain.about, None);
+}
+
+#[tokio::test]
+async fn only_whom_the_service_lets_read_reads_without_joining() {
+    let (stub, relay) = world().await;
+    let client = Client::new();
+    let link = client.create_owned(&relay).await.unwrap();
+    let id = link.rsplit('/').next().unwrap().to_owned();
+    stub.rooms.lock().unwrap().insert(id);
+    let claude = client
+        .join(&link, "luis/claude", Some("t-luis"))
+        .await
+        .unwrap();
+    client
+        .send(&claude.link, "text/plain", None, "Hi.")
+        .await
+        .unwrap();
+    let http = reqwest::Client::new();
+    let read = |token: Option<&'static str>| {
+        let mut request = http.get(format!("{link}/log?wait=0"));
+        if let Some(token) = token {
+            request = request.bearer_auth(token);
+        }
+        request.send()
+    };
+    let refused = read(None).await.unwrap();
+    assert_eq!(refused.status(), 403);
+    assert_eq!(refused.text().await.unwrap().trim(), "members only");
+    assert_eq!(read(Some("t-ben")).await.unwrap().status(), 403);
+    let answer = read(Some("t-luis")).await.unwrap();
+    assert_eq!(answer.status(), 200);
+    let lines: Vec<serde_json::Value> = answer
+        .text()
+        .await
+        .unwrap()
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+    assert_eq!(lines.len(), 3, "{lines:?}");
+    assert_eq!(lines[1]["text"], "Hi.");
+    // The reader wrote nothing and stands in no presence.
+    let presence = lines[2]["presence"].as_object().unwrap();
+    assert_eq!(presence.keys().collect::<Vec<_>>(), ["luis/claude"]);
+    assert_eq!(
+        read(Some("t-luis"))
+            .await
+            .unwrap()
+            .text()
+            .await
+            .unwrap()
+            .lines()
+            .count(),
+        3
+    );
 }

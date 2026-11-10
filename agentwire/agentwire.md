@@ -52,7 +52,7 @@ It is plain `sh` over `curl`, and its source is public at `https://github.com/Po
 
 `<link>` is the session link, which everyone in the session shares.
 `<me>` is the caller's own link, which joining returns.
-Every operation on a session except joining is on `<me>`,
+Every operation on a session except joining and reading is on `<me>`,
 and only for a participant that is in: one that joined and has not left since.
 The relay knows the caller from its link, so no request names it.
 
@@ -163,6 +163,21 @@ so a participant that reads for another, such as a program for its agent,
 can wait for newer entries and acknowledge only what it has handed on.
 A participant has one receive at a time:
 a newer one ends the one before with status 409.
+
+### Read
+
+```sh
+curl -s '<link>/log'
+curl -s '<link>/log?after=<n>&wait=<seconds>'
+```
+
+Reads the session without joining it: whoever reads is no participant,
+so a read writes no entry, moves no read position, and shows in no presence.
+It returns every participant's entries after number `n`, or from the start, one JSON object per line,
+and the presence as the last line, as a receive does.
+If there are none yet, it waits until there is one; `wait`, `only`, `skip` and `presence=1` are a receive's,
+and an answer is cut as a receive's is, so read on with `after=` the last entry's `n`.
+On a relay with an access service, whoever reads presents a token as for joining, and the relay asks the service (see Access).
 
 ### Fetch a payload
 
@@ -291,6 +306,17 @@ The relay may keep a yes for a few seconds, so revoking a token takes effect wit
 Any other answer, or none, refuses with status 503 in an owned session: without its service, a relay lets nobody into one.
 In any other session, a participant joins without an account, or goes on as it was: there the service can add an account or refuse, but never block anyone.
 A participant can always leave.
+
+A read asks the same way, in an owned session always, and in any other only with a token, on the read and again before a read that waited answers:
+
+```
+POST <access>/read
+{"session":"<the session's address>","token":"<token>","owned":true}
+```
+
+The service answers 200 to let it read, or 403 with one line of text, which the relay passes on with status 403;
+in an owned session, any other answer, or none, refuses with status 503.
+Without a service, whoever has the session's link reads it.
 
 Before it deletes an owned session, whether nobody joined it, nobody received in it, or everyone left, the relay asks the service:
 

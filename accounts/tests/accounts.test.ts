@@ -674,6 +674,16 @@ test("a project points at GitHub repos, which a join into its sessions tells", a
 	});
 	assert.equal(outsider.status, 403, outsider.text);
 	assert.equal(outsider.text.includes("formoniq"), false);
+	// Reading without joining takes the same: a member's token.
+	const read = (token: string | null) =>
+		call(null, "POST", "/agentwire/read", {
+			session: address.split("/").pop(),
+			token,
+			owned: true,
+		});
+	assert.equal((await read(luisToken)).json.account, "luis");
+	assert.equal((await read(benToken)).status, 403);
+	assert.equal((await read(null)).status, 403);
 	// A session no account owns says nothing about itself.
 	const unowned = await call(null, "POST", "/agentwire/join", {
 		session: "unknown",

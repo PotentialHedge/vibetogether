@@ -165,6 +165,49 @@ access.post("/join", async (c) => {
 	});
 });
 
+// Reading a session without joining it, as the web app shows one: whoever may join it, by the
+// same checks, reads it, and writes nothing to it.
+access.post("/read", async (c) => {
+	const body = (await c.req.json().catch(() => null)) as {
+		session?: unknown;
+		token?: unknown;
+		owned?: unknown;
+	} | null;
+	const session = body?.session;
+	const token = body?.token ?? null;
+	if (
+		typeof session !== "string" ||
+		(token !== null && typeof token !== "string")
+	)
+		return c.text(
+			'The body is {"session":"…","token":"…"|null,"owned":true|false}.',
+			400,
+		);
+	const caller = token ? await callerOfToken(token) : undefined;
+	if (token && !caller)
+		return c.text(
+			"The token is no valid token: it was revoked, or it expired.",
+			403,
+		);
+	const dm = dmBySecret(session);
+	if (dm) {
+		if (!caller || (caller.id !== dm.a && caller.id !== dm.b))
+			return c.text("This DM is its two friends' alone.", 403);
+		if (!areFriends(dm.a, dm.b))
+			return c.text("The two of this DM are no longer friends.", 403);
+		return c.json({ account: caller.login });
+	}
+	const owned = sessionBySecret(session);
+	if (!owned && body?.owned === true)
+		return c.text("This session was deleted.", 403);
+	if (owned && (!caller || !isMember(owned.group, caller.id)))
+		return c.text(
+			"This session is its group's members' only: read it with a token of your account, as Authorization: Bearer <token>.",
+			403,
+		);
+	return c.json({ account: caller?.login ?? null });
+});
+
 access.get("/sessions/:session", (c) =>
 	sessionBySecret(c.req.param("session")) || dmBySecret(c.req.param("session"))
 		? c.json({})

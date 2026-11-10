@@ -28,7 +28,7 @@ use tokio::time::{sleep, timeout};
 use access::{About, Access, Admitted, Credential, Verdict};
 use limits::{COST, Limits};
 use sessions::Kept;
-use sessions::{Answer, MAX_NAME, Receive, Sessions, Ticket, is_name, is_secret};
+use sessions::{Answer, MAX_NAME, Reading, Receive, Sessions, Ticket, is_name, is_secret};
 
 /// The transport's version, the first part of every session's path: a
 /// breaking change bumps it, and the relay serves only the current one.
@@ -259,6 +259,24 @@ impl Relay {
         ))
     }
 
+    /// Lets whoever presents `token`, if anything, read the session without joining it, if
+    /// the access service lets them: in an owned session always, and in any other only with
+    /// a token, as for a join. Without a service, whoever has the session's address reads it.
+    async fn may_read(&self, session: &str, token: Option<&str>) -> Result<(), Fail> {
+        self.sessions().enter(session)?;
+        let Some(access) = &self.access else {
+            return Ok(());
+        };
+        let owned = self.sessions().owned(session)?;
+        if !owned && token.is_none() {
+            return Ok(());
+        }
+        match access.read(session, token, owned).await? {
+            Verdict::Silent if owned => Err(fail(503, "the relay can't reach its access service")),
+            _ => Ok(()),
+        }
+    }
+
     /// Lets the caller act, if the access service lets it be in the session,
     /// with the token it presents now or else what is kept of the one it joined
     /// with; what it is let in with is kept, and so is the account vouched for.
@@ -299,6 +317,22 @@ impl Relay {
 
     fn sessions(&self) -> MutexGuard<'_, Sessions> {
         self.sessions.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+}
+
+/// A waiting read, which its caller abandons by going away.
+struct Read<'a> {
+    relay: &'a Relay,
+    client: Option<IpAddr>,
+    reading: Reading,
+}
+
+impl Drop for Read<'_> {
+    fn drop(&mut self) {
+        self.relay.sessions().abandon_read(&self.reading);
+        if let Some(client) = self.client {
+            self.relay.limits().waited(client);
+        }
     }
 }
 
@@ -538,12 +572,20 @@ async fn session(
     let get = method == Method::GET;
     let token = bearer(headers);
     // Leaving is always let through, so that nobody is kept in.
-    let about = if *secret != "join" && operation != ["leave"] {
+    let about = if !["join", "log"].contains(secret) && operation != ["leave"] {
         relay.admit(id, secret, token.as_deref()).await?
     } else {
         None
     };
     match (*secret, operation) {
+        ("log", []) if get => {
+            takes(
+                query,
+                "a read",
+                &["after", "wait", "only", "skip", "presence"],
+            )?;
+            read(relay, client, id, token.as_deref(), query).await
+        }
         ("join", []) if post => {
             takes(query, "a join", &["as"])?;
             relay.adds(client, 0)?;
@@ -689,13 +731,59 @@ async fn read_at_most(mut body: Body, limit: usize) -> Result<Option<Vec<u8>>, F
     Ok((size <= limit).then_some(payload))
 }
 
-async fn receive(
+/// A read of the session's entries without joining it, as the spec's "Read" says.
+async fn read(
     relay: &Relay,
     client: Option<IpAddr>,
     id: &str,
-    secret: &str,
+    token: Option<&str>,
     query: &str,
 ) -> Result<Response, Fail> {
+    relay.may_read(id, token).await?;
+    let (receive, wait) = receive_of(query)?;
+    if let Some(client) = client
+        && !relay.limits().wait(client)
+    {
+        return Err(busy("this client has too many receives waiting", 60));
+    }
+    let started = relay.sessions().read(id, receive);
+    let (reading, mut answered) = started.inspect_err(|_| {
+        if let Some(client) = client {
+            relay.limits().waited(client);
+        }
+    })?;
+    let reading = Read {
+        relay,
+        client,
+        reading,
+    };
+    let answer = match wait {
+        None => answered.await,
+        Some(wait) => match timeout(wait, &mut answered).await {
+            Ok(answer) => answer,
+            Err(_) => {
+                relay.sessions().read_now(&reading.reading)?;
+                answered.await
+            }
+        },
+    };
+    let answer = answer.map_err(|_| fail(503, "the relay can't answer right now"))?;
+    // A read may wait long past the access service's yes, so it asks again.
+    relay.may_read(id, token).await?;
+    match answer {
+        Answer::Lines(lines, _, held) => {
+            let body = Full::new(Bytes::from(lines)).map_frame(move |frame| {
+                let _ = &held;
+                frame
+            });
+            Ok(text(Body::new(body), "application/jsonl; charset=utf-8"))
+        }
+        Answer::Replaced | Answer::TakenBack => Err(fail(503, "the relay can't answer right now")),
+    }
+}
+
+/// What a receive or a read asks for, and how long it waits, as its query gives them.
+fn receive_of(query: &str) -> Result<(Receive, Option<Duration>), Fail> {
     let after = match param(query, "after") {
         None => None,
         Some(after) => Some(number(&after).ok_or_else(|| fail(400, "after is a number"))?),
@@ -731,6 +819,17 @@ async fn receive(
         only: types("only")?,
         skip: types("skip")?,
     };
+    Ok((receive, wait))
+}
+
+async fn receive(
+    relay: &Relay,
+    client: Option<IpAddr>,
+    id: &str,
+    secret: &str,
+    query: &str,
+) -> Result<Response, Fail> {
+    let (receive, wait) = receive_of(query)?;
     if let Some(client) = client
         && !relay.limits().wait(client)
     {

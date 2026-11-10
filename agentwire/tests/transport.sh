@@ -205,5 +205,23 @@ check "one left inside" "$(status "$claude/5")" 200
 curl -s -X POST "$claude/leave" >/dev/null
 check "the last to leave ends it" "$(status -X POST "$claude/join")" 404
 
+# Reading without joining.
+link=$(curl -s -X POST "$relay/v2/s")
+ben=$(curl -s -X POST "$link/join?as=ben" | jq -r .link)
+curl -s --data-binary 'Hi.' "$ben" >/dev/null
+read=$(curl -s "$link/log?wait=0")
+check "read without joining" "$(head -n -1 <<<"$read" | jq -r .n | xargs)" "1 2"
+check "a read is in no presence" "$(tail -1 <<<"$read" | jq -c '.presence | keys')" '["ben"]'
+check "read after" "$(curl -s "$link/log?after=1&wait=0" | head -n -1 | jq -r .text)" "Hi."
+check "a read takes a receive's parameters only" "$(status "$link/log?own=1")" 400
+curl -s "$link/log?after=2" >"$work/read" &
+waiting=$!
+sleep 0.5
+check "a read writes nothing" "$(curl -s --data-binary 'Read?' "$ben")" '{"n":3}'
+wait "$waiting"
+check "a waiting read wakes" "$(head -1 "$work/read" | jq -r .text)" "Read?"
+check "read no session" "$(status "$relay/v2/s/AAAAAAAAAAAAAAAAAAAAAA/log?wait=0")" 404
+curl -s -X POST "$ben/leave" >/dev/null
+
 trash "$work"
 exit "$failed"

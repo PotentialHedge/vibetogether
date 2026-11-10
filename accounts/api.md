@@ -75,4 +75,6 @@ The relay asks this service, as its access service, on the loopback only:
   A session accounts own takes only a token of one of its group's members, checked through its project to its group each time; a DM only a token of one of its two, while they are friends; a session no account owns, which is the relay's alone, takes anyone.
   The sessions accounts own are the relay's owned sessions, which this service creates with `POST <relay>/v2/s?owned`; an owned session no account owns any more was deleted, and takes no one.
   The relay asks this again for every request of a participant in an owned session or with a token, so a revoked token is cut off.
+- `POST /agentwire/read` with `{"session":"<the secret in the address>","token":"<token>"|null,"owned":true|false}`, for reading a session without joining it:
+  200 with `{"account":"<name>"|null}` for whoever may join it, by the same checks, and 403 with one line of text for anyone else.
 - `GET /agentwire/sessions/<the secret in the address>`: 200 for a session an account owns or a DM, which keeps it, and 404 for any other session.

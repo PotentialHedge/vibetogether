@@ -112,6 +112,8 @@ pub struct Sessions {
     /// The receives answered but not yet handed over, by session, name and
     /// receive, with whether each waited for presence: see `settle`.
     answered: HashMap<(String, String, u64), bool>,
+    /// The reads still waiting, by session and read: whoever reads without joining.
+    readers: HashMap<String, BTreeMap<u64, Waiting>>,
     receives: u64,
     /// The bytes the answers not yet handed over hold.
     held: Arc<AtomicUsize>,
@@ -159,6 +161,12 @@ pub enum Answer {
     Replaced,
     /// Its name's account took the name back.
     TakenBack,
+}
+
+/// One waiting read, as its caller holds it.
+pub struct Reading {
+    session: String,
+    id: u64,
 }
 
 /// One waiting receive, as its caller holds it.
@@ -313,6 +321,7 @@ impl Sessions {
             db,
             waiting: HashMap::new(),
             answered: HashMap::new(),
+            readers: HashMap::new(),
             receives: 0,
             held: Arc::default(),
         })
@@ -397,6 +406,12 @@ impl Sessions {
         for name in self.names_waiting(session) {
             self.answer(session, &name)?;
         }
+        let readers: Vec<u64> = self
+            .readers
+            .get(session)
+            .map(|readers| readers.keys().copied().collect())
+            .unwrap_or_default();
+        self.answer_readers(session, &readers)?;
         Ok(())
     }
 
@@ -871,38 +886,8 @@ impl Sessions {
         let mut lines = String::new();
         let mut read = None;
         if self.is_inside(session, name)? {
-            let (after, own) = (waiting.after, waiting.receive.own);
-            let mut entries = self.db.prepare_cached(
-                "SELECT n, time, sender, type, size, filename, text, account FROM entries
-                 WHERE session = ? AND n > ? AND (? OR sender != ?) ORDER BY n",
-            )?;
-            let mut rows = entries.query(params![session, after, own, name])?;
-            let mut cut = None;
-            let held = self.held.load(Ordering::Relaxed);
-            let room = MAX_ANSWER.min(MAX_ANSWERS.saturating_sub(held));
-            while let Some(row) = rows.next()? {
-                if !lines.is_empty() && lines.len() >= room {
-                    cut = Some(row.get::<_, i64>(0)? - 1);
-                    break;
-                }
-                if !waiting.receive.wants(&row.get::<_, String>(3)?) {
-                    continue;
-                }
-                let entry = Entry {
-                    n: row.get(0)?,
-                    time: row.get(1)?,
-                    from: row.get(2)?,
-                    kind: row.get(3)?,
-                    size: row.get(4)?,
-                    filename: row.get(5)?,
-                    text: row.get(6)?,
-                    account: row.get(7)?,
-                };
-                lines += &serde_json::to_string(&entry).expect("an entry is JSON");
-                lines.push('\n');
-            }
-            drop(rows);
-            drop(entries);
+            let cut;
+            (lines, cut) = self.lines(session, waiting, Some(name))?;
             // A receive from the read position acknowledges what it returns,
             // and what it leaves out, since its caller keeps no position of its
             // own; one that says what it read acknowledges only that.
@@ -921,6 +906,144 @@ impl Sessions {
             }
         }
         Ok(Some((lines, read)))
+    }
+
+    /// The entries `waiting` asks for, one line each, all but `own`'s own unless it asks for
+    /// them, and where they were cut, if they were: an answer holds at most `MAX_ANSWER`.
+    fn lines(
+        &self,
+        session: &str,
+        waiting: &Waiting,
+        own: Option<&str>,
+    ) -> rusqlite::Result<(String, Option<i64>)> {
+        let mut lines = String::new();
+        let mut entries = self.db.prepare_cached(
+            "SELECT n, time, sender, type, size, filename, text, account FROM entries
+             WHERE session = ? AND n > ? AND (? OR sender IS NOT ?) ORDER BY n",
+        )?;
+        let mut rows = entries.query(params![session, waiting.after, waiting.receive.own, own])?;
+        let mut cut = None;
+        let held = self.held.load(Ordering::Relaxed);
+        let room = MAX_ANSWER.min(MAX_ANSWERS.saturating_sub(held));
+        while let Some(row) = rows.next()? {
+            if !lines.is_empty() && lines.len() >= room {
+                cut = Some(row.get::<_, i64>(0)? - 1);
+                break;
+            }
+            if !waiting.receive.wants(&row.get::<_, String>(3)?) {
+                continue;
+            }
+            let entry = Entry {
+                n: row.get(0)?,
+                time: row.get(1)?,
+                from: row.get(2)?,
+                kind: row.get(3)?,
+                size: row.get(4)?,
+                filename: row.get(5)?,
+                text: row.get(6)?,
+                account: row.get(7)?,
+            };
+            lines += &serde_json::to_string(&entry).expect("an entry is JSON");
+            lines.push('\n');
+        }
+        Ok((lines, cut))
+    }
+
+    /// Starts a read of the session's entries after `receive.after`, or from the start, by
+    /// someone who doesn't join: it holds no read position, writes nothing to the log, and
+    /// stands in no presence. It is answered once it has something to return.
+    pub fn read(
+        &mut self,
+        session: &str,
+        receive: Receive,
+    ) -> Result<(Reading, oneshot::Receiver<Answer>), Fail> {
+        self.enter(session)?;
+        self.receives += 1;
+        let id = self.receives;
+        let (answer, answered) = oneshot::channel();
+        let waiting = Waiting {
+            id,
+            after: receive.after.unwrap_or(0),
+            receive: Receive {
+                own: true,
+                ..receive
+            },
+            answer,
+        };
+        self.readers
+            .entry(session.to_owned())
+            .or_default()
+            .insert(id, waiting);
+        if self.reader_ready(session, id)? {
+            self.answer_readers(session, &[id])?;
+        }
+        let reading = Reading {
+            session: session.to_owned(),
+            id,
+        };
+        Ok((reading, answered))
+    }
+
+    /// Answers a read now, as when its wait has passed.
+    pub fn read_now(&mut self, reading: &Reading) -> Result<(), Fail> {
+        self.answer_readers(&reading.session, &[reading.id])
+    }
+
+    /// Drops a read whose caller went away.
+    pub fn abandon_read(&mut self, reading: &Reading) {
+        if let Some(readers) = self.readers.get_mut(&reading.session) {
+            readers.remove(&reading.id);
+            if readers.is_empty() {
+                self.readers.remove(&reading.session);
+            }
+        }
+    }
+
+    /// Whether a read has entries to return.
+    fn reader_ready(&self, session: &str, id: u64) -> rusqlite::Result<bool> {
+        let Some(waiting) = self.readers.get(session).and_then(|r| r.get(&id)) else {
+            return Ok(false);
+        };
+        let mut kinds = self
+            .db
+            .prepare_cached("SELECT type FROM entries WHERE session = ? AND n > ? ORDER BY n")?;
+        let mut rows = kinds.query(params![session, waiting.after])?;
+        while let Some(row) = rows.next()? {
+            if waiting.receive.wants(&row.get::<_, String>(0)?) {
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    }
+
+    /// Answers the reads `ids` with the entries each asks for, and the presence last.
+    fn answer_readers(&mut self, session: &str, ids: &[u64]) -> Result<(), Fail> {
+        if ids.is_empty() {
+            return Ok(());
+        }
+        let presence = Received::presence_line(&self.presence(session)?);
+        for id in ids {
+            let Some(waiting) = self.readers.get(session).and_then(|r| r.get(id)) else {
+                continue;
+            };
+            let (mut lines, _) = self.lines(session, waiting, None)?;
+            lines += &presence;
+            lines.push('\n');
+            let Some(waiting) = self.readers.get_mut(session).and_then(|r| r.remove(id)) else {
+                continue;
+            };
+            let bytes = lines.len();
+            self.held.fetch_add(bytes, Ordering::Relaxed);
+            let held = Held {
+                held: self.held.clone(),
+                bytes,
+            };
+            _ = waiting.answer.send(Answer::Lines(lines, None, held));
+        }
+        if self.readers.get(session).is_some_and(BTreeMap::is_empty) {
+            self.readers.remove(session);
+        }
+        Ok(())
     }
 
     /// Ends a receive: its participant is no longer receiving.
@@ -944,7 +1067,19 @@ impl Sessions {
                 ready.push(name);
             }
         }
-        self.answer_all(session, &ready)
+        self.answer_all(session, &ready)?;
+        let mut ready = Vec::new();
+        for id in self
+            .readers
+            .get(session)
+            .into_iter()
+            .flat_map(BTreeMap::keys)
+        {
+            if self.reader_ready(session, *id)? {
+                ready.push(*id);
+            }
+        }
+        self.answer_readers(session, &ready)
     }
 
     /// Answers the receives waiting for presence, except `by`'s own.
@@ -957,7 +1092,16 @@ impl Sessions {
             .filter(|(name, waiting)| waiting.receive.presence && name.as_str() != by)
             .map(|(name, _)| name.clone())
             .collect();
-        self.answer_all(session, &stirred)
+        self.answer_all(session, &stirred)?;
+        let readers: Vec<u64> = self
+            .readers
+            .get(session)
+            .into_iter()
+            .flatten()
+            .filter(|(_, waiting)| waiting.receive.presence)
+            .map(|(id, _)| *id)
+            .collect();
+        self.answer_readers(session, &readers)
     }
 
     fn presence(&self, session: &str) -> rusqlite::Result<BTreeMap<String, Presence>> {

@@ -62,6 +62,13 @@ struct Join<'a> {
     owned: bool,
 }
 
+#[derive(Serialize)]
+struct Read<'a> {
+    session: &'a str,
+    token: Option<&'a str>,
+    owned: bool,
+}
+
 /// What the service said to a participant.
 pub enum Verdict {
     /// It may be in.
@@ -113,6 +120,45 @@ impl Access {
         owned: bool,
     ) -> Result<Verdict, Fail> {
         let key = (session.to_owned(), name.to_owned(), credential.key());
+        let (token, grant) = match credential {
+            Credential::None => (None, None),
+            Credential::Token(token) => (Some(token), None),
+            Credential::Grant(grant) => (None, Some(grant)),
+        };
+        let join = Join {
+            session,
+            name,
+            token,
+            grant,
+            owned,
+        };
+        self.asked(key, "join", &join).await
+    }
+
+    /// Asks whether whoever presents `token`, if anything, may read `session` without
+    /// joining it: refuses with the service's line why, or answers what the service said.
+    pub async fn read(
+        &self,
+        session: &str,
+        token: Option<&str>,
+        owned: bool,
+    ) -> Result<Verdict, Fail> {
+        // No name is empty, so a read's yes is kept apart from every join's.
+        let key = (
+            session.to_owned(),
+            String::new(),
+            token.map(|t| format!("read {t}")),
+        );
+        let read = Read {
+            session,
+            token,
+            owned,
+        };
+        self.asked(key, "read", &read).await
+    }
+
+    /// What the service at `path` answers `body`, kept a few seconds under `key`.
+    async fn asked(&self, key: Key, path: &str, body: &impl Serialize) -> Result<Verdict, Fail> {
         let now = Instant::now();
         {
             let mut admitted = self.admitted.lock().unwrap_or_else(|e| e.into_inner());
@@ -121,22 +167,11 @@ impl Access {
                 return Ok(Verdict::Admitted(said.clone()));
             }
         }
-        let (token, grant) = match credential {
-            Credential::None => (None, None),
-            Credential::Token(token) => (Some(token), None),
-            Credential::Grant(grant) => (None, Some(grant)),
-        };
         let response = self
             .http
-            .post(format!("{}/join", self.url))
+            .post(format!("{}/{path}", self.url))
             .timeout(ANSWER)
-            .json(&Join {
-                session,
-                name,
-                token,
-                grant,
-                owned,
-            })
+            .json(body)
             .send()
             .await;
         let Ok(response) = response else {
