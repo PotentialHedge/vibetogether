@@ -4,6 +4,10 @@ POST /inject with {"from": <id>, "text": ...} makes a message arrive in the send
 with "username" its sender's; with "kicked": true instead, the sender blocks the bot;
 with "photo" or "document" as base64 instead, a photo or a file, with "caption",
 and for a file "file_name" and "mime_type".
+In a group: "chat" its id, with "title"; "member" instead makes the bot's own membership in it
+change to that status, such as "member" or "left"; "joined" a list of ids who joined it.
+"edited": true makes it an edit, "forward_origin" a forward, "is_bot" or "sender_chat" a sender
+that is no person. getChatMember says 99 is an admin, and getChatMemberCount a group has 4.
 GET /calls returns every call of the bot so far, as [{"method": ..., "body": ...}];
 a file uploaded in a form is in the body as {"filename", "type", "size", "sha256"}.
 """
@@ -83,6 +87,20 @@ class Handler(BaseHTTPRequestHandler):
             body["chat_id"] = int(body["chat_id"])
         else:
             body = json.loads(raw or b"{}")
+        if self.path == "/inject" and "member" in body:
+            with lock:
+                chat = body["chat"]
+                updates.append({
+                    "update_id": len(updates) + 1,
+                    "my_chat_member": {
+                        "chat": {"id": chat, "type": "supergroup", "title": body.get("title", "Team")},
+                        "from": {"id": body["from"], "first_name": "Luis", "is_bot": False},
+                        "new_chat_member": {"status": body["member"]},
+                    },
+                })
+                lock.notify_all()
+            self.answer({"message_id": 0})
+            return
         if self.path == "/inject" and body.get("kicked"):
             with lock:
                 sender = body["from"]
@@ -100,19 +118,28 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == "/inject":
             with lock:
                 sender = body["from"]
-                n = message_id()
+                n = body.get("message_id") or message_id()
+                chat = {"id": sender, "type": "private"}
+                if "chat" in body:
+                    chat = {"id": body["chat"], "type": "supergroup", "title": body.get("title", "Team")}
+                kind = "edited_message" if body.get("edited") else "message"
                 updates.append({
                     "update_id": len(updates) + 1,
-                    "message": {
+                    kind: {
                         "message_id": n,
                         "date": 1793000000,
-                        "chat": {"id": sender, "type": "private"},
-                        "from": {"id": sender, "first_name": body.get("name", "Luis"), "is_bot": False},
+                        "chat": chat,
+                        "from": {"id": sender, "first_name": body.get("name", "Luis"), "is_bot": body.get("is_bot", False)},
                     },
                 })
+                message = updates[-1][kind]
                 if "username" in body:
-                    updates[-1]["message"]["from"]["username"] = body["username"]
-                message = updates[-1]["message"]
+                    message["from"]["username"] = body["username"]
+                for field in ("forward_origin", "sender_chat"):
+                    if field in body:
+                        message[field] = body[field]
+                if "joined" in body:
+                    message["new_chat_members"] = [{"id": i, "first_name": "New", "is_bot": False} for i in body["joined"]]
                 if "text" in body:
                     message["text"] = body["text"]
                 if "caption" in body:
@@ -133,6 +160,11 @@ class Handler(BaseHTTPRequestHandler):
             self.answer({"ok": True, "result": {"file_id": body["file_id"], "file_path": f"files/{body['file_id']}"}})
         elif method == "getMe":
             self.answer({"ok": True, "result": {"id": 1, "first_name": "Bot", "username": "fakebot"}})
+        elif method == "getChatMemberCount":
+            self.answer({"ok": True, "result": 4})
+        elif method == "getChatMember":
+            status = "administrator" if body["user_id"] == 99 else "member"
+            self.answer({"ok": True, "result": {"status": status, "user": {"id": body["user_id"], "first_name": "X", "is_bot": False}}})
         elif method == "getUpdates":
             offset = body.get("offset", 0)
             with lock:

@@ -50,16 +50,16 @@ enum Action {
     /// Print the link of the room's agentwire session, which the agent joins with,
     /// once the user is connected.
     Session,
-    /// The shared bot, for everyone: each person links their private chat with it to their
-    /// Vibe Together account, and the bot carries the chat into a session of theirs, as them.
+    /// The Telegram bridge, one bot for everyone: a chat with it, private or a group, is bridged
+    /// into a Vibe Together session a member picks as they approve its OTP.
     /// It keeps its files in the state directory.
     Serve {
         /// A file holding the bot's token, from BotFather.
         #[arg(long, value_name = "FILE")]
         bot_token: PathBuf,
-        /// A file holding messagent's secret at the account service.
+        /// A file holding messagent's secret at the account service, as a bridge it knows.
         #[arg(long, value_name = "FILE")]
-        app_secret: PathBuf,
+        bridge_secret: PathBuf,
         /// The account service.
         #[arg(long, default_value = "https://vibetogether.agentics.lwirth.com")]
         accounts: String,
@@ -97,7 +97,7 @@ fn main() -> Result<()> {
         }
         Action::Serve {
             bot_token,
-            app_secret,
+            bridge_secret,
             accounts,
             telegram_api,
         } => serve::serve(serve::Settings {
@@ -105,7 +105,7 @@ fn main() -> Result<()> {
                 telegram_api.as_deref().unwrap_or(telegram::API),
                 &read_secret(&bot_token)?,
             ),
-            accounts: serve::Accounts::new(&accounts, &read_secret(&app_secret)?),
+            accounts: serve::Accounts::new(&accounts, &read_secret(&bridge_secret)?),
             state: paths.state.clone(),
         })?,
     }

@@ -1,6 +1,6 @@
-# messagent's shared bot as a NixOS service: one Telegram bot for everyone, which acts as each
-# person who linked their chat. It fetches Telegram's updates by long polling, so it listens on
-# nothing. It runs as a user of its own, whose state directory holds the people's tokens.
+# messagent's Telegram bridge as a NixOS service: one bot for everyone, which bridges each chat a
+# member added to a session of theirs. It fetches Telegram's updates by long polling, so it listens
+# on nothing. It runs as a user of its own, whose state directory holds the bridges' credentials.
 self: {
   config,
   lib,
@@ -10,7 +10,7 @@ self: {
   cfg = config.services.messagent;
 in {
   options.services.messagent = {
-    enable = lib.mkEnableOption "messagent's shared Telegram bot";
+    enable = lib.mkEnableOption "messagent's Telegram bridge";
     accounts = lib.mkOption {
       type = lib.types.str;
       example = "https://vibetogether.agentics.lwirth.com";
@@ -20,14 +20,14 @@ in {
       type = lib.types.path;
       description = "The file holding the bot's token, from BotFather, read as a credential, so that it never enters the store.";
     };
-    appSecretFile = lib.mkOption {
+    bridgeSecretFile = lib.mkOption {
       type = lib.types.path;
-      description = "The file holding messagent's secret at the account service, read as a credential.";
+      description = "The file holding messagent's secret at the account service, as a bridge it knows, read as a credential.";
     };
   };
 
   config.systemd.services.messagent = lib.mkIf cfg.enable {
-    description = "messagent's shared Telegram bot";
+    description = "messagent's Telegram bridge";
     after = ["network-online.target"];
     wants = ["network-online.target"];
     wantedBy = ["multi-user.target"];
@@ -44,8 +44,8 @@ in {
         "serve"
         "--bot-token"
         "%d/bot-token"
-        "--app-secret"
-        "%d/app-secret"
+        "--bridge-secret"
+        "%d/bridge-secret"
         "--accounts"
         cfg.accounts
       ];
@@ -53,7 +53,7 @@ in {
       RestartSec = 5;
       LoadCredential = [
         "bot-token:${cfg.botTokenFile}"
-        "app-secret:${cfg.appSecretFile}"
+        "bridge-secret:${cfg.bridgeSecretFile}"
       ];
       DynamicUser = true;
       StateDirectory = "messagent";

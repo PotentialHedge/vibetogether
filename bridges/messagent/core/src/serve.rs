@@ -1,65 +1,76 @@
-//! The shared bot: one Telegram bot for everyone, run as a service of ours.
-//! A person links their private chat with it to their Vibe Together account by an OTP they approve,
-//! through which the bot acts as them: it carries the chat into a session of their account,
-//! as the person, and their agents join it there.
+//! The Telegram bridge: one bot for everyone, run as a service of ours.
+//! A Telegram chat, private or a group, is bridged into one Vibe Together session that a member
+//! picks as they approve the bot's OTP: the bot joins it as `<member>/messagent`, and passes
+//! everything both ways, Luis's decisions (2026-11-10).
+//!
+//! In the session, a person who linked their Telegram account, by an OTP from their private chat
+//! with the bot, speaks as themselves; everyone else's messages come from the bridge, labelled
+//! with their Telegram name and marked unverified.
 //!
 //! It fetches Telegram's updates by long polling, so nothing reaches it from outside.
-//! Each linked person has a directory of their own, by their Telegram id,
-//! with their link (`link.json`, holding the token) and their bridge's files.
+//! Each bridged chat has a directory of its own, by its id, with its bridge (`bridge.json`,
+//! holding the credential) and its place in the session (`place.json`).
 
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{BTreeMap, BTreeSet, HashMap, HashSet},
     fs::{self, File},
     io::ErrorKind,
     os::unix::fs::PermissionsExt,
     path::{Path, PathBuf},
-    sync::{Arc, Mutex},
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicBool, Ordering},
+    },
     thread,
     time::{Duration, Instant},
 };
 
+use ::agentwire::chat::Ping;
 use anyhow::{Context, Result, anyhow};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_json::{Value, json};
 
 use crate::{
-    Paths,
-    bridge::{Agents, Bridge, Revoked, Room, Waker},
+    agentwire::{self, Entry, JOIN, LEAVE, Received, Relay},
+    bridge::{Backoff, SPEECH, base, is_image, pings, pings_any, plain, refused},
     config::write_private,
-    messenger::Messenger,
-    telegram::{Bot, Message, Refusal, User, UserChat, message_of},
+    messenger::{Arrived, Image, Messages, Reactions},
+    reactions::{self, Reaction},
+    telegram::{Bot, Message, Refusal, Update, User, UserChat, message_of},
 };
 
-/// The app's name at the account service, its `client_id`, which the OTP's page shows.
+/// The bridge's name at the account service, its `client_id`, which the OTP's page shows.
 pub const CLIENT_ID: &str = "messagent";
-
-/// The name of the session a linked chat gets.
-const SESSION_NAME: &str = "Telegram";
 
 /// What Telegram shows of the bot, set as the service starts.
 const COMMANDS: &[(&str, &str)] = &[
-    ("start", "Link this chat to your Vibe Together account"),
-    ("stop", "Unlink this chat"),
+    ("start", "Bridge this chat into a Vibe Together session"),
+    ("stop", "End this chat's bridge"),
 ];
-const DESCRIPTION: &str = "This bot links your chat to your Vibe Together account, as a session of yours that your agents join. \
-What you write here reaches them, and their answers come back here.\n\n\
-Send /start, then approve on the page it sends you, signed in. /stop unlinks the chat.\n\n\
+const DESCRIPTION: &str = "This bot bridges a Telegram chat, private or a group, into a Vibe Together session: \
+everything said in either reaches the other, so you talk with the agents there from here.\n\n\
+Send /start, then approve on the page it sends you, signed in, and pick the session. /stop ends the bridge.\n\n\
 https://vibetogether.agentics.lwirth.com";
-const SHORT_DESCRIPTION: &str = "Talk with your agents from Telegram, through Vibe Together. https://vibetogether.agentics.lwirth.com";
+const SHORT_DESCRIPTION: &str = "Talk with agents from Telegram, through Vibe Together. https://vibetogether.agentics.lwirth.com";
 
-/// The most linkings at once, each a thread asking the account service, so that no one floods it:
-/// one person has at most one at a time.
+/// The most bridgings at once, each a thread asking the account service, one per chat.
 const MAX_LINKING: usize = 50;
+/// The most chats bridged at once, so that no one fills the service.
+const MAX_CHATS: usize = 1000;
+/// How long the bot stays in a group nobody bridged.
+const UNBRIDGED: Duration = Duration::from_secs(10 * 60);
+/// The longest a label from Telegram gets: a group's title or a person's name.
+const LABEL: usize = 60;
 
 /// What the service runs with.
 pub struct Settings {
     pub bot: Bot,
     pub accounts: Accounts,
-    /// Where its files are: the offset, and each person's directory.
+    /// Where its files are: the offset, the linked identities, and each chat's directory.
     pub state: PathBuf,
 }
 
-/// Vibe Together's account service, as an app that acts as its person.
+/// Vibe Together's account service, as a bridge.
 #[derive(Clone)]
 pub struct Accounts {
     agent: ureq::Agent,
@@ -67,7 +78,7 @@ pub struct Accounts {
     secret: String,
 }
 
-/// An OTP the service gave, for the person to approve.
+/// An OTP the service gave, for a member to approve.
 #[derive(Deserialize, Debug)]
 pub struct DeviceCode {
     pub device_code: String,
@@ -81,14 +92,37 @@ pub struct DeviceCode {
 #[derive(Debug, PartialEq)]
 pub enum Approval {
     Pending,
-    /// The person approved it: the token.
+    /// A member approved it: the bridge's credential.
     Approved(String),
     /// Denied or expired, with the service's error.
     Ended(String),
 }
 
+/// A bridge, as the account service tells it of itself.
+#[derive(Deserialize, Debug, Clone)]
+pub struct Own {
+    /// Its name in the session, such as `luis/messagent`.
+    pub name: String,
+    /// Who added it.
+    pub by: String,
+    pub session: OwnSession,
+}
+
+#[derive(Deserialize, Debug, Clone)]
+pub struct OwnSession {
+    pub id: String,
+    pub name: String,
+    pub group: Named,
+    pub address: Option<String>,
+}
+
+#[derive(Deserialize, Debug, Clone)]
+pub struct Named {
+    pub name: String,
+}
+
 impl Accounts {
-    /// The service at `url`, with the app's secret.
+    /// The service at `url`, with the bridge's secret.
     pub fn new(url: &str, secret: &str) -> Self {
         let agent = ureq::Agent::config_builder()
             .timeout_global(Some(Duration::from_secs(30)))
@@ -102,12 +136,10 @@ impl Accounts {
         }
     }
 
-    fn post(&self, path: &str, token: Option<&str>, body: Value) -> Result<(u16, Value)> {
-        let mut request = self.agent.post(format!("{}{path}", self.url));
-        if let Some(token) = token {
-            request = request.header("Authorization", format!("Bearer {token}"));
-        }
-        let mut response = request
+    fn post(&self, path: &str, body: Value) -> Result<(u16, Value)> {
+        let mut response = self
+            .agent
+            .post(format!("{}{path}", self.url))
             .send_json(body)
             .map_err(|error| anyhow!("{path}: {error}"))?;
         let status = response.status().as_u16();
@@ -115,18 +147,20 @@ impl Accounts {
         Ok((status, body))
     }
 
-    /// Asks for an OTP to act as the person, saying what for.
-    pub fn ask(&self, what_for: &str) -> Result<DeviceCode> {
-        let (status, body) = self.post(
-            "/api/auth/device/code",
-            None,
-            json!({
-                "client_id": CLIENT_ID,
-                "client_secret": self.secret,
-                "scope": "person",
-                "for": what_for,
-            }),
-        )?;
+    /// Asks for an OTP to be added to a session, saying what it bridges, and where the chat is
+    /// the sender's alone, their Telegram id and name, which approving links.
+    pub fn ask(&self, what_for: &str, identity: Option<(i64, String)>) -> Result<DeviceCode> {
+        let mut body = json!({
+            "client_id": CLIENT_ID,
+            "client_secret": self.secret,
+            "scope": "bridge",
+            "for": what_for,
+        });
+        if let Some((id, name)) = identity {
+            body["identity"] = id.to_string().into();
+            body["identity_name"] = name.into();
+        }
+        let (status, body) = self.post("/api/auth/device/code", body)?;
         if status != 200 {
             return Err(anyhow!(
                 "the account service refused an OTP ({status}): {body}"
@@ -135,11 +169,10 @@ impl Accounts {
         Ok(serde_json::from_value(body)?)
     }
 
-    /// Whether the person approved the OTP of `device_code` yet.
+    /// Whether a member approved the OTP of `device_code` yet.
     pub fn poll(&self, device_code: &str) -> Result<Approval> {
         let (status, body) = self.post(
             "/api/auth/device/token",
-            None,
             json!({
                 "grant_type": "urn:ietf:params:oauth:grant-type:device_code",
                 "device_code": device_code,
@@ -148,10 +181,10 @@ impl Accounts {
             }),
         )?;
         if status == 200 {
-            let token = body["access_token"]
+            let credential = body["access_token"]
                 .as_str()
-                .context("the account service gave no token")?;
-            return Ok(Approval::Approved(token.into()));
+                .context("the account service gave no credential")?;
+            return Ok(Approval::Approved(credential.into()));
         }
         Ok(match body["error"].as_str() {
             Some("authorization_pending" | "slow_down") => Approval::Pending,
@@ -160,72 +193,111 @@ impl Accounts {
         })
     }
 
-    /// The person's name, or `None` where the token no longer counts.
-    pub fn login(&self, token: &str) -> Result<Option<String>> {
+    /// The bridge of `credential`, or `None` where it no longer is.
+    pub fn own(&self, credential: &str) -> Result<Option<Own>> {
         let mut response = self
             .agent
-            .get(format!("{}/api/me", self.url))
-            .header("Authorization", format!("Bearer {token}"))
+            .get(format!("{}/api/bridges/self", self.url))
+            .header("Authorization", format!("Bearer {credential}"))
             .call()
-            .map_err(|error| anyhow!("/api/me: {error}"))?;
+            .map_err(|error| anyhow!("/api/bridges/self: {error}"))?;
         match response.status().as_u16() {
-            200 => {
-                let me: Value = response.body_mut().read_json()?;
-                Ok(Some(
-                    me["name"].as_str().context("/api/me gave no name")?.into(),
-                ))
-            }
-            401 => Ok(None),
-            status => Err(anyhow!("/api/me answered {status}")),
+            200 => Ok(Some(response.body_mut().read_json()?)),
+            401 | 404 => Ok(None),
+            status => Err(anyhow!("/api/bridges/self answered {status}")),
         }
     }
 
-    /// Creates a session of the person's, and returns its address.
-    pub fn create_session(&self, token: &str, name: &str) -> Result<String> {
-        let (status, body) = self.post("/api/sessions", Some(token), json!({ "name": name }))?;
-        match status {
-            201 | 200 => Ok(body["address"]
-                .as_str()
-                .context("the new session has no address yet")?
-                .into()),
-            401 => Err(anyhow!("the token no longer counts").context(Revoked)),
-            status => Err(anyhow!("creating a session failed ({status}): {body}")),
-        }
-    }
-
-    /// Revokes the token itself, as its person unlinks the chat.
-    pub fn revoke(&self, token: &str) -> Result<()> {
+    /// Removes the bridge of `credential` from its session.
+    pub fn remove(&self, credential: &str) -> Result<()> {
         let mut response = self
             .agent
-            .delete(format!("{}/api/apps/self", self.url))
-            .header("Authorization", format!("Bearer {token}"))
+            .delete(format!("{}/api/bridges/self", self.url))
+            .header("Authorization", format!("Bearer {credential}"))
             .call()
-            .map_err(|error| anyhow!("/api/apps/self: {error}"))?;
+            .map_err(|error| anyhow!("/api/bridges/self: {error}"))?;
         match response.status().as_u16() {
             204 | 401 | 404 => Ok(()),
             status => Err(anyhow!(
-                "revoking the token failed ({status}): {}",
+                "removing the bridge failed ({status}): {}",
                 response.body_mut().read_to_string().unwrap_or_default()
             )),
         }
     }
 }
 
-/// A person's link of their chat to their account.
+/// A chat's bridge, as kept on disk.
 #[derive(Serialize, Deserialize, Debug, Clone)]
 struct Link {
-    /// Their name, such as `luis`.
-    login: String,
-    /// The token the bot acts as them with.
-    token: String,
+    /// The credential the bot joins the session with.
+    credential: String,
+    /// Its name in the session, such as `luis/messagent`.
+    name: String,
+    /// Who added it.
+    by: String,
+    session: String,
+    /// Its address on the relay.
+    address: String,
+    /// Whether the chat is a private one, one person's alone.
+    private: bool,
+    /// The chat's label: a group's title, or the person's name.
+    title: String,
 }
 
-/// A linked chat while the service runs.
-struct Linked {
-    login: String,
-    token: String,
-    bridge: Arc<Bridge>,
-    chat: UserChat,
+/// The chat's place in its session, as kept on disk.
+#[derive(Serialize, Deserialize, Debug, Default)]
+struct Place {
+    /// The bridge's own link, with which it receives and says its notices.
+    me: Option<String>,
+    /// The last entry handled.
+    after: u64,
+    /// The entries that came from this chat, each with its message in Telegram.
+    messages: BTreeMap<u64, String>,
+    /// Those of them no agent has read yet.
+    unseen: BTreeSet<u64>,
+    /// How many were in the group when the session was last told.
+    members: Option<u64>,
+}
+
+/// The most entries of a chat whose message is kept, for reactions and 👀.
+const KEPT: usize = 2000;
+
+/// A bridged chat while the service runs.
+struct Bridged {
+    chat: i64,
+    link: Link,
+    dir: PathBuf,
+    place: Mutex<Place>,
+    stopped: AtomicBool,
+}
+
+impl Bridged {
+    fn save(&self, place: &Place) -> Result<()> {
+        write_private(&self.dir.join("place.json"), &serde_json::to_vec(place)?)
+    }
+
+    fn update(&self, change: impl FnOnce(&mut Place)) -> Result<()> {
+        let mut place = self.place.lock().expect("no holder panics");
+        change(&mut place);
+        self.save(&place)
+    }
+
+    /// Keeps that entry `n` came from this chat's message `message`.
+    fn sent(&self, n: u64, message: &str) -> Result<()> {
+        self.update(|place| {
+            place.messages.insert(n, message.to_string());
+            place.unseen.insert(n);
+            while place.messages.len() > KEPT {
+                place.messages.pop_first();
+            }
+        })
+    }
+
+    /// Whether `name` is an agent whose reading marks this chat's messages seen:
+    /// a participant's agent, and no bridge.
+    fn is_agent(name: &str) -> bool {
+        name.contains('/') && !name.ends_with(&format!("/{CLIENT_ID}"))
+    }
 }
 
 /// How far the updates are fetched.
@@ -238,10 +310,19 @@ struct Offset {
 struct Service {
     bot: Bot,
     accounts: Accounts,
+    relay: Relay,
     state: PathBuf,
-    linked: Mutex<HashMap<i64, Linked>>,
-    /// The people linking, by Telegram id: one linking each at a time.
+    chats: Mutex<HashMap<i64, Arc<Bridged>>>,
+    /// The chats being bridged: one bridging each at a time.
     linking: Mutex<HashSet<i64>>,
+    /// The groups the bot was added to and nobody bridged yet, since when.
+    waiting: Mutex<HashMap<i64, Instant>>,
+    /// The Telegram accounts linked to an account, by Telegram id, as the bot saw them linked;
+    /// the account service decides whether they still are, at each join.
+    identities: Mutex<BTreeMap<i64, String>>,
+    /// The participants through which linked people speak, by session address and name, shared
+    /// by every chat bridged into that session, since a name joins a session once.
+    people: Mutex<BTreeMap<String, String>>,
 }
 
 /// Creates a directory readable by its owner only.
@@ -251,299 +332,941 @@ fn private_dir(dir: &Path) -> Result<()> {
     Ok(())
 }
 
+fn load<T: DeserializeOwned + Default>(file: &Path) -> Result<T> {
+    match fs::read_to_string(file) {
+        Ok(text) => Ok(serde_json::from_str(&text)
+            .with_context(|| format!("can't read {}", file.display()))?),
+        Err(error) if error.kind() == ErrorKind::NotFound => Ok(T::default()),
+        Err(error) => Err(error.into()),
+    }
+}
+
+/// One line of at most `most` characters, for a label anyone in Telegram sets.
+pub fn label(text: &str, most: usize) -> String {
+    let line = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    let mut label: String = line.chars().take(most).collect();
+    if line.chars().count() > most {
+        label.push('…');
+    }
+    label
+}
+
+/// A Telegram user as others read them: their name and, where they have one, their username.
+pub fn name_of(user: &User) -> String {
+    let name = match &user.last_name {
+        Some(last) => format!("{} {last}", user.first_name),
+        None => user.first_name.clone(),
+    };
+    let name = label(&name, LABEL);
+    match &user.username {
+        Some(username) => format!("{name} (@{})", label(username, 40)),
+        None => name,
+    }
+}
+
+/// The command a message gives the bot, such as `start`, from `/start` or `/start@bot args`.
+fn command(message: &Message) -> Option<&str> {
+    let text = message.text.as_deref()?.trim();
+    let word = text.strip_prefix('/')?.split_whitespace().next()?;
+    Some(word.split('@').next().unwrap_or(word))
+}
+
+/// Where a forwarded message came from, as one line.
+fn origin(forward: &Value) -> String {
+    let name = match forward["type"].as_str() {
+        Some("user") => forward["sender_user"]["first_name"].as_str(),
+        Some("hidden_user") => forward["sender_user_name"].as_str(),
+        Some("chat") => forward["sender_chat"]["title"].as_str(),
+        Some("channel") => forward["chat"]["title"].as_str(),
+        _ => None,
+    };
+    label(name.unwrap_or("someone"), LABEL)
+}
+
 impl Service {
-    fn person_dir(&self, user: i64) -> PathBuf {
-        self.state.join("people").join(user.to_string())
+    fn chat_dir(&self, chat: i64) -> PathBuf {
+        self.state.join("chats").join(chat.to_string())
     }
 
-    fn chat(&self, user: i64) -> UserChat {
+    fn telegram(&self, chat: i64) -> UserChat {
         UserChat {
             bot: self.bot.clone(),
-            user,
+            user: chat,
         }
     }
 
-    /// Tells the person something of messagent's own.
-    fn tell(&self, user: i64, text: &str) {
-        if let Err(error) = self.bot.send_message(user, text) {
-            eprintln!("messagent serve: can't tell {user}: {error:#}");
+    /// Tells a chat something of the bot's own.
+    fn tell(&self, chat: i64, text: &str) {
+        if let Err(error) = self.bot.send_message(chat, text) {
+            eprintln!("messagent serve: can't tell {chat}: {error:#}");
         }
     }
 
-    /// Starts the bridge of a linked chat.
-    fn start(self: &Arc<Self>, user: i64, link: Link) -> Result<Arc<Bridge>> {
-        let dir = self.person_dir(user);
+    fn bridged(&self, chat: i64) -> Option<Arc<Bridged>> {
+        self.chats
+            .lock()
+            .expect("no holder panics")
+            .get(&chat)
+            .cloned()
+    }
+
+    fn save_identities(&self) -> Result<()> {
+        let identities = self.identities.lock().expect("no holder panics");
+        write_private(
+            &self.state.join("identities.json"),
+            &serde_json::to_vec(&*identities)?,
+        )
+    }
+
+    fn save_people(&self) -> Result<()> {
+        let people = self.people.lock().expect("no holder panics");
+        write_private(
+            &self.state.join("people.json"),
+            &serde_json::to_vec(&*people)?,
+        )
+    }
+
+    /// Starts carrying a bridged chat.
+    fn start(self: &Arc<Self>, chat: i64, link: Link) -> Result<Arc<Bridged>> {
+        let dir = self.chat_dir(chat);
         private_dir(&dir)?;
-        let accounts = self.accounts.clone();
-        let token = link.token.clone();
-        let chat = self.chat(user);
-        let bridge = Arc::new(Bridge::new(
-            Paths {
-                config: dir.clone(),
-                state: dir,
-            },
-            Room {
-                name: link.login.clone(),
-                agents: Agents::Any,
-                token: Some(link.token.clone()),
-            },
-            Box::new(move || accounts.create_session(&token, SESSION_NAME)),
-            Box::new(move || Ok(Box::new(chat.clone()) as Box<dyn Messenger>)),
-        )?);
-        let service = self.clone();
-        bridge.spawn(Waker::spawn(String::new(), || {}), move |error| {
-            eprintln!("messagent serve: the bridge of {user} ended: {error:#}");
-            service.ended(user, &error);
+        let bridged = Arc::new(Bridged {
+            chat,
+            place: Mutex::new(load(&dir.join("place.json"))?),
+            dir,
+            link,
+            stopped: AtomicBool::new(false),
         });
-        self.linked.lock().expect("no holder panics").insert(
-            user,
-            Linked {
-                login: link.login,
-                token: link.token,
-                bridge: bridge.clone(),
-                chat: self.chat(user),
-            },
-        );
-        Ok(bridge)
+        self.chats
+            .lock()
+            .expect("no holder panics")
+            .insert(chat, bridged.clone());
+        let service = self.clone();
+        let listening = bridged.clone();
+        thread::spawn(move || {
+            if let Err(error) = service.listen(&listening) {
+                eprintln!("messagent serve: the bridge of {chat} ended: {error:#}");
+            }
+        });
+        Ok(bridged)
     }
 
-    /// A bridge ended: where its token was revoked, the chat is unlinked.
-    fn ended(&self, user: i64, error: &anyhow::Error) {
-        if error.downcast_ref::<Revoked>().is_none() {
-            return;
-        }
-        let token = match self.linked.lock().expect("no holder panics").get(&user) {
-            Some(linked) => linked.token.clone(),
-            None => return,
-        };
-        if let Ok(None) = self.accounts.login(&token) {
-            self.unlink(user);
-            self.tell(
-                user,
-                "This chat was unlinked from your Vibe Together account. Send /start to link it again.",
-            );
-        }
-    }
-
-    /// Unlinks a chat: its token is revoked, its bridge leaves, and its files go.
-    fn unlink(&self, user: i64) {
-        let Some(linked) = self.linked.lock().expect("no holder panics").remove(&user) else {
+    /// Ends a chat's bridge here: it stops, leaves the session, and its files go.
+    /// `remove` removes it at the account service too, as /stop does.
+    fn end(&self, chat: i64, remove: bool) {
+        let Some(bridged) = self.chats.lock().expect("no holder panics").remove(&chat) else {
             return;
         };
-        linked.bridge.stop();
-        if let Err(error) = self.accounts.revoke(&linked.token) {
-            eprintln!("messagent serve: can't revoke the token of {user}: {error:#}");
+        bridged.stopped.store(true, Ordering::Relaxed);
+        if remove && let Err(error) = self.accounts.remove(&bridged.link.credential) {
+            eprintln!("messagent serve: can't remove the bridge of {chat}: {error:#}");
         }
-        if let Err(error) = fs::remove_dir_all(self.person_dir(user)) {
-            eprintln!("messagent serve: can't remove the files of {user}: {error:#}");
+        let me = bridged.place.lock().expect("no holder panics").me.clone();
+        if let Some(me) = me
+            && let Err(error) = self.relay.leave(&me)
+        {
+            eprintln!("messagent serve: can't leave the session of {chat}: {error:#}");
+        }
+        if let Err(error) = fs::remove_dir_all(self.chat_dir(chat)) {
+            eprintln!("messagent serve: can't remove the files of {chat}: {error:#}");
         }
     }
 
-    /// Starts linking a chat, unless it is linking already.
-    fn link(self: &Arc<Self>, from: &User) {
-        let user = from.id;
+    /// Whether the bridge still is at the account service: where it no longer is, removed in
+    /// Vibe Together or gone with its session or its member, the chat is told and it ends.
+    fn still(&self, bridged: &Bridged) -> bool {
+        match self.accounts.own(&bridged.link.credential) {
+            Ok(Some(_)) => true,
+            Ok(None) => {
+                self.end(bridged.chat, false);
+                self.tell(
+                    bridged.chat,
+                    "This chat is no longer bridged: the bridge was removed in Vibe Together, or its session is gone. Send /start to bridge it again.",
+                );
+                false
+            }
+            Err(error) => {
+                eprintln!(
+                    "messagent serve: can't ask about {}: {error:#}",
+                    bridged.chat
+                );
+                true
+            }
+        }
+    }
+
+    /// The bridge's own link in its session, joined where it has none: the place stays locked
+    /// meanwhile, so that its listening and its notices join once.
+    fn me(&self, bridged: &Bridged) -> Result<String> {
+        let mut place = bridged.place.lock().expect("no holder panics");
+        if let Some(me) = &place.me {
+            return Ok(me.clone());
+        }
+        let joined = self.relay.join(
+            &bridged.link.address,
+            &bridged.link.name,
+            Some(&bridged.link.credential),
+        )?;
+        place.me = Some(joined.link.clone());
+        bridged.save(&place)?;
+        Ok(joined.link)
+    }
+
+    /// Says something of the bridge's own in the session, returning its entry's number.
+    fn notice(&self, bridged: &Bridged, text: &str) -> Result<u64> {
+        let me = self.me(bridged)?;
+        self.send(bridged, &me, SPEECH, None, text.as_bytes())
+    }
+
+    /// Sends with a link of the bridge's, joining again once where it was let go.
+    fn send(
+        &self,
+        bridged: &Bridged,
+        me: &str,
+        kind: &str,
+        filename: Option<&str>,
+        body: &[u8],
+    ) -> Result<u64> {
+        match self.relay.send(me, kind, filename, body) {
+            Err(error) if agentwire::status(&error) == Some(403) => {
+                self.relay.rejoin(me, Some(&bridged.link.credential))?;
+                self.relay.send(me, kind, filename, body)
+            }
+            sent => sent,
+        }
+    }
+
+    /// The link through which `login` speaks in the chat's session, or `None` where they may not:
+    /// they unlinked their Telegram, or are no member of the session's group.
+    fn person(&self, bridged: &Bridged, login: &str) -> Result<Option<String>> {
+        let key = format!("{} {login}", bridged.link.address);
+        if let Some(link) = self.people.lock().expect("no holder panics").get(&key) {
+            return Ok(Some(link.clone()));
+        }
+        match self
+            .relay
+            .join(&bridged.link.address, login, Some(&bridged.link.credential))
+        {
+            Ok(joined) => {
+                self.people
+                    .lock()
+                    .expect("no holder panics")
+                    .insert(key, joined.link.clone());
+                self.save_people()?;
+                Ok(Some(joined.link))
+            }
+            Err(error) if matches!(agentwire::status(&error), Some(403 | 409)) => {
+                eprintln!(
+                    "messagent serve: {login} doesn't speak in {}: {error:#}",
+                    bridged.chat
+                );
+                Ok(None)
+            }
+            Err(error) => Err(error),
+        }
+    }
+
+    /// Sends as `login`, rejoining once where the participant was let go; `None` where they may
+    /// no longer speak, which forgets their link.
+    fn send_as(
+        &self,
+        bridged: &Bridged,
+        login: &str,
+        kind: &str,
+        filename: Option<&str>,
+        body: &[u8],
+    ) -> Result<Option<u64>> {
+        let Some(link) = self.person(bridged, login)? else {
+            return Ok(None);
+        };
+        match self.send(bridged, &link, kind, filename, body) {
+            Ok(n) => Ok(Some(n)),
+            Err(error) if matches!(agentwire::status(&error), Some(403 | 404)) => {
+                eprintln!(
+                    "messagent serve: {login} no longer speaks in {}: {error:#}",
+                    bridged.chat
+                );
+                let key = format!("{} {login}", bridged.link.address);
+                self.people.lock().expect("no holder panics").remove(&key);
+                self.save_people()?;
+                Ok(None)
+            }
+            Err(error) => Err(error),
+        }
+    }
+
+    /// Tells the session who reads it: the chat, and in a group how many are in it.
+    fn audience(&self, bridged: &Bridged) -> Result<()> {
+        let link = &bridged.link;
+        let text = if link.private {
+            format!(
+                "This session is bridged to {}'s private Telegram chat with messagent, added by {}: everything said here reaches that chat.",
+                link.title, link.by
+            )
+        } else {
+            let members = self
+                .bot
+                .member_count(bridged.chat)
+                .map(|n| n.saturating_sub(1))
+                .ok();
+            let told = bridged.place.lock().expect("no holder panics").members;
+            if told.is_some() && told == members {
+                return Ok(());
+            }
+            bridged.update(|place| place.members = members)?;
+            let count = members.map_or(String::new(), |n| format!(" ({n} people)"));
+            format!(
+                "This session is bridged to the Telegram group \"{}\"{count}, added by {}: everything said here reaches all of them. \
+                 People who linked their Telegram account speak here as themselves; everyone else's messages come from {}, marked unverified.",
+                link.title, link.by, link.name
+            )
+        };
+        self.notice(bridged, &text).map(drop)
+    }
+
+    /// Starts bridging a chat, unless it is being bridged already.
+    fn link(self: &Arc<Self>, message: &Message, from: &User) {
+        let chat = message.chat.id;
         {
             let mut linking = self.linking.lock().expect("no holder panics");
-            if linking.contains(&user) {
+            if linking.contains(&chat) {
                 return;
             }
-            if linking.len() >= MAX_LINKING {
+            if linking.len() >= MAX_LINKING
+                || self.chats.lock().expect("no holder panics").len() >= MAX_CHATS
+            {
                 drop(linking);
-                self.tell(
-                    user,
-                    "Busy linking other chats: try again in a few minutes.",
-                );
+                self.tell(chat, "Busy: try again in a few minutes.");
                 return;
             }
-            linking.insert(user);
+            linking.insert(chat);
         }
         let service = self.clone();
-        let what_for = what_for(from);
+        let private = message.chat.kind == "private";
+        let title = if private {
+            name_of(from)
+        } else {
+            label(message.chat.title.as_deref().unwrap_or("a group"), LABEL)
+        };
+        let from = from.clone();
         thread::spawn(move || {
-            if let Err(error) = service.linking(user, &what_for) {
-                eprintln!("messagent serve: linking {user} failed: {error:#}");
+            if let Err(error) = service.linking(chat, private, &title, &from) {
+                eprintln!("messagent serve: bridging {chat} failed: {error:#}");
                 service.tell(
-                    user,
-                    "Linking failed on our side. Send /start to try again.",
+                    chat,
+                    "Bridging failed on our side. Send /start to try again.",
                 );
             }
             service
                 .linking
                 .lock()
                 .expect("no holder panics")
-                .remove(&user);
+                .remove(&chat);
         });
     }
 
-    /// Links a chat: the person approves the OTP, and the bridge starts.
-    fn linking(self: &Arc<Self>, user: i64, what_for: &str) -> Result<()> {
-        let code = self.accounts.ask(what_for)?;
+    /// Bridges a chat: a member approves the OTP and picks the session, and the bridge starts.
+    fn linking(self: &Arc<Self>, chat: i64, private: bool, title: &str, from: &User) -> Result<()> {
+        let asker = what_for(from);
+        let (what_for, identity) = if private {
+            (
+                format!("Telegram private chat with {asker}"),
+                Some((from.id, name_of(from))),
+            )
+        } else {
+            let members = self.bot.member_count(chat).map_or(String::new(), |n| {
+                format!(", {} people", n.saturating_sub(1))
+            });
+            (
+                format!("Telegram group \"{title}\", id {chat}{members}; asked by {asker}"),
+                None,
+            )
+        };
+        let code = self.accounts.ask(&what_for, identity)?;
+        let linked = if private {
+            " Approving also links your Telegram account to your Vibe Together account, so that what you write in bridged chats reaches their sessions as you."
+        } else {
+            ""
+        };
         self.tell(
-            user,
+            chat,
             &format!(
-                "To link this chat to your Vibe Together account, open\n{}\nand approve it there, signed in. \
-                 Approve only if the page shows the code {} and your own Telegram account.\n\
-                 Once linked, I act as you: what you write here goes to your agents as yours, \
-                 and their answers come back here. Telegram itself can read chats with bots.",
+                "To bridge this chat into a Vibe Together session, open\n{}\nsigned in, pick the session, and approve. \
+                 Approve only if the page shows the code {}.{linked}\n\
+                 Once bridged, everything said here reaches the session, its people and their agents, and everything said there comes here. \
+                 Telegram itself can read chats with bots.",
                 code.verification_uri_complete, code.user_code
             ),
         );
         let until = Instant::now() + Duration::from_secs(code.expires_in);
         let mut interval = Duration::from_secs(code.interval.max(1));
-        let token = loop {
+        let credential = loop {
             thread::sleep(interval);
             if Instant::now() > until {
                 self.tell(
-                    user,
-                    "The link expired before it was approved. Send /start to try again.",
+                    chat,
+                    "The OTP expired before it was approved. Send /start to try again.",
                 );
                 return Ok(());
             }
             match self.accounts.poll(&code.device_code) {
                 Ok(Approval::Pending) => {}
-                Ok(Approval::Approved(token)) => break token,
+                Ok(Approval::Approved(credential)) => break credential,
                 Ok(Approval::Ended(error)) => {
                     let text = match error.as_str() {
-                        "access_denied" => "Linking was denied. Send /start to try again.",
-                        _ => "The link expired before it was approved. Send /start to try again.",
+                        "access_denied" => "Bridging was denied. Send /start to try again.",
+                        _ => "The OTP expired before it was approved. Send /start to try again.",
                     };
-                    self.tell(user, text);
+                    self.tell(chat, text);
                     return Ok(());
                 }
                 Err(error) => {
-                    eprintln!("messagent serve: asking about {user}'s OTP failed: {error:#}");
+                    eprintln!("messagent serve: asking about {chat}'s OTP failed: {error:#}");
                     interval = (interval * 2).min(Duration::from_secs(60));
                 }
             }
         };
-        let login = self
+        let own = self
             .accounts
-            .login(&token)?
-            .context("the new token doesn't count")?;
-        let link = Link { login, token };
-        let dir = self.person_dir(user);
+            .own(&credential)?
+            .context("the new bridge doesn't count")?;
+        let link = Link {
+            credential,
+            name: own.name.clone(),
+            by: own.by.clone(),
+            session: own.session.id.clone(),
+            address: own
+                .session
+                .address
+                .clone()
+                .context("the session has no address yet")?,
+            private,
+            title: title.to_string(),
+        };
+        // A chat bridged already, such as into another session, ends first.
+        if self.bridged(chat).is_some() {
+            self.end(chat, true);
+        }
+        let dir = self.chat_dir(chat);
         private_dir(&dir)?;
-        write_private(&dir.join("link.json"), &serde_json::to_vec(&link)?)?;
-        // A chat already linked, such as to another account, is unlinked first.
-        self.unlink_quietly(user);
-        let login = link.login.clone();
-        let bridge = self.start(user, link)?;
-        bridge.ensure()?;
-        bridge.notice(&format!(
-            "This Telegram chat is now linked to {login}'s account."
-        ))?;
+        write_private(&dir.join("bridge.json"), &serde_json::to_vec(&link)?)?;
+        if private {
+            self.identities
+                .lock()
+                .expect("no holder panics")
+                .insert(from.id, own.by.clone());
+            self.save_identities()?;
+        }
+        self.waiting.lock().expect("no holder panics").remove(&chat);
+        let bridged = self.start(chat, link)?;
+        self.audience(&bridged)?;
         self.tell(
-            user,
+            chat,
             &format!(
-                "Linked to {login}. Your agents find this chat among your sessions, as \"{SESSION_NAME}\". \
-                 /stop unlinks it."
+                "Bridged into the session \"{}\" of {}, added by {}. Everything said there comes here, and what is said here goes there.{} /stop ends the bridge.",
+                label(&own.session.name, LABEL),
+                label(&own.session.group.name, LABEL),
+                own.by,
+                if private {
+                    ""
+                } else {
+                    " People who linked their Telegram account, in a private chat with me, show there as themselves; everyone else as unverified."
+                }
             ),
         );
         Ok(())
     }
 
-    /// Unlinks a chat about to be linked anew, keeping the new link's file.
-    fn unlink_quietly(&self, user: i64) {
-        if let Some(linked) = self.linked.lock().expect("no holder panics").remove(&user) {
-            linked.bridge.stop();
-            if let Err(error) = self.accounts.revoke(&linked.token) {
-                eprintln!("messagent serve: can't revoke the token of {user}: {error:#}");
-            }
+    /// Whether `from` may end a chat's bridge: in a private chat its person, in a group whoever
+    /// added it, by their linked Telegram account, or an admin of the group.
+    fn may_stop(&self, bridged: &Bridged, from: &User) -> bool {
+        if bridged.link.private {
+            return true;
         }
+        let linked = self
+            .identities
+            .lock()
+            .expect("no holder panics")
+            .get(&from.id)
+            .cloned();
+        linked.as_deref() == Some(bridged.link.by.as_str())
+            || self
+                .bot
+                .member_status(bridged.chat, from.id)
+                .is_ok_and(|status| status == "creator" || status == "administrator")
     }
 
-    /// Takes in one message: only a private chat is a conversation so far.
-    fn message(self: &Arc<Self>, message: &Message) {
+    /// Takes in one message, or an edit of one.
+    fn message(self: &Arc<Self>, message: &Message, edited: bool) {
+        let chat = message.chat.id;
+        if message.chat.kind == "channel" {
+            return;
+        }
+        if let Some(to) = message.migrate_to_chat_id {
+            self.migrate(chat, to);
+            return;
+        }
+        let bridged = self.bridged(chat);
+        // Someone joined or left a group: the session learns how many read it.
+        if message.new_chat_members.is_some() || message.left_chat_member.is_some() {
+            if let Some(bridged) = bridged
+                && let Err(error) = self.audience(&bridged)
+            {
+                eprintln!("messagent serve: can't tell {chat}'s session its audience: {error:#}");
+            }
+            return;
+        }
+        // The sender is a person alone: no bot, and no channel or anonymous admin.
         let Some(from) = &message.from else {
             return;
         };
-        if message.chat.kind != "private" || message.chat.id != from.id {
+        if from.is_bot || message.sender_chat.is_some() {
             return;
         }
-        let user = from.id;
-        let text = message.text.as_deref().map(str::trim);
-        let linked = self
-            .linked
-            .lock()
-            .expect("no holder panics")
-            .get(&user)
-            .map(|linked| {
-                (
-                    linked.login.clone(),
-                    linked.bridge.clone(),
-                    linked.chat.clone(),
-                )
-            });
-        let Some((login, bridge, chat)) = linked else {
-            self.link(from);
+        let Some(bridged) = bridged else {
+            let private = message.chat.kind == "private";
+            if edited {
+                return;
+            }
+            if private || command(message) == Some("start") {
+                self.link(message, from);
+            } else if !self
+                .waiting
+                .lock()
+                .expect("no holder panics")
+                .contains_key(&chat)
+                && !self
+                    .linking
+                    .lock()
+                    .expect("no holder panics")
+                    .contains(&chat)
+            {
+                // A group nobody bridged, such as from before a restart.
+                if let Err(error) = self.bot.leave_chat(chat) {
+                    eprintln!("messagent serve: can't leave {chat}: {error:#}");
+                }
+            }
             return;
         };
-        match text {
-            Some("/stop") => {
-                self.unlink(user);
-                self.tell(user, "Unlinked: this chat no longer reaches your agents. Send /start to link it again.");
+        match command(message).filter(|_| !edited) {
+            Some("stop") => {
+                if self.may_stop(&bridged, from) {
+                    self.end(chat, true);
+                    self.tell(chat, "The bridge ended: this chat no longer reaches the session. Send /start to bridge it again.");
+                } else {
+                    self.tell(
+                        chat,
+                        "Only whoever added the bridge, or an admin of the group, ends it.",
+                    );
+                }
             }
-            Some(text) if text == "/start" || text.starts_with("/start ") => self.tell(
-                user,
-                &format!("This chat is linked to {login}'s account. /stop unlinks it."),
+            Some("start") => self.tell(
+                chat,
+                &format!(
+                    "This chat is bridged into a session, added by {}. /stop ends the bridge.",
+                    bridged.link.by
+                ),
             ),
             _ => {
-                let arrived = message_of(message);
-                if let Err(error) = bridge.arrived(&chat, arrived) {
-                    eprintln!("messagent serve: can't carry a message of {user}: {error:#}");
-                    if error.downcast_ref::<Revoked>().is_some() {
-                        self.ended(user, &error);
+                if let Err(error) = self.carry(&bridged, message, from, edited) {
+                    eprintln!("messagent serve: can't carry a message of {chat}: {error:#}");
+                    if matches!(agentwire::status(&error), Some(403 | 404)) {
+                        self.still(&bridged);
                     }
                 }
             }
         }
     }
+
+    /// Carries a message into the session: as its sender where they linked their Telegram
+    /// account, else from the bridge, labelled with their name and marked unverified.
+    fn carry(&self, bridged: &Bridged, message: &Message, from: &User, edited: bool) -> Result<()> {
+        let Arrived::Message { id, image, text } = message_of(message) else {
+            return Ok(());
+        };
+        // What it is: an edit, or a forward of someone else's words, which stay theirs.
+        let mut marks = Vec::new();
+        if edited {
+            marks.push("edited".to_string());
+        }
+        if let Some(forward) = &message.forward_origin {
+            marks.push(format!("forwarded from {}", origin(forward)));
+        }
+        let mark = if marks.is_empty() {
+            String::new()
+        } else {
+            format!("[{}] ", marks.join(", "))
+        };
+        let text = text.filter(|text| !text.is_empty());
+        let telegram = self.telegram(bridged.chat);
+        let login = self
+            .identities
+            .lock()
+            .expect("no holder panics")
+            .get(&from.id)
+            .cloned();
+        if let Some(login) = login {
+            let mut spoke = true;
+            if let Some(file) = &image {
+                let bytes = telegram.download(file)?;
+                match self.send_as(
+                    bridged,
+                    &login,
+                    &file.kind,
+                    file.filename.as_deref(),
+                    &bytes,
+                )? {
+                    Some(n) => bridged.sent(n, &id)?,
+                    None => spoke = false,
+                }
+            }
+            if spoke
+                && let Some(text) =
+                    text.as_ref()
+                        .map(|text| format!("{mark}{text}"))
+                        .or_else(|| {
+                            (!mark.is_empty() && image.is_none()).then(|| mark.trim().to_string())
+                        })
+            {
+                match self.send_as(bridged, &login, SPEECH, None, text.as_bytes())? {
+                    Some(n) => bridged.sent(n, &id)?,
+                    None => spoke = false,
+                }
+            }
+            if spoke {
+                return Ok(());
+            }
+        }
+        // Unverified: from the bridge itself, its sender named in front.
+        let me = self.me(bridged)?;
+        let who = format!("{} (Telegram, unverified)", name_of(from));
+        let said = match (&text, &image) {
+            (Some(text), _) => format!("{who}: {mark}{text}"),
+            (None, Some(_)) => format!("{who}: {mark}[an image, below]"),
+            (None, None) => format!("{who}: {mark}"),
+        };
+        let n = self.send(bridged, &me, SPEECH, None, said.as_bytes())?;
+        bridged.sent(n, &id)?;
+        if let Some(file) = &image {
+            let bytes = telegram.download(file)?;
+            let n = self.send(bridged, &me, &file.kind, file.filename.as_deref(), &bytes)?;
+            bridged.sent(n, &id)?;
+        }
+        Ok(())
+    }
+
+    /// A group became a supergroup: its bridge moves to the new id.
+    fn migrate(self: &Arc<Self>, from: i64, to: i64) {
+        let Some(bridged) = self.chats.lock().expect("no holder panics").remove(&from) else {
+            return;
+        };
+        bridged.stopped.store(true, Ordering::Relaxed);
+        let moved = fs::rename(self.chat_dir(from), self.chat_dir(to))
+            .map_err(anyhow::Error::from)
+            .and_then(|()| self.start(to, bridged.link.clone()).map(drop));
+        if let Err(error) = moved {
+            eprintln!("messagent serve: can't move the bridge of {from} to {to}: {error:#}");
+        }
+    }
+
+    /// The bot was added to a group, or removed from a chat.
+    fn membership(&self, update: &crate::telegram::ChatMember) {
+        let chat = update.chat.id;
+        let status = update.new_chat_member.status.as_str();
+        if matches!(status, "left" | "kicked") {
+            self.waiting.lock().expect("no holder panics").remove(&chat);
+            if self.bridged(chat).is_some() {
+                self.end(chat, true);
+            }
+            return;
+        }
+        if update.chat.kind != "private" && self.bridged(chat).is_none() {
+            self.waiting
+                .lock()
+                .expect("no holder panics")
+                .insert(chat, Instant::now());
+            self.tell(
+                chat,
+                "Send /start to bridge this group into a Vibe Together session. Without it I leave in 10 minutes.",
+            );
+        }
+    }
+
+    /// Leaves the groups nobody bridged in time.
+    fn leave_unbridged(&self) {
+        let due: Vec<i64> = {
+            let mut waiting = self.waiting.lock().expect("no holder panics");
+            let linking = self.linking.lock().expect("no holder panics");
+            let due: Vec<i64> = waiting
+                .iter()
+                .filter(|(chat, since)| since.elapsed() > UNBRIDGED && !linking.contains(chat))
+                .map(|(chat, _)| *chat)
+                .collect();
+            for chat in &due {
+                waiting.remove(chat);
+            }
+            due
+        };
+        for chat in due {
+            if self.bridged(chat).is_none()
+                && let Err(error) = self.bot.leave_chat(chat)
+            {
+                eprintln!("messagent serve: can't leave {chat}: {error:#}");
+            }
+        }
+    }
+
+    /// Receives from the session for good, carrying what comes out to the chat.
+    fn listen(&self, bridged: &Bridged) -> Result<()> {
+        let telegram = self.telegram(bridged.chat);
+        let mut backoff = Backoff::new();
+        while !bridged.stopped.load(Ordering::Relaxed) {
+            let me = match self.me(bridged) {
+                Ok(me) => me,
+                Err(error) if matches!(agentwire::status(&error), Some(403 | 404)) => {
+                    if !self.still(bridged) {
+                        return Ok(());
+                    }
+                    backoff.wait(&error);
+                    continue;
+                }
+                Err(error) => {
+                    backoff.wait(&error);
+                    continue;
+                }
+            };
+            let after = bridged.place.lock().expect("no holder panics").after;
+            match self.relay.receive(&me, after) {
+                Ok(received) => {
+                    backoff = Backoff::new();
+                    self.received(bridged, &telegram, received)?;
+                }
+                Err(error) => match agentwire::status(&error) {
+                    Some(404) => {
+                        if !self.still(bridged) {
+                            return Ok(());
+                        }
+                        // The relay lost the session's participant: it joins anew.
+                        bridged.update(|place| place.me = None)?;
+                        backoff.wait(&error);
+                    }
+                    Some(403) => {
+                        if let Err(error) = self.relay.rejoin(&me, Some(&bridged.link.credential)) {
+                            if !self.still(bridged) {
+                                return Ok(());
+                            }
+                            backoff.wait(&error);
+                        }
+                    }
+                    _ => backoff.wait(&error),
+                },
+            }
+        }
+        Ok(())
+    }
+
+    /// Takes in one receive: what goes out to the chat, and what the agents have read.
+    fn received(&self, bridged: &Bridged, telegram: &UserChat, received: Received) -> Result<()> {
+        for entry in &received.entries {
+            if bridged.stopped.load(Ordering::Relaxed) {
+                return Ok(());
+            }
+            let (after, ours) = {
+                let place = bridged.place.lock().expect("no holder panics");
+                (place.after, place.messages.contains_key(&entry.n))
+            };
+            if entry.n <= after {
+                continue;
+            }
+            // What came from this chat, and the bridge's own notices, are the chat's already;
+            // one that pings the bridge alone is for its use, such as an image a Telegram
+            // message sends.
+            let own = entry.from == bridged.link.name;
+            let for_bridge = !entry.is(telegram.native())
+                && matches!(Ping::of(&entry.kind), Some(Ping::Only(names))
+                    if !names.is_empty() && names.iter().all(|name| *name == bridged.link.name));
+            if !(ours || own || for_bridge || entry.is(JOIN) || entry.is(LEAVE)) {
+                self.deliver(bridged, telegram, entry)?;
+            }
+            bridged.update(|place| place.after = entry.n)?;
+        }
+        let read = received
+            .presence
+            .iter()
+            .filter(|(name, _)| Bridged::is_agent(name))
+            .map(|(_, presence)| presence.read)
+            .max()
+            .unwrap_or(0);
+        let seen: Vec<(u64, String)> = {
+            let place = bridged.place.lock().expect("no holder panics");
+            place
+                .unseen
+                .range(..=read)
+                .filter_map(|n| place.messages.get(n).map(|message| (*n, message.clone())))
+                .collect()
+        };
+        let mut reacted = HashSet::new();
+        for (n, message) in seen {
+            if reacted.insert(message.clone())
+                && let Err(error) = telegram.react(&message, "👀")
+            {
+                eprintln!("messagent serve: can't mark a message seen: {error:#}");
+            }
+            bridged.update(|place| {
+                place.unseen.remove(&n);
+            })?;
+        }
+        bridged.update(|place| {
+            place
+                .unseen
+                .retain(|n| *n > read || place.messages.contains_key(n))
+        })?;
+        Ok(())
+    }
+
+    /// Carries an entry out, riding out passing failures; one Telegram refuses becomes a notice.
+    fn deliver(&self, bridged: &Bridged, telegram: &UserChat, entry: &Entry) -> Result<()> {
+        let mut backoff = Backoff::new();
+        loop {
+            match self.out(bridged, telegram, entry) {
+                Ok(()) => return Ok(()),
+                Err(error) if refused(&error) => {
+                    let text = format!(
+                        "Entry {} didn't reach the Telegram chat: {error:#}",
+                        entry.n
+                    );
+                    eprintln!("messagent serve: {text}");
+                    return self.notice(bridged, &text).map(drop);
+                }
+                Err(error) => backoff.wait(&error),
+            }
+        }
+    }
+
+    /// Carries one entry out to the chat, if it is for people.
+    fn out(&self, bridged: &Bridged, telegram: &UserChat, entry: &Entry) -> Result<()> {
+        let me = self.me(bridged)?;
+        if entry.is(reactions::REACTION) {
+            let reaction: Reaction = serde_json::from_str(entry.text.as_deref().unwrap_or(""))?;
+            let message = bridged
+                .place
+                .lock()
+                .expect("no holder panics")
+                .messages
+                .get(&reaction.entry)
+                .cloned();
+            if let Some(message) = message {
+                telegram.react(&message, &reaction.emoji)?;
+                bridged.update(|place| {
+                    place.unseen.remove(&reaction.entry);
+                })?;
+            }
+            return Ok(());
+        }
+        let image = |n: u64| -> Result<Image> {
+            let payload = self.relay.fetch(&me, n)?;
+            Ok(Image {
+                kind: base(&payload.kind),
+                filename: payload.filename,
+                bytes: payload.bytes,
+            })
+        };
+        // What pings nobody in the chat reaches it without a notification: in a private chat
+        // its person is pinged by their name, in a group anyone by a message for everyone.
+        let quiet = if bridged.link.private {
+            !pings(entry, &bridged.link.by, telegram.native())
+        } else {
+            !pings_any(entry, telegram.native(), |_| false)
+        };
+        if entry.is(telegram.native()) {
+            let body = match &entry.text {
+                Some(text) => text.clone().into_bytes(),
+                None => self.relay.fetch(&me, entry.n)?.bytes,
+            };
+            telegram.send_native(&body, &image, quiet)?;
+            return Ok(());
+        }
+        if !::agentwire::chat::is_message(&entry.kind) {
+            return Ok(());
+        }
+        if is_image(entry) {
+            telegram.send_image(&image(entry.n)?, quiet)?;
+            return Ok(());
+        }
+        // In a private chat its person's own agents speak without a name, as a friend does.
+        let by = format!("{}/", bridged.link.by);
+        let text = plain(entry, |name| {
+            bridged.link.private && name.starts_with(&by) && name != bridged.link.name
+        });
+        for part in telegram.split(&text) {
+            telegram.send(&part, quiet)?;
+        }
+        Ok(())
+    }
 }
 
-/// What the OTP's page shows the link is for: the Telegram id and username, which no one else can
+/// Who asks, as the OTP's page shows it: the Telegram id and username, which no one else can
 /// take, and the name, which anyone can choose, last.
 pub fn what_for(from: &User) -> String {
     let username = from
         .username
         .as_deref()
-        .map_or("no username".to_string(), |name| format!("@{name}"));
-    let name: String = from.first_name.chars().take(64).collect();
-    format!("Telegram id {}, {username}, named {name}", from.id)
+        .map_or("no username".to_string(), |name| {
+            format!("@{}", label(name, 40))
+        });
+    format!(
+        "Telegram id {}, {username}, named {}",
+        from.id,
+        label(&from.first_name, 64)
+    )
 }
 
-/// Runs the shared bot for good.
+/// Runs the bot for good.
 pub fn serve(settings: Settings) -> Result<()> {
     private_dir(&settings.state)?;
-    private_dir(&settings.state.join("people"))?;
     let lock = File::create(settings.state.join("serve.lock"))?;
     if lock.try_lock().is_err() {
         eprintln!("messagent serve: another `messagent serve` runs; waiting until it ends");
         lock.lock()?;
     }
+    // The links of before bridges, each a person's chat with an app's grant, which no longer counts.
+    let before = settings.state.join("people");
+    if before.exists() {
+        eprintln!(
+            "messagent serve: removing the links of before bridges, whose grants no longer count"
+        );
+        fs::remove_dir_all(&before)?;
+    }
+    private_dir(&settings.state.join("chats"))?;
     let offset_file = settings.state.join("telegram.json");
-    let mut offset: Offset = match fs::read_to_string(&offset_file) {
-        Ok(text) => serde_json::from_str(&text)?,
-        Err(error) if error.kind() == ErrorKind::NotFound => Offset::default(),
-        Err(error) => return Err(error.into()),
-    };
+    let mut offset: Offset = load(&offset_file)?;
     let service = Arc::new(Service {
         bot: settings.bot,
         accounts: settings.accounts,
+        relay: Relay::new(),
+        identities: Mutex::new(load(&settings.state.join("identities.json"))?),
+        people: Mutex::new(load(&settings.state.join("people.json"))?),
         state: settings.state,
-        linked: Mutex::new(HashMap::new()),
+        chats: Mutex::new(HashMap::new()),
         linking: Mutex::new(HashSet::new()),
+        waiting: Mutex::new(HashMap::new()),
     });
-    for entry in fs::read_dir(service.state.join("people"))? {
+    for entry in fs::read_dir(service.state.join("chats"))? {
         let entry = entry?;
-        let Ok(user) = entry.file_name().to_string_lossy().parse::<i64>() else {
+        let Ok(chat) = entry.file_name().to_string_lossy().parse::<i64>() else {
             continue;
         };
-        let link = match fs::read_to_string(entry.path().join("link.json")) {
-            Ok(text) => serde_json::from_str(&text)?,
-            Err(error) if error.kind() == ErrorKind::NotFound => continue,
+        let link: Option<Link> = match fs::read_to_string(entry.path().join("bridge.json")) {
+            Ok(text) => Some(serde_json::from_str(&text)?),
+            Err(error) if error.kind() == ErrorKind::NotFound => None,
             Err(error) => return Err(error.into()),
         };
-        service.start(user, link)?;
+        match link {
+            Some(link) => {
+                service.start(chat, link)?;
+            }
+            None => fs::remove_dir_all(entry.path())?,
+        }
     }
     if let Err(error) = service
         .bot
@@ -553,12 +1276,13 @@ pub fn serve(settings: Settings) -> Result<()> {
     }
     let mut delay = Duration::from_secs(1);
     loop {
+        service.leave_unbridged();
         // Saved before each fetch, which confirms the updates before the offset to Telegram.
         write_private(&offset_file, &serde_json::to_vec(&offset)?)?;
-        let updates = match service
-            .bot
-            .get_updates_of(offset.offset, &["message", "my_chat_member"])
-        {
+        let updates: Vec<Update> = match service.bot.get_updates_of(
+            offset.offset,
+            &["message", "edited_message", "my_chat_member"],
+        ) {
             Ok(updates) => {
                 delay = Duration::from_secs(1);
                 updates
@@ -582,14 +1306,13 @@ pub fn serve(settings: Settings) -> Result<()> {
             }
             offset.offset = update.update_id + 1;
             if let Some(message) = &update.message {
-                service.message(message);
+                service.message(message, false);
             }
-            // The person blocked the bot: the chat is unlinked.
-            if let Some(member) = &update.my_chat_member
-                && member.chat.kind == "private"
-                && member.new_chat_member.status == "kicked"
-            {
-                service.unlink(member.from.id);
+            if let Some(message) = &update.edited_message {
+                service.message(message, true);
+            }
+            if let Some(member) = &update.my_chat_member {
+                service.membership(member);
             }
         }
     }

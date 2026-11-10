@@ -44,15 +44,15 @@ pub const WAKE_FAILED: &str =
 
 /// The type of what the user and messagent say: a chat message in plain text, which pings everyone
 /// in the room, since everyone in the chat's room is in the conversation.
-const SPEECH: &str = "text/plain; charset=utf-8";
+pub const SPEECH: &str = "text/plain; charset=utf-8";
 
 /// A type without its parameters, such as `ping`.
-fn base(kind: &str) -> String {
+pub fn base(kind: &str) -> String {
     kind.split(';').next().unwrap_or("").trim().to_string()
 }
 
 /// Whether an entry is an image, by the base of its type.
-fn is_image(entry: &Entry) -> bool {
+pub fn is_image(entry: &Entry) -> bool {
     entry
         .kind
         .split(';')
@@ -222,17 +222,23 @@ impl std::fmt::Display for Revoked {
 impl std::error::Error for Revoked {}
 
 /// A pause after a failure that may pass, growing up to a minute.
-struct Backoff(Duration);
+pub struct Backoff(Duration);
+
+impl Default for Backoff {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl Backoff {
-    fn new() -> Self {
+    pub fn new() -> Self {
         Self(Duration::from_secs(1))
     }
 
-    fn wait(&mut self, error: &anyhow::Error) {
+    pub fn wait(&mut self, error: &anyhow::Error) {
         let retry = agentwire::retry(error).map(Duration::from_secs);
         let pause = retry.unwrap_or(self.0);
-        eprintln!("messagent watch: {error:#}; trying again in {pause:?}");
+        eprintln!("messagent: {error:#}; trying again in {pause:?}");
         thread::sleep(pause);
         self.0 = (self.0 * 2).min(Duration::from_secs(60));
     }
@@ -473,12 +479,12 @@ pub fn plain(entry: &Entry, is_agent: impl Fn(&str) -> bool) -> String {
 
 /// Whether an entry pings `name`, by chat's rule, under which an entry of a `vnd.` type
 /// is no message; a message in the messenger's own format pings as a message does.
-fn pings(entry: &Entry, name: &str, native: &str) -> bool {
+pub fn pings(entry: &Entry, name: &str, native: &str) -> bool {
     pings_any(entry, native, |pinged| pinged == name)
 }
 
 /// Whether an entry pings anyone `matches` holds, as `pings` does for one.
-fn pings_any(entry: &Entry, native: &str, matches: impl Fn(&str) -> bool) -> bool {
+pub fn pings_any(entry: &Entry, native: &str, matches: impl Fn(&str) -> bool) -> bool {
     match Ping::of(&entry.kind) {
         Some(Ping::Everyone) => true,
         Some(Ping::Only(names)) => names.iter().any(|name| matches(name)),
@@ -488,7 +494,7 @@ fn pings_any(entry: &Entry, native: &str, matches: impl Fn(&str) -> bool) -> boo
 
 /// Whether an error is the messenger refusing, or a message it can't take,
 /// rather than a failure that may pass.
-fn refused(error: &anyhow::Error) -> bool {
+pub fn refused(error: &anyhow::Error) -> bool {
     error.downcast_ref::<crate::telegram::Refusal>().is_some()
         || error.downcast_ref::<serde_json::Error>().is_some()
 }

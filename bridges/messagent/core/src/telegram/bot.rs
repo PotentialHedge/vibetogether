@@ -59,18 +59,24 @@ struct Response<T> {
     description: String,
 }
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, Clone)]
 pub struct User {
     pub id: i64,
+    #[serde(default)]
+    pub is_bot: bool,
     pub first_name: String,
+    pub last_name: Option<String>,
     pub username: Option<String>,
 }
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, Clone)]
 pub struct Chat {
     pub id: i64,
+    /// `private`, `group`, `supergroup` or `channel`.
     #[serde(rename = "type")]
     pub kind: String,
+    /// A group's title, which any member may set.
+    pub title: Option<String>,
 }
 
 #[derive(Deserialize, Debug)]
@@ -79,6 +85,16 @@ pub struct Message {
     pub date: i64,
     pub chat: Chat,
     pub from: Option<User>,
+    /// The chat a message is sent on behalf of, such as a channel or an anonymous admin:
+    /// then `from` is no person.
+    pub sender_chat: Option<Chat>,
+    /// Where a forwarded message came from, as Telegram gives it.
+    pub forward_origin: Option<Value>,
+    /// People who joined a group, and one who left it: a service message.
+    pub new_chat_members: Option<Vec<User>>,
+    pub left_chat_member: Option<User>,
+    /// A group that became a supergroup, with a new id.
+    pub migrate_to_chat_id: Option<i64>,
     pub text: Option<String>,
     pub caption: Option<String>,
     /// A photo, in the sizes Telegram keeps, the largest last.
@@ -118,6 +134,8 @@ pub struct Upload<'a> {
 pub struct Update {
     pub update_id: i64,
     pub message: Option<Message>,
+    /// A message edited, as it is now.
+    pub edited_message: Option<Message>,
     /// The bot's own membership in a chat changed, such as the user blocking it.
     pub my_chat_member: Option<ChatMember>,
 }
@@ -309,6 +327,24 @@ impl Bot {
             .send(&form[..])
             .map_err(|error| self.hide(method, error))?;
         Self::result(response)
+    }
+
+    /// Leaves a group.
+    pub fn leave_chat(&self, chat: i64) -> Result<()> {
+        self.call::<bool>("leaveChat", json!({ "chat_id": chat }))?;
+        Ok(())
+    }
+
+    /// How many are in a chat, the bot included.
+    pub fn member_count(&self, chat: i64) -> Result<u64> {
+        self.call("getChatMemberCount", json!({ "chat_id": chat }))
+    }
+
+    /// What `user` is in `chat`: `creator`, `administrator`, `member`, `restricted`, `left` or `kicked`.
+    pub fn member_status(&self, chat: i64, user: i64) -> Result<String> {
+        let member: Member =
+            self.call("getChatMember", json!({ "chat_id": chat, "user_id": user }))?;
+        Ok(member.status)
     }
 
     /// Sends a plain text.
