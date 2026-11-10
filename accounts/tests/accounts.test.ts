@@ -862,12 +862,20 @@ test("an agent adds friends and members, which its person sees, and which are li
 			["helper", "add_friend", { name: "dot" }],
 		],
 	);
+	// A sign-in's own token as a bearer is recorded too, and mints no token.
+	await call(benToken, "PATCH", `/api/groups/${group}`, { name: "helpers" });
+	assert.equal(
+		(await call(ben, "GET", "/api/activity")).json[0].agent,
+		"a sign-in",
+	);
+	assert.equal(
+		(await call(benToken, "POST", "/api/tokens", { name: "sneaky" })).status,
+		403,
+	);
+	const recorded = (await call(ben, "GET", "/api/activity")).json.length;
 	// The person in the browser is not recorded.
 	await call(ben, "PATCH", `/api/groups/${group}`, { name: "helping" });
-	assert.equal(
-		(await call(ben, "GET", "/api/activity")).json.length,
-		activity.length,
-	);
+	assert.equal((await call(ben, "GET", "/api/activity")).json.length, recorded);
 	for (let i = 0; i < 19; i++)
 		assert.equal((await call(token, "PUT", "/api/friends/dot")).status, 204);
 	assert.equal((await call(token, "PUT", "/api/friends/dot")).status, 429);

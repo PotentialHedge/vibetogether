@@ -1176,8 +1176,14 @@ api.openapi(
 		},
 	}),
 	async (c) => {
-		const { id: me, app, credential } = c.var.caller;
+		const { id: me, app, credential, token } = c.var.caller;
 		if (app) return c.text(notForApps, 403);
+		// A sign-in's own token would mint tokens that outlive signing out.
+		if (credential && !token)
+			return c.text(
+				"A sign-in mints no token as a bearer: mint it with the cookie, or with an agent's token.",
+				403,
+			);
 		const { name } = c.req.valid("json");
 		if (!isNamePart(name))
 			return c.text(

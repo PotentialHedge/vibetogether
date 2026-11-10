@@ -18,7 +18,9 @@ const limited: Record<string, number> = {
 
 /** The token's or app's name, as `/api/tokens` and `/api/apps` give it. */
 function agentOf(caller: Caller): string {
-	const id = caller.token ?? "";
+	// A sign-in's own token, sent as a bearer by a page of the site.
+	if (!caller.token) return "a sign-in";
+	const id = caller.token;
 	if (id.startsWith("o_")) {
 		const grant = Buffer.from(id.slice(2), "base64url").toString();
 		const row = db
@@ -35,11 +37,11 @@ function agentOf(caller: Caller): string {
 	return row?.agent ?? "a token";
 }
 
-/** Records and limits the operation `id` where an agent calls it; a read is neither. */
+/** Records and limits the operation `id` where a bearer calls it, a sign-in's own included; a read is neither. */
 export function recorded(id: string): MiddlewareHandler<Env> {
 	return async (c, next) => {
 		const caller = c.var.caller;
-		if (!caller.token || c.req.method === "GET") return next();
+		if (!caller.credential || c.req.method === "GET") return next();
 		const most = limited[id];
 		if (most !== undefined) {
 			const since = new Date(Date.now() - 3600_000).toISOString();
@@ -69,7 +71,7 @@ export function recorded(id: string): MiddlewareHandler<Env> {
 			"INSERT INTO activity (user, token, agent, operation, arguments, created) VALUES (?, ?, ?, ?, ?, ?)",
 		).run(
 			caller.id,
-			caller.token,
+			caller.token ?? caller.credential,
 			agentOf(caller),
 			id,
 			JSON.stringify(args).slice(0, 2000),
