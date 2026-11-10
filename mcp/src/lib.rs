@@ -300,7 +300,7 @@ impl Server {
             .map_err(fail)?;
         Ok(format!(
             "Joined as {}. Your own link, a secret that the other tools take: {}\n\
-             A join wakes no one: the others learn that you are here once you say so.\n{}",
+             A join wakes no one: the others wait until a message of yours says that you are here.\n{}",
             joined.name,
             joined.link,
             describe_presence(Some(&received.presence), &joined.name),
