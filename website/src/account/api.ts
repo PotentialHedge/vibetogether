@@ -29,6 +29,8 @@ export type Project = {
 	group: Named;
 	/** The app whose sessions it holds, in the person's own group. */
 	app: string | null;
+	/** The GitHub repositories where its context lives, as their URLs. */
+	repos: string[];
 };
 
 export type Session = {
@@ -159,6 +161,8 @@ const live = {
 	projects: () => call<Project[]>("GET", "api/projects"),
 	createProject: (group: string, name: string) =>
 		call<Project>("POST", "api/projects", { name, group }),
+	changeProject: (id: string, change: { name?: string; repos?: string[] }) =>
+		call<Project>("PATCH", `api/projects/${encodeURIComponent(id)}`, change),
 	deleteProject: (id: string) =>
 		call<void>("DELETE", `api/projects/${encodeURIComponent(id)}`),
 	sessions: () => call<Session[]>("GET", "api/sessions"),
@@ -266,13 +270,15 @@ function mock(): Api {
 			name: "messagent",
 			group: named("g_0"),
 			app: "messagent",
+			repos: [],
 		},
-		{ id: "p_1", name: "notes", group: named("g_0"), app: null },
+		{ id: "p_1", name: "notes", group: named("g_0"), app: null, repos: [] },
 		{
 			id: "p_2",
 			name: "vibetogether",
 			group: named("g_1"),
 			app: null,
+			repos: ["https://github.com/PotentialHedge/vibetogether"],
 		},
 	];
 	const inProject = (id: string) => {
@@ -398,9 +404,25 @@ function mock(): Api {
 				name,
 				group: named(group),
 				app: null,
+				repos: [],
 			};
 			projects = [...projects, project];
 			return project;
+		},
+		changeProject: async (id, change) => {
+			const repos = change.repos?.map((repo) =>
+				repo.startsWith("https://") ? repo : `https://github.com/${repo}`,
+			);
+			projects = projects.map((project) =>
+				project.id === id
+					? {
+							...project,
+							...(change.name && { name: change.name }),
+							...(repos && { repos }),
+						}
+					: project,
+			);
+			return projects.find((project) => project.id === id) as Project;
 		},
 		deleteProject: async (id) => {
 			projects = projects.filter((project) => project.id !== id);

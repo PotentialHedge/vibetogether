@@ -640,6 +640,86 @@ test("sessions are created and renamed by their group's members, and deleted by 
 	);
 });
 
+test("a project points at GitHub repos, which a join into its sessions tells", async () => {
+	const created = await call(luis, "POST", "/api/projects", {
+		name: "formoniq",
+		repos: [
+			"luiswirth/formoniq",
+			"https://github.com/luiswirth/formoniq-studio.git",
+		],
+	});
+	assert.equal(created.status, 201, created.text);
+	assert.deepEqual(created.json.repos, [
+		"https://github.com/luiswirth/formoniq",
+		"https://github.com/luiswirth/formoniq-studio",
+	]);
+	const id = created.json.id;
+	for (const repos of [
+		["luiswirth"],
+		["https://gitlab.com/a/b"],
+		["a/b/c"],
+		["-a/b"],
+		["a/.."],
+		"a/b",
+		[1],
+		Array.from({ length: 21 }, (_, i) => `a/r${i}`),
+	])
+		assert.equal(
+			(await call(luis, "PATCH", `/api/projects/${id}`, { repos })).status,
+			400,
+			JSON.stringify(repos),
+		);
+	const changed = await call(luis, "PATCH", `/api/projects/${id}`, {
+		repos: [
+			"luiswirth/formoniq-studio",
+			"LuisWirth/Formoniq-Studio",
+			"luiswirth/formoniq",
+		],
+	});
+	assert.equal(changed.status, 200, changed.text);
+	assert.equal(changed.json.name, "formoniq");
+	assert.deepEqual(changed.json.repos, [
+		"https://github.com/luiswirth/formoniq-studio",
+		"https://github.com/luiswirth/formoniq",
+	]);
+	assert.deepEqual(
+		(await call(luisToken, "GET", "/api/projects")).json.find(
+			(p: { id: string }) => p.id === id,
+		).repos,
+		changed.json.repos,
+	);
+	// Someone outside the group neither sees nor changes them.
+	assert.equal(
+		(await call(ben, "PATCH", `/api/projects/${id}`, { repos: [] })).status,
+		404,
+	);
+	const { address } = await session(luis, "agents", id);
+	const joined = await call(null, "POST", "/agentwire/join", {
+		session: address.split("/").pop(),
+		name: "luis/claude",
+		token: luisToken,
+		owned: true,
+	});
+	assert.equal(joined.status, 200, joined.text);
+	assert.deepEqual(joined.json.about, {
+		project: "formoniq",
+		repos: changed.json.repos,
+	});
+	// A session no account owns says nothing about itself.
+	const unowned = await call(null, "POST", "/agentwire/join", {
+		session: "unknown",
+		name: "luis/claude",
+		token: luisToken,
+		owned: false,
+	});
+	assert.equal(unowned.json.about, undefined);
+	assert.equal(
+		(await call(luis, "PATCH", `/api/projects/${id}`, { repos: [] })).json.repos
+			.length,
+		0,
+	);
+});
+
 test("a session open by its address lets anyone in, and only the person opens it", async () => {
 	const created = await call(luis, "POST", "/api/sessions", {
 		name: "open",

@@ -187,7 +187,7 @@ impl Server {
     }
 
     #[tool(
-        description = "Join a session. Returns your own link, a secret that the other tools take."
+        description = "Join a session. Returns your own link, a secret that the other tools take, and for a session of a project, the GitHub repos where the project's context lives."
     )]
     async fn join(
         &self,
@@ -227,7 +227,7 @@ impl Server {
     }
 
     #[tool(
-        description = "List your person's Vibe Together DMs, one session with each friend of theirs, and their groups, each with its projects and their sessions: a session's address is what join takes, its id is how your person names it, and its app is the one behind it, such as messagent for your person's Telegram chat. The first call asks your person to sign in."
+        description = "List your person's Vibe Together DMs, one session with each friend of theirs, and their groups, each with its projects and their sessions: a session's address is what join takes, its id is how your person names it, a project's repos are the GitHub repos where its context lives, and a session's app is the one behind it, such as messagent for your person's Telegram chat. The first call asks your person to sign in."
     )]
     async fn sessions(&self, Extension(parts): Extension<Parts>) -> CallToolResult {
         match self.account(&parts) {
@@ -354,9 +354,17 @@ impl Server {
             .receive(&joined.link, &now)
             .await
             .map_err(fail)?;
+        // What the account service says of the session, such as its project and the GitHub
+        // repositories where the project's context lives: JSON, since every name is someone's to choose.
+        let about = joined.about.as_ref().map_or(String::new(), |about| {
+            format!(
+                "The session, as Vibe Together knows it: {}\n",
+                serde_json::Value::Object(about.clone())
+            )
+        });
         Ok(format!(
             "Joined as {}. Your own link, a secret that the other tools take: {}\n\
-             A join wakes no one: the others wait until a message of yours says that you are here.\n{}",
+             A join wakes no one: the others wait until a message of yours says that you are here.\n{about}{}",
             joined.name,
             joined.link,
             describe_presence(Some(&received.presence), &joined.name),

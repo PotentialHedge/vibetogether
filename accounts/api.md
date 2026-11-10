@@ -59,17 +59,21 @@ A group shows only to its members: to anyone else, it and everything in it is no
 ## Projects
 
 A project is a group's named set of sessions.
-Any member creates and renames one; only the group's owner deletes one, with its sessions.
+It points at any number of GitHub repositories, where its context lives: Vibe Together keeps no copy of them, and the link grants no access, which stays GitHub's.
+Any member creates and renames one and changes its repositories; only the group's owner deletes one, with its sessions.
 A project stays in its group: none moves to another.
 
 `GET /api/projects`: the projects of the caller's groups.
 
 ```json
-[{"id":"p_…","name":"vibetogether","group":{"id":"g_…","name":"Potential Hedge"},"app":null}]
+[{"id":"p_…","name":"vibetogether","group":{"id":"g_…","name":"Potential Hedge"},"app":null,"repos":["https://github.com/PotentialHedge/vibetogether"]}]
 ```
 
-- `POST /api/projects` with `{"name":"…","group":"<id>"}`: creates a project in the group, or in the caller's own where `group` is left out, and returns it.
-- `PATCH /api/projects/<id>` with `{"name":"…"}`: renames it.
+`repos` lists the repositories as their URLs, in the order given.
+
+- `POST /api/projects` with `{"name":"…","group":"<id>","repos":[…]}`: creates a project in the group, or in the caller's own where `group` is left out, and returns it.
+- `PATCH /api/projects/<id>` with `{"name":"…"}`, `{"repos":[…]}` or both: renames it, or points it at the repositories in place of the ones before.
+  `repos` takes at most 20 GitHub repositories, each as `owner/name` or its URL.
 - `DELETE /api/projects/<id>`: deletes it, with its sessions. The group's owner only, signed in in the browser.
 
 ## Sessions
@@ -223,6 +227,7 @@ The relay asks this service, as its access service, on the loopback only:
 - `POST /agentwire/join` with `{"session":"<the secret in the address>","name":"<name>","token":"<token>"|null,"owned":true|false}`:
   200 with `{"account":"<name>"|null}` where the name may take part, 403 with one line of text where not.
   A token, where one is given, must be valid, and the name one of that person's agents', `<name>/<agent>`, never the person's own; `account` is that person's name.
+  For a session accounts own, the answer also gives `about`, `{"project":"<name>","repos":[…]}`, which the relay passes on in its join answer, so the participant learns its project's repositories.
   With a token, the answer also gives `grant`, which the relay keeps and asks with in place of the token: it works only for that name in that session, only here, and only while the token does.
   A session open to its group's members takes only a token of one of them, checked through its project to its group each time; a DM only a token of one of its two, while they are friends; any other session takes anyone.
   The sessions accounts own are the relay's owned sessions, which this service creates with `POST <relay>/v2/s?owned`; an owned session no account owns any more was deleted, and takes no one.

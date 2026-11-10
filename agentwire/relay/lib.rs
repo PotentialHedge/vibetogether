@@ -25,7 +25,7 @@ use http_body_util::{BodyExt, Full};
 use serde::Serialize;
 use tokio::time::{sleep, timeout};
 
-use access::{Access, Admitted, Credential, Verdict};
+use access::{About, Access, Admitted, Credential, Verdict};
 use limits::{COST, Limits};
 use sessions::Kept;
 use sessions::{Answer, MAX_NAME, Receive, Sessions, Ticket, is_name, is_secret};
@@ -262,13 +262,19 @@ impl Relay {
     /// Lets the caller act, if the access service lets it be in the session,
     /// with the token it presents now or else what is kept of the one it joined
     /// with; what it is let in with is kept, and so is the account vouched for.
-    async fn admit(&self, session: &str, secret: &str, token: Option<&str>) -> Result<(), Fail> {
+    /// Answers what the service says about the session, if anything.
+    async fn admit(
+        &self,
+        session: &str,
+        secret: &str,
+        token: Option<&str>,
+    ) -> Result<Option<About>, Fail> {
         let Some(access) = &self.access else {
-            return Ok(());
+            return Ok(None);
         };
         // A link that is no participant's fails as the operation would.
         let Ok((name, kept, vouched)) = self.sessions().credentials(session, secret) else {
-            return Ok(());
+            return Ok(None);
         };
         let credential = token.map_or_else(|| kept.credential(), Credential::Token);
         let verdict = self.verdict(access, session, &name, credential).await;
@@ -281,14 +287,14 @@ impl Relay {
         }
         // Without an answer, it goes on as it was.
         let Some(Verdict::Admitted(said)) = verdict? else {
-            return Ok(());
+            return Ok(None);
         };
         let now = keeps(&kept, token, &said);
         if now != kept || said.account != vouched {
             self.sessions()
                 .vouch(session, secret, &now, said.account.as_deref())?;
         }
-        Ok(())
+        Ok(said.about)
     }
 
     fn sessions(&self) -> MutexGuard<'_, Sessions> {
@@ -532,15 +538,18 @@ async fn session(
     let get = method == Method::GET;
     let token = bearer(headers);
     // Leaving is always let through, so that nobody is kept in.
-    if *secret != "join" && operation != ["leave"] {
-        relay.admit(id, secret, token.as_deref()).await?;
-    }
+    let about = if *secret != "join" && operation != ["leave"] {
+        relay.admit(id, secret, token.as_deref()).await?
+    } else {
+        None
+    };
     match (*secret, operation) {
         ("join", []) if post => {
             takes(query, "a join", &["as"])?;
             relay.adds(client, 0)?;
             let name = param(query, "as");
             let mut account = None;
+            let mut about = None;
             let mut kept = Kept {
                 token: token.clone(),
                 grant: None,
@@ -559,6 +568,7 @@ async fn session(
             {
                 kept = keeps(&Kept::default(), token.as_deref(), &said);
                 account = said.account;
+                about = said.about;
             }
             let take_back = match (&relay.access, name.as_deref(), account.as_deref()) {
                 (Some(access), Some(name), Some(account)) => {
@@ -574,7 +584,7 @@ async fn session(
                 account.as_deref(),
                 take_back,
             )?;
-            Ok(json(&joined))
+            Ok(json(&agentwire::Joined { about, ..joined }))
         }
         (_, []) if post => {
             takes(query, "a send", &["filename"])?;
@@ -592,7 +602,7 @@ async fn session(
             takes(query, "joining again", &[])?;
             relay.adds(client, 0)?;
             let joined = relay.sessions().rejoin(id, secret, &me)?;
-            Ok(json(&joined))
+            Ok(json(&agentwire::Joined { about, ..joined }))
         }
         (_, ["leave"]) if post => {
             takes(query, "a leave", &[])?;

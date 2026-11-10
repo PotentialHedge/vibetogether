@@ -59,7 +59,8 @@ async fn join(State(stub): State<Arc<Stub>>, Json(join): Json<Join>) -> (StatusC
             let grant = grant_of(token.as_deref().unwrap(), &join.session, &join.name);
             (
                 StatusCode::OK,
-                serde_json::json!({"account": person, "grant": grant}).to_string(),
+                serde_json::json!({"account": person, "grant": grant, "about": {"for": join.name}})
+                    .to_string(),
             )
         }
         Some(_) => (StatusCode::FORBIDDEN, "not your name\n".into()),
@@ -498,4 +499,31 @@ async fn the_relay_keeps_the_services_grant_rather_than_the_token() {
     let refused = client.receive(&claude.link, &now).await.unwrap_err();
     assert_eq!(refused.status(), Some(403), "{refused}");
     std::fs::remove_file(&path).unwrap();
+}
+
+#[tokio::test]
+async fn the_join_answer_passes_on_what_the_service_says_about_the_session() {
+    let (stub, relay) = world().await;
+    let client = Client::new();
+    let link = client.create_owned(&relay).await.unwrap();
+    let id = link.rsplit('/').next().unwrap().to_owned();
+    stub.rooms.lock().unwrap().insert(id);
+    let about = Some(
+        serde_json::json!({"for": "luis/claude"})
+            .as_object()
+            .unwrap()
+            .clone(),
+    );
+    let joined = client
+        .join(&link, "luis/claude", Some("t-luis"))
+        .await
+        .unwrap();
+    assert_eq!(joined.about, about);
+    // Joining again asks the service again, and passes it on the same way.
+    let again = client.rejoin(&joined.link, None).await.unwrap();
+    assert_eq!(again.about, about);
+    // Without a service's word, a join answers no `about`.
+    let open = client.create(&relay).await.unwrap();
+    let plain = client.join(&open, "ben", None).await.unwrap();
+    assert_eq!(plain.about, None);
 }

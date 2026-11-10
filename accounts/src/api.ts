@@ -12,6 +12,7 @@ import {
 	ownGroupOf,
 } from "./db.ts";
 import { isNamePart } from "./names.ts";
+import { reposHelp, reposOf, reposOfInput, setRepos } from "./repos.ts";
 import {
 	addressOf,
 	createSession,
@@ -116,6 +117,7 @@ function projectJson(project: ProjectRow) {
 		name: project.name,
 		group: { id: project.group, name: group.name },
 		app: project.app,
+		repos: reposOf(project.id),
 	};
 }
 
@@ -371,10 +373,13 @@ api.get("/projects", (c) => {
 api.post("/projects", async (c) => {
 	const { id: me, app } = c.var.caller;
 	if (app) return c.text(notForApps, 403);
-	const input = inputOf(await bodyOf(c.req.raw), "group");
-	if (!input?.name)
+	const body = await bodyOf(c.req.raw);
+	const input = inputOf(body, "group");
+	const given = (body as { repos?: unknown } | null)?.repos;
+	const repos = given === undefined ? [] : reposOfInput(given);
+	if (!input?.name || !repos)
 		return c.text(
-			`The body is {"name":"…","group":"<id>"}, ${nameHelp}, and the group your own where it is left out.`,
+			`The body is {"name":"…","group":"<id>","repos":[…]}, ${nameHelp}, the group your own where it is left out, and ${reposHelp}.`,
 			400,
 		);
 	const group = input.place
@@ -401,6 +406,7 @@ api.post("/projects", async (c) => {
 	db.prepare(
 		`INSERT INTO project (id, name, "group", created) VALUES (?, ?, ?, ?)`,
 	).run(project.id, project.name, project.group, project.created);
+	setRepos(project.id, repos);
 	return c.json(projectJson(project), 201);
 });
 
@@ -413,14 +419,23 @@ api.patch("/projects/:id", async (c) => {
 			"This project holds its app's sessions, named after it.",
 			403,
 		);
-	const input = inputOf(await bodyOf(c.req.raw));
-	if (!input?.name)
-		return c.text(`The body is {"name":"…"}, ${nameHelp}.`, 400);
-	db.prepare("UPDATE project SET name = ? WHERE id = ?").run(
-		input.name,
-		project.id,
-	);
-	return c.json(projectJson({ ...project, name: input.name }));
+	const body = await bodyOf(c.req.raw);
+	const input = inputOf(body);
+	const given = (body as { repos?: unknown } | null)?.repos;
+	const repos = given === undefined ? undefined : reposOfInput(given);
+	if (
+		!input ||
+		(input.name === undefined && given === undefined) ||
+		(given !== undefined && !repos)
+	)
+		return c.text(
+			`The body is {"name":"…"}, {"repos":[…]} or both, ${nameHelp}, and ${reposHelp}.`,
+			400,
+		);
+	const name = input.name ?? project.name;
+	db.prepare("UPDATE project SET name = ? WHERE id = ?").run(name, project.id);
+	if (repos) setRepos(project.id, repos);
+	return c.json(projectJson({ ...project, name }));
 });
 
 // With its sessions, so only the person, signed in in the browser.

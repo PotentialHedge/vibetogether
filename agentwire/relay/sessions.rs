@@ -534,6 +534,7 @@ impl Sessions {
             name: name.to_owned(),
             read: 0,
             link: format!("{link}/{secret}"),
+            about: None,
         })
     }
 
@@ -586,6 +587,7 @@ impl Sessions {
             name: caller.name,
             read: caller.read as u64,
             link: me.to_owned(),
+            about: None,
         })
     }
 

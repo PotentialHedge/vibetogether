@@ -59,7 +59,7 @@ async fn groups(headers: HeaderMap) -> (StatusCode, String) {
 async fn projects(headers: HeaderMap) -> (StatusCode, String) {
     for_luis(
         &headers,
-        r#"[{"id":"p_1","name":"vibetogether","group":{"id":"g_2","name":"Potential Hedge"},"app":null},{"id":"p_2","name":"messagent","group":{"id":"g_1","name":"luis"},"app":"messagent"}]"#,
+        r#"[{"id":"p_1","name":"vibetogether","group":{"id":"g_2","name":"Potential Hedge"},"app":null,"repos":["https://github.com/PotentialHedge/vibetogether"]},{"id":"p_2","name":"messagent","group":{"id":"g_1","name":"luis"},"app":"messagent","repos":[]}]"#,
     )
 }
 
@@ -87,7 +87,12 @@ async fn join(State(stub): State<Arc<Stub>>, Json(join): Json<Join>) -> (StatusC
     let open = stub.open.lock().unwrap().contains(&join.session);
     match join.token.as_deref() {
         Some("t-luis") if join.name.split('/').next() == Some("luis") => {
-            (StatusCode::OK, r#"{"account":"luis"}"#.into())
+            let about = if session {
+                r#","about":{"project":"vibetogether","repos":["https://github.com/PotentialHedge/vibetogether"]}"#
+            } else {
+                ""
+            };
+            (StatusCode::OK, format!(r#"{{"account":"luis"{about}}}"#))
         }
         Some(_) => (StatusCode::FORBIDDEN, "not your name\n".into()),
         None if (join.owned && !open) || session => {
@@ -272,6 +277,12 @@ async fn an_agent_joins_with_its_token_and_shows_as_verified() {
             text.contains(r#""name":"luis/claude","you":true,"verified":true"#),
             "{text}"
         );
+        // A session of a project tells its repos, as the service says them.
+        assert_eq!(
+            text.contains(r#"The session, as Vibe Together knows it: {"project":"vibetogether","repos":["https://github.com/PotentialHedge/vibetogether"]}"#),
+            session == &world.session,
+            "{text}"
+        );
     }
     let refused = join_as(&client, &world.open, "ben/claude").await;
     assert_eq!(refused.is_error, Some(true));
@@ -301,7 +312,7 @@ async fn listing_the_rooms_asks_to_sign_in_first() {
         .unwrap();
     assert_eq!(
         text(&listed),
-        r#"{"dms":[{"id":"s_3","friend":"ben","address":"D"}],"groups":[{"id":"g_1","name":"luis","own":true,"owner":"luis","members":[],"projects":[{"id":"p_2","name":"messagent","app":"messagent","sessions":[{"id":"s_2","name":"Telegram","address":"T","open":"members","app":"messagent"}]}]},{"id":"g_2","name":"Potential Hedge","own":false,"owner":"luis","members":["ben"],"projects":[{"id":"p_1","name":"vibetogether","app":null,"sessions":[{"id":"s_1","name":"agents","address":"L","open":"members","app":null}]}]}]}"#
+        r#"{"dms":[{"id":"s_3","friend":"ben","address":"D"}],"groups":[{"id":"g_1","name":"luis","own":true,"owner":"luis","members":[],"projects":[{"id":"p_2","name":"messagent","app":"messagent","repos":[],"sessions":[{"id":"s_2","name":"Telegram","address":"T","open":"members","app":"messagent"}]}]},{"id":"g_2","name":"Potential Hedge","own":false,"owner":"luis","members":["ben"],"projects":[{"id":"p_1","name":"vibetogether","app":null,"repos":["https://github.com/PotentialHedge/vibetogether"],"sessions":[{"id":"s_1","name":"agents","address":"L","open":"members","app":null}]}]}]}"#
     );
 }
 

@@ -70,12 +70,26 @@ pub enum Verdict {
     Silent,
 }
 
-/// A yes: the account the service vouches for, if any, and the grant it gives the relay to
-/// keep in place of the token, if any.
+/// A yes: the account the service vouches for, if any, the grant it gives the relay to
+/// keep in place of the token, if any, and what it says about the session, passed on unread
+/// in the answer to a join.
 #[derive(Deserialize, Default, Clone)]
 pub struct Admitted {
     pub account: Option<String>,
     pub grant: Option<String>,
+    #[serde(default, deserialize_with = "object")]
+    pub about: Option<About>,
+}
+
+/// What the service says about a session.
+pub type About = serde_json::Map<String, serde_json::Value>;
+
+/// An object, or nothing where the service gave anything else.
+fn object<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<Option<About>, D::Error> {
+    Ok(match serde_json::Value::deserialize(deserializer)? {
+        serde_json::Value::Object(about) => Some(about),
+        _ => None,
+    })
 }
 
 impl Access {

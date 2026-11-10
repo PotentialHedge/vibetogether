@@ -58,6 +58,9 @@ struct ListedProject {
     group: Named,
     /// The app whose sessions it holds, such as messagent.
     app: Option<String>,
+    /// The GitHub repositories where its context lives.
+    #[serde(default)]
+    repos: Vec<String>,
 }
 
 /// A session, as the service lists it.
@@ -230,7 +233,7 @@ impl Accounts {
                             .filter(|session| session.project.id == project.id)
                             .map(|session| serde_json::json!({"id": session.id, "name": session.name, "address": session.address, "open": session.open, "app": session.app.as_ref().map(|app| &app.name)}))
                             .collect();
-                        serde_json::json!({"id": project.id, "name": project.name, "app": project.app, "sessions": sessions})
+                        serde_json::json!({"id": project.id, "name": project.name, "app": project.app, "repos": project.repos, "sessions": sessions})
                     })
                     .collect();
                 serde_json::json!({"id": group.id, "name": group.name, "own": group.own, "owner": group.owner, "members": group.members, "projects": projects})

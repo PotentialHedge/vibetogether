@@ -114,6 +114,15 @@ export function migrate(): void {
 			created TEXT NOT NULL
 		);
 		CREATE UNIQUE INDEX IF NOT EXISTS project_app ON project ("group", app) WHERE app IS NOT NULL;
+		-- The GitHub repositories a project points at, where its context lives, as "owner/name",
+		-- in the order given: a pointer only, which grants no access.
+		CREATE TABLE IF NOT EXISTS project_repo (
+			project TEXT NOT NULL REFERENCES project(id) ON DELETE CASCADE,
+			position INTEGER NOT NULL,
+			repo TEXT NOT NULL,
+			PRIMARY KEY (project, position),
+			UNIQUE (project, repo)
+		);
 		-- "secret" is the secret part of the session's address on the relay.
 		-- "open" is who may join: its group's members only, or anyone with its address.
 		-- "creator" is who created it, who with the group's owner may delete it.

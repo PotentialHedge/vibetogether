@@ -57,14 +57,17 @@ export function CopySessionPrompt({ session }: { session: { id: string } }) {
 /** A name typed in place, made on Enter, dropped on Escape or leaving it. */
 function NameInPlace({
 	placeholder,
+	initial = "",
 	onName,
 	onDone,
 }: {
 	placeholder: string;
+	/** What it starts with, which also lets it be emptied. */
+	initial?: string;
 	onName: (name: string) => Promise<void>;
 	onDone: () => void;
 }) {
-	const [name, setName] = useState("");
+	const [name, setName] = useState(initial);
 	const [problem, setProblem] = useState<string | null>(null);
 	return (
 		<form
@@ -72,7 +75,7 @@ function NameInPlace({
 			onSubmit={async (event) => {
 				event.preventDefault();
 				const chosen = name.trim();
-				if (!chosen) return onDone();
+				if (!chosen && !initial) return onDone();
 				try {
 					await onName(chosen);
 					onDone();
@@ -88,7 +91,7 @@ function NameInPlace({
 				value={name}
 				onChange={(event) => setName(event.target.value)}
 				onKeyDown={(event) => event.key === "Escape" && onDone()}
-				onBlur={() => !name.trim() && onDone()}
+				onBlur={() => (!name.trim() || name === initial) && onDone()}
 			/>
 			{problem && <span className="text-xs text-destructive">{problem}</span>}
 		</form>
@@ -258,7 +261,12 @@ function Heading({
 	);
 }
 
-/** A project and its sessions. */
+/** A repository's `owner/name`, from its URL. */
+function repoName(url: string): string {
+	return url.replace(/^https:\/\/github\.com\//, "");
+}
+
+/** A project, the GitHub repos it points at, and its sessions. */
 function ProjectItem({
 	project,
 	sessions,
@@ -277,6 +285,7 @@ function ProjectItem({
 	reload: () => Promise<void>;
 }) {
 	const [adding, setAdding] = useState(false);
+	const [linking, setLinking] = useState(false);
 	return (
 		<li className="flex flex-col">
 			<div className="group/project flex h-8 items-center gap-1.5 rounded-md pr-1 pl-2">
@@ -300,7 +309,7 @@ function ProjectItem({
 						<Plus />
 					</Button>
 				)}
-				{isOwner && !project.app && (
+				{!project.app && (
 					<DropdownMenu>
 						<DropdownMenuTrigger
 							render={
@@ -314,16 +323,54 @@ function ProjectItem({
 							<Ellipsis />
 						</DropdownMenuTrigger>
 						<DropdownMenuContent align="end" className="w-44">
-							<DropdownMenuItem
-								variant="destructive"
-								onClick={act(() => api.deleteProject(project.id))}
-							>
-								Delete project
+							<DropdownMenuItem onClick={() => setLinking(true)}>
+								GitHub repos
 							</DropdownMenuItem>
+							{isOwner && (
+								<DropdownMenuItem
+									variant="destructive"
+									onClick={act(() => api.deleteProject(project.id))}
+								>
+									Delete project
+								</DropdownMenuItem>
+							)}
 						</DropdownMenuContent>
 					</DropdownMenu>
 				)}
 			</div>
+			{linking ? (
+				<div className="pl-3">
+					<NameInPlace
+						placeholder="owner/repo, owner/repo"
+						initial={project.repos.map(repoName).join(", ")}
+						onName={async (repos) => {
+							await api.changeProject(project.id, {
+								repos: repos.split(/[\s,]+/).filter(Boolean),
+							});
+							await reload();
+						}}
+						onDone={() => setLinking(false)}
+					/>
+				</div>
+			) : (
+				project.repos.length > 0 && (
+					<ul className="flex flex-col pb-1 pl-5">
+						{project.repos.map((repo) => (
+							<li key={repo}>
+								<a
+									href={repo}
+									target="_blank"
+									rel="noreferrer"
+									title="Where this project's context lives"
+									className="block truncate font-mono text-xs text-muted-foreground/80 hover:text-foreground"
+								>
+									{repoName(repo)}
+								</a>
+							</li>
+						))}
+					</ul>
+				)
+			)}
 			<ul className="flex flex-col">
 				{sessions.map((session) => (
 					<li key={session.id}>

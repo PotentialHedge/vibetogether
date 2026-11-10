@@ -94,6 +94,10 @@ pub struct Joined {
     pub read: u64,
     /// The participant's own link, a secret: whoever holds it acts under its name.
     pub link: String,
+    /// What the relay's access service says about the session to whom it lets in,
+    /// an object the relay passes on unread.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub about: Option<serde_json::Map<String, serde_json::Value>>,
 }
 
 /// The answer to a send or a leave: the number of the entry it appended.

@@ -4,6 +4,7 @@ import { type Caller, callerOfCredential, callerOfToken } from "./caller.ts";
 import { config } from "./config.ts";
 import { areFriends, db, isMember } from "./db.ts";
 import { isAgentOf } from "./names.ts";
+import { reposOf } from "./repos.ts";
 import { live } from "./sessions.ts";
 
 /**
@@ -14,13 +15,19 @@ import { live } from "./sessions.ts";
  */
 export const access = new Hono();
 
-type Session = { id: string; group: string; open: "members" | "link" };
+type Session = {
+	id: string;
+	group: string;
+	open: "members" | "link";
+	project: string;
+	projectName: string;
+};
 type Dm = { id: string; a: string; b: string };
 
 function sessionBySecret(secret: string): Session | undefined {
 	return db
 		.prepare(
-			`SELECT s.id, p."group" AS "group", s.open FROM owned_session s JOIN project p ON p.id = s.project
+			`SELECT s.id, p."group" AS "group", s.open, p.id AS project, p.name AS projectName FROM owned_session s JOIN project p ON p.id = s.project
 			 WHERE s.secret = ? AND ${live}`,
 		)
 		.get(secret) as Session | undefined;
@@ -146,10 +153,15 @@ access.post("/join", async (c) => {
 				403,
 			);
 	}
+	// What the joining participant learns of the session: its project, and the repositories
+	// where the project's context lives.
 	return c.json({
 		account: caller?.login ?? null,
 		...(caller?.credential && {
 			grant: grantOf(caller.credential, session, name),
+		}),
+		...(owned && {
+			about: { project: owned.projectName, repos: reposOf(owned.project) },
 		}),
 	});
 });
