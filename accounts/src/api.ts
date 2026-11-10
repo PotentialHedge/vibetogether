@@ -1,8 +1,8 @@
-import { Hono } from "hono";
+import { type Context, Hono } from "hono";
 import { auth } from "./auth.ts";
 import { type Caller, callerOf } from "./caller.ts";
 import { config } from "./config.ts";
-import { db } from "./db.ts";
+import { appProjectOf, db, isMember, newId, ownGroupOf } from "./db.ts";
 import { isNamePart } from "./names.ts";
 import {
 	addressOf,
@@ -42,12 +42,113 @@ function areFriends(a: string, b: string): boolean {
 	);
 }
 
-async function sessionJson(session: SessionRow) {
+type GroupRow = {
+	id: string;
+	name: string;
+	owner: string;
+	own: number;
+	created: string;
+};
+
+type ProjectRow = {
+	id: string;
+	name: string;
+	group: string;
+	app: string | null;
+	created: string;
+};
+
+/** A session with its project and group, as one query gives them. */
+type SessionOfGroup = SessionRow & {
+	projectName: string;
+	groupId: string;
+	groupName: string;
+	groupOwner: string;
+};
+
+const sessionsOfGroups = `SELECT s.*, p.name AS projectName, g.id AS groupId, g.name AS groupName, g.owner AS groupOwner
+	FROM owned_session s JOIN project p ON p.id = s.project JOIN "group" g ON g.id = p."group"`;
+
+/** The group, where `user` is in it: to anyone else no group shows, so that none is found by its id. */
+function groupFor(id: string, user: string): GroupRow | undefined {
+	const group = db.prepare(`SELECT * FROM "group" WHERE id = ?`).get(id) as
+		| GroupRow
+		| undefined;
+	return group && isMember(group.id, user) ? group : undefined;
+}
+
+/** The project, where `user` is in its group. */
+function projectFor(id: string, user: string): ProjectRow | undefined {
+	const project = db.prepare("SELECT * FROM project WHERE id = ?").get(id) as
+		| ProjectRow
+		| undefined;
+	return project && isMember(project.group, user) ? project : undefined;
+}
+
+/** The session, where `user` is in its project's group. */
+function sessionFor(id: string, user: string): SessionOfGroup | undefined {
+	const session = db
+		.prepare(`${sessionsOfGroups} WHERE s.id = ? AND ${live}`)
+		.get(id) as SessionOfGroup | undefined;
+	return session && isMember(session.groupId, user) ? session : undefined;
+}
+
+function groupJson(group: GroupRow) {
 	const members = db
 		.prepare(
-			"SELECT u.login FROM session_member m JOIN user u ON u.id = m.user WHERE m.session = ? ORDER BY u.login",
+			`SELECT u.login FROM group_member m JOIN user u ON u.id = m.user WHERE m."group" = ? AND m.user != ? ORDER BY u.login`,
 		)
-		.all(session.id) as { login: string }[];
+		.all(group.id, group.owner) as { login: string }[];
+	return {
+		id: group.id,
+		name: group.name,
+		own: group.own === 1,
+		owner: loginOf(group.owner),
+		members: members.map((m) => m.login),
+	};
+}
+
+type FileRow = {
+	version: number;
+	text: string;
+	author: string;
+	via: string | null;
+	written: string;
+};
+
+function fileOf(project: string, version?: number): FileRow | undefined {
+	return (
+		version === undefined
+			? db
+					.prepare(
+						"SELECT * FROM project_file WHERE project = ? ORDER BY version DESC LIMIT 1",
+					)
+					.get(project)
+			: db
+					.prepare(
+						"SELECT * FROM project_file WHERE project = ? AND version = ?",
+					)
+					.get(project, version)
+	) as FileRow | undefined;
+}
+
+function projectJson(project: ProjectRow) {
+	const group = db
+		.prepare(`SELECT name FROM "group" WHERE id = ?`)
+		.get(project.group) as { name: string };
+	const file = fileOf(project.id);
+	return {
+		id: project.id,
+		name: project.name,
+		group: { id: project.group, name: group.name },
+		app: project.app,
+		file: file
+			? { version: file.version, by: file.author, written: file.written }
+			: null,
+	};
+}
+
+async function sessionJson(session: SessionOfGroup) {
 	let address: string | null = null;
 	try {
 		address = addressOf(await secretOf(session));
@@ -57,33 +158,42 @@ async function sessionJson(session: SessionRow) {
 	return {
 		id: session.id,
 		name: session.name,
-		owner: loginOf(session.owner),
-		members: members.map((m) => m.login),
+		project: { id: session.project, name: session.projectName },
+		group: { id: session.groupId, name: session.groupName },
 		open: session.open,
 		app: appOf(session),
 		address,
 	};
 }
 
-type SessionInput = { name?: string; open?: SessionRow["open"] };
+type Input = { name?: string; open?: SessionRow["open"]; place?: string };
 
-const sessionInputHelp =
-	'The body is {"name":"…","open":"members"|"link"}, each optional where the session exists, with a name of at most 100 characters.';
+const nameHelp = "a name of at most 100 characters";
 
-/** A session's name and who it is open to, as a request gives them, or undefined where they are malformed. */
-function sessionInput(body: unknown): SessionInput | undefined {
+/**
+ * A name, who a session is open to, and where it goes, `project` or `group` as `place` is
+ * named, as a request gives them, or undefined where they are malformed.
+ */
+function inputOf(
+	body: unknown,
+	place?: "project" | "group",
+): Input | undefined {
 	if (body === null || typeof body !== "object") return undefined;
-	const { name, open } = body as { name?: unknown; open?: unknown };
-	const input: SessionInput = {};
-	if (name !== undefined) {
-		if (typeof name !== "string") return undefined;
-		const trimmed = name.trim();
+	const fields = body as Record<string, unknown>;
+	const input: Input = {};
+	if (fields.name !== undefined) {
+		if (typeof fields.name !== "string") return undefined;
+		const trimmed = fields.name.trim();
 		if (trimmed.length === 0 || trimmed.length > 100) return undefined;
 		input.name = trimmed;
 	}
-	if (open !== undefined) {
-		if (open !== "members" && open !== "link") return undefined;
-		input.open = open;
+	if (fields.open !== undefined) {
+		if (fields.open !== "members" && fields.open !== "link") return undefined;
+		input.open = fields.open;
+	}
+	if (place && fields[place] !== undefined) {
+		if (typeof fields[place] !== "string") return undefined;
+		input.place = fields[place];
 	}
 	return input;
 }
@@ -98,15 +208,33 @@ async function bodyOf(request: Request): Promise<unknown> {
 	}
 }
 
-export const api = new Hono<Env>();
+/** The name of the token the caller acts by, such as its machine or MCP client, as `/tokens` lists it. */
+function tokenName(caller: Caller): string | null {
+	const { token } = caller;
+	if (!token) return null;
+	if (token.startsWith("o_")) {
+		const row = db
+			.prepare(
+				`SELECT c.name FROM oauthAccessToken t LEFT JOIN oauthClient c ON c.clientId = t.clientId WHERE ${grantKey} = ? LIMIT 1`,
+			)
+			.get(Buffer.from(token.slice(2), "base64url").toString()) as
+			| { name: string | null }
+			| undefined;
+		return row?.name ?? "an MCP client";
+	}
+	const row = db
+		.prepare("SELECT agent FROM session WHERE id = ?")
+		.get(token.slice(2)) as { agent: string | null } | undefined;
+	return row?.agent ?? null;
+}
 
-/** The most sessions one account owns, since every session it owns lasts. */
-const maxSessions = 20;
+export const api = new Hono<Env>();
 
 /**
  * Whether the request is the person's, signed in in the browser, rather than an agent's with a token.
  * Letting others in, as friends, members or by opening a session to its address, is the person's
  * alone, so that an agent told to by someone else can't give them a seat in its person's sessions.
+ * A sign-in's own token sent as a bearer is no browser: only the cookie is.
  */
 function isPerson(request: Request): boolean {
 	return !request.headers.has("authorization");
@@ -130,6 +258,8 @@ api.use(async (c, next) => {
 			401,
 		);
 	c.set("caller", caller);
+	// Everyone has a group of their own, from their first request on.
+	ownGroupOf(caller.id);
 	await next();
 });
 
@@ -144,7 +274,327 @@ api.get("/me", (c) => {
 	});
 });
 
-// Sessions
+// Groups: people. Everyone has a group of their own, which holds them alone; the owner of any
+// other adds and removes its members, each a friend of theirs, and a member leaves on their own.
+
+/** The most groups one person owns besides their own, members of one group, projects of one group, and sessions of one project. */
+const maxGroups = 20;
+const maxMembers = 50;
+const maxProjects = 50;
+const maxSessions = 20;
+
+/** An app acts as its person only in its own sessions: groups, projects and their files stay the person's. */
+const notForApps = "An app manages only its own sessions.";
+
+api.get("/groups", (c) => {
+	const groups = db
+		.prepare(
+			`SELECT g.* FROM "group" g JOIN group_member m ON m."group" = g.id WHERE m.user = ? ORDER BY g.own DESC, g.created`,
+		)
+		.all(c.var.caller.id) as GroupRow[];
+	return c.json(groups.map(groupJson));
+});
+
+api.post("/groups", async (c) => {
+	const { id: me, app } = c.var.caller;
+	if (app) return c.text(notForApps, 403);
+	const input = inputOf(await bodyOf(c.req.raw));
+	if (!input?.name)
+		return c.text(`The body is {"name":"…"}, ${nameHelp}.`, 400);
+	const owned = (
+		db
+			.prepare(`SELECT count(*) AS n FROM "group" WHERE owner = ? AND own = 0`)
+			.get(me) as { n: number }
+	).n;
+	if (owned >= maxGroups)
+		return c.text(
+			`A person owns at most ${maxGroups} groups besides their own: delete one first.`,
+			403,
+		);
+	const group: GroupRow = {
+		id: newId("g"),
+		name: input.name,
+		owner: me,
+		own: 0,
+		created: new Date().toISOString(),
+	};
+	db.prepare(
+		`INSERT INTO "group" (id, name, owner, own, created) VALUES (?, ?, ?, 0, ?)`,
+	).run(group.id, group.name, me, group.created);
+	db.prepare(`INSERT INTO group_member ("group", user) VALUES (?, ?)`).run(
+		group.id,
+		me,
+	);
+	return c.json(groupJson(group), 201);
+});
+
+api.patch("/groups/:id", async (c) => {
+	const group = groupFor(c.req.param("id"), c.var.caller.id);
+	if (!group) return c.text("No such group.", 404);
+	if (c.var.caller.app) return c.text(notForApps, 403);
+	if (group.own) return c.text("Your own group is named after you.", 403);
+	if (group.owner !== c.var.caller.id)
+		return c.text("Only the group's owner renames it.", 403);
+	const input = inputOf(await bodyOf(c.req.raw));
+	if (!input?.name)
+		return c.text(`The body is {"name":"…"}, ${nameHelp}.`, 400);
+	db.prepare(`UPDATE "group" SET name = ? WHERE id = ?`).run(
+		input.name,
+		group.id,
+	);
+	return c.json(groupJson({ ...group, name: input.name }));
+});
+
+// With its projects, their files and their sessions, so only the person, signed in in the browser.
+api.delete("/groups/:id", (c) => {
+	if (!isPerson(c.req.raw)) return c.text(onlyThePerson, 403);
+	const group = groupFor(c.req.param("id"), c.var.caller.id);
+	if (!group) return c.text("No such group.", 404);
+	if (group.own) return c.text("Your own group stays as long as you do.", 403);
+	if (group.owner !== c.var.caller.id)
+		return c.text("Only the group's owner deletes it.", 403);
+	db.prepare(`DELETE FROM "group" WHERE id = ?`).run(group.id);
+	return c.body(null, 204);
+});
+
+api.put("/groups/:id/members/:name", (c) => {
+	if (!isPerson(c.req.raw)) return c.text(onlyThePerson, 403);
+	const group = groupFor(c.req.param("id"), c.var.caller.id);
+	if (!group) return c.text("No such group.", 404);
+	if (group.own) return c.text("Your own group holds you alone.", 403);
+	if (group.owner !== c.var.caller.id)
+		return c.text("Only the group's owner adds members.", 403);
+	const person = personByLogin(c.req.param("name"));
+	if (!person) return c.text("No such person.", 404);
+	if (isMember(group.id, person.id)) return c.json(groupJson(group));
+	if (!areFriends(group.owner, person.id))
+		return c.text("Only friends of the owner become members.", 403);
+	const members = (
+		db
+			.prepare(`SELECT count(*) AS n FROM group_member WHERE "group" = ?`)
+			.get(group.id) as { n: number }
+	).n;
+	if (members >= maxMembers)
+		return c.text(`A group has at most ${maxMembers} members.`, 403);
+	db.prepare(`INSERT INTO group_member ("group", user) VALUES (?, ?)`).run(
+		group.id,
+		person.id,
+	);
+	return c.json(groupJson(group));
+});
+
+api.delete("/groups/:id/members/:name", (c) => {
+	const me = c.var.caller.id;
+	if (c.var.caller.app) return c.text(notForApps, 403);
+	const group = groupFor(c.req.param("id"), me);
+	if (!group) return c.text("No such group.", 404);
+	const person = personByLogin(c.req.param("name"));
+	if (!person) return c.text("No such person.", 404);
+	if (person.id === group.owner)
+		return c.text(
+			"The owner stays in the group as long as it exists: delete it instead.",
+			403,
+		);
+	if (group.owner !== me && person.id !== me)
+		return c.text("Only the owner removes others from a group.", 403);
+	db.prepare(`DELETE FROM group_member WHERE "group" = ? AND user = ?`).run(
+		group.id,
+		person.id,
+	);
+	return c.body(null, 204);
+});
+
+// Projects: each a group's, with its sessions and its file. Any member creates and renames one,
+// and only the group's owner deletes one. A project never moves to another group.
+
+api.get("/projects", (c) => {
+	const projects = db
+		.prepare(
+			`SELECT p.* FROM project p JOIN group_member m ON m."group" = p."group" WHERE m.user = ? ORDER BY p.created`,
+		)
+		.all(c.var.caller.id) as ProjectRow[];
+	return c.json(projects.map(projectJson));
+});
+
+api.post("/projects", async (c) => {
+	const { id: me, app } = c.var.caller;
+	if (app) return c.text(notForApps, 403);
+	const input = inputOf(await bodyOf(c.req.raw), "group");
+	if (!input?.name)
+		return c.text(
+			`The body is {"name":"…","group":"<id>"}, ${nameHelp}, and the group your own where it is left out.`,
+			400,
+		);
+	const group = input.place
+		? groupFor(input.place, me)
+		: groupFor(ownGroupOf(me), me);
+	if (!group) return c.text("No such group.", 404);
+	const projects = (
+		db
+			.prepare(`SELECT count(*) AS n FROM project WHERE "group" = ?`)
+			.get(group.id) as { n: number }
+	).n;
+	if (projects >= maxProjects)
+		return c.text(
+			`A group has at most ${maxProjects} projects: delete one first.`,
+			403,
+		);
+	const project: ProjectRow = {
+		id: newId("p"),
+		name: input.name,
+		group: group.id,
+		app: null,
+		created: new Date().toISOString(),
+	};
+	db.prepare(
+		`INSERT INTO project (id, name, "group", created) VALUES (?, ?, ?, ?)`,
+	).run(project.id, project.name, project.group, project.created);
+	return c.json(projectJson(project), 201);
+});
+
+api.patch("/projects/:id", async (c) => {
+	const project = projectFor(c.req.param("id"), c.var.caller.id);
+	if (!project) return c.text("No such project.", 404);
+	if (c.var.caller.app) return c.text(notForApps, 403);
+	if (project.app)
+		return c.text(
+			"This project holds its app's sessions, named after it.",
+			403,
+		);
+	const input = inputOf(await bodyOf(c.req.raw));
+	if (!input?.name)
+		return c.text(`The body is {"name":"…"}, ${nameHelp}.`, 400);
+	db.prepare("UPDATE project SET name = ? WHERE id = ?").run(
+		input.name,
+		project.id,
+	);
+	return c.json(projectJson({ ...project, name: input.name }));
+});
+
+// With its file and its sessions.
+api.delete("/projects/:id", (c) => {
+	const project = projectFor(c.req.param("id"), c.var.caller.id);
+	if (!project) return c.text("No such project.", 404);
+	if (c.var.caller.app) return c.text(notForApps, 403);
+	if (project.app)
+		return c.text(
+			"This project holds its app's sessions: revoking the app ends them.",
+			403,
+		);
+	const owner = (
+		db.prepare(`SELECT owner FROM "group" WHERE id = ?`).get(project.group) as {
+			owner: string;
+		}
+	).owner;
+	if (owner !== c.var.caller.id)
+		return c.text("Only the group's owner deletes its projects.", 403);
+	db.prepare("DELETE FROM project WHERE id = ?").run(project.id);
+	return c.body(null, 204);
+});
+
+// The project file: Markdown the group's members share, as context for their agents.
+// Each write names the version it replaces, so that nobody writes over a version unseen;
+// each version keeps who wrote it, and the last `keptVersions` are kept.
+
+/** The most bytes of a project file, in UTF-8. */
+const maxFile = 64 * 1024;
+const keptVersions = 100;
+
+function fileJson(file: FileRow | undefined, withText: boolean) {
+	return {
+		version: file?.version ?? 0,
+		by: file?.author ?? null,
+		via: file?.via ?? null,
+		written: file?.written ?? null,
+		...(withText && { text: file?.text ?? "" }),
+	};
+}
+
+/** The project of a request for its file, or the answer that refuses it. */
+function fileProject(c: Context<Env>): ProjectRow | Response {
+	const project = projectFor(c.req.param("id") ?? "", c.var.caller.id);
+	if (!project) return c.text("No such project.", 404);
+	if (c.var.caller.app)
+		return c.text(
+			"A project's file is for its group's members and their agents, never for an app.",
+			403,
+		);
+	return project;
+}
+
+api.get("/projects/:id/file", (c) => {
+	const project = fileProject(c);
+	if (project instanceof Response) return project;
+	const asked = c.req.query("version");
+	if (asked === undefined) return c.json(fileJson(fileOf(project.id), true));
+	const version = Number(asked);
+	const file = Number.isSafeInteger(version)
+		? fileOf(project.id, version)
+		: undefined;
+	if (!file)
+		return c.text("No such version: it may be too old to be kept.", 404);
+	return c.json(fileJson(file, true));
+});
+
+api.get("/projects/:id/file/versions", (c) => {
+	const project = fileProject(c);
+	if (project instanceof Response) return project;
+	const files = db
+		.prepare(
+			"SELECT * FROM project_file WHERE project = ? ORDER BY version DESC",
+		)
+		.all(project.id) as FileRow[];
+	return c.json(files.map((file) => fileJson(file, false)));
+});
+
+api.put("/projects/:id/file", async (c) => {
+	const project = fileProject(c);
+	if (project instanceof Response) return project;
+	const help = `The body is {"text":"…","replaces":<version>}, with the version you read, 0 for none yet, and at most ${maxFile} bytes of text.`;
+	const length = Number(c.req.header("content-length") ?? 0);
+	if (length > 4 * maxFile) return c.text(help, 413);
+	const body = (await bodyOf(c.req.raw)) as
+		| { text?: unknown; replaces?: unknown }
+		| undefined
+		| null;
+	const text = body?.text;
+	const replaces = body?.replaces;
+	if (typeof text !== "string" || !Number.isSafeInteger(replaces))
+		return c.text(help, 400);
+	if (Buffer.byteLength(text) > maxFile) return c.text(help, 413);
+	const current = fileOf(project.id)?.version ?? 0;
+	if (replaces !== current)
+		return c.text(
+			`The file is at version ${current} now, not ${replaces}: read it again, and write over what you read.`,
+			409,
+		);
+	const file: FileRow = {
+		version: current + 1,
+		text,
+		author: c.var.caller.login,
+		via: tokenName(c.var.caller),
+		written: new Date().toISOString(),
+	};
+	db.prepare(
+		"INSERT INTO project_file (project, version, text, author, via, written) VALUES (?, ?, ?, ?, ?, ?)",
+	).run(
+		project.id,
+		file.version,
+		file.text,
+		file.author,
+		file.via,
+		file.written,
+	);
+	db.prepare("DELETE FROM project_file WHERE project = ? AND version <= ?").run(
+		project.id,
+		file.version - keptVersions,
+	);
+	return c.json(fileJson(file, false));
+});
+
+// Sessions: each a project's, open to its group's members only, or to anyone with its address.
+// Any member creates, renames and deletes one; only the group's owner opens one to its address.
+// An app's sessions are its own, in its project of the person's own group.
 
 /** The app that owns a session for the person, as `/apps` lists it, or null for the person's own. */
 function appOf(session: SessionRow): { id: string; name: string } | null {
@@ -156,7 +606,7 @@ function appOf(session: SessionRow): { id: string; name: string } | null {
 }
 
 /**
- * Why the caller may not manage a session it owns, or undefined where it may:
+ * Why the caller may not manage a session, or undefined where it may:
  * an app's session is its app's alone, and an app manages only its own.
  */
 function notManaged(session: SessionRow, caller: Caller): string | undefined {
@@ -164,69 +614,100 @@ function notManaged(session: SessionRow, caller: Caller): string | undefined {
 		return caller.token === `a_${session.app_grant}`
 			? undefined
 			: "This session is its app's: the app manages it, and revoking the app ends it.";
-	return caller.app ? "An app manages only its own sessions." : undefined;
+	return caller.app ? notForApps : undefined;
 }
 
-function sessionOf(id: string): SessionRow | undefined {
-	return db
-		.prepare(`SELECT * FROM owned_session WHERE id = ? AND ${live}`)
-		.get(id) as SessionRow | undefined;
+/** Why the request may not open a session of the group to its address, or undefined where it may. */
+function notOpened(request: Request, groupOwner: string, caller: Caller) {
+	if (!isPerson(request)) return onlyThePerson;
+	if (groupOwner !== caller.id)
+		return "Only the group's owner opens a session to anyone with its address.";
+	return undefined;
 }
 
 api.get("/sessions", async (c) => {
 	const sessions = db
 		.prepare(
-			`SELECT * FROM owned_session WHERE (owner = ? OR id IN (SELECT session FROM session_member WHERE user = ?)) AND ${live} ORDER BY created`,
+			`${sessionsOfGroups} JOIN group_member m ON m."group" = g.id WHERE m.user = ? AND ${live} ORDER BY s.created`,
 		)
-		.all(c.var.caller.id, c.var.caller.id) as SessionRow[];
+		.all(c.var.caller.id) as SessionOfGroup[];
 	return c.json(await Promise.all(sessions.map(sessionJson)));
 });
 
 api.post("/sessions", async (c) => {
-	const { app, token } = c.var.caller;
-	// An app's session is owned by its grant, which counts its own, apart from the person's.
-	const appGrant = app && token ? token.slice(2) : null;
-	const owned = (
+	const caller = c.var.caller;
+	const input = inputOf(await bodyOf(c.req.raw), "project");
+	const help = `The body is {"name":"…","project":"<id>","open":"members"|"link"}, ${nameHelp}, and "open" members where it is left out.`;
+	if (!input?.name) return c.text(help, 400);
+	// An app's sessions go into its project, which it neither names nor sees.
+	let project: ProjectRow | undefined;
+	if (caller.app) {
+		if (input.place)
+			return c.text("An app's sessions go into its own project.", 403);
+		project = projectFor(appProjectOf(caller.id, caller.app), caller.id);
+	} else {
+		if (!input.place) return c.text(help, 400);
+		project = projectFor(input.place, caller.id);
+		if (!project) return c.text("No such project.", 404);
+		if (project.app)
+			return c.text("This project holds its app's sessions alone.", 403);
+	}
+	if (!project) return c.text("No such project.", 404);
+	if (input.open === "link") {
+		const owner = (
+			db
+				.prepare(`SELECT owner FROM "group" WHERE id = ?`)
+				.get(project.group) as {
+				owner: string;
+			}
+		).owner;
+		const refused = notOpened(c.req.raw, owner, caller);
+		if (refused) return c.text(refused, 403);
+	}
+	const sessions = (
 		db
 			.prepare(
-				"SELECT count(*) AS n FROM owned_session WHERE owner = ? AND app_grant IS ?",
+				`SELECT count(*) AS n FROM owned_session WHERE project = ? AND ${live}`,
 			)
-			.get(c.var.caller.id, appGrant) as { n: number }
+			.get(project.id) as { n: number }
 	).n;
-	if (owned >= maxSessions)
+	if (sessions >= maxSessions)
 		return c.text(
-			`An account owns at most ${maxSessions} sessions: delete one first.`,
+			`A project has at most ${maxSessions} sessions: delete one first.`,
 			403,
 		);
-	const input = sessionInput(await bodyOf(c.req.raw));
-	if (!input?.name) return c.text(sessionInputHelp, 400);
-	if (input.open === "link" && !isPerson(c.req.raw))
-		return c.text(onlyThePerson, 403);
-	return c.json(
-		await sessionJson(
-			await createSession(
-				c.var.caller.id,
-				input.name,
-				input.open ?? "members",
-				appGrant,
-			),
-		),
-		201,
+	const appGrant = caller.app && caller.token ? caller.token.slice(2) : null;
+	const session = await createSession(
+		project.id,
+		input.name,
+		input.open ?? "members",
+		appGrant,
 	);
+	const created = sessionFor(session.id, caller.id);
+	if (!created) return c.text("The session went at once.", 500);
+	return c.json(await sessionJson(created), 201);
 });
 
 api.patch("/sessions/:id", async (c) => {
-	const session = sessionOf(c.req.param("id"));
+	const session = sessionFor(c.req.param("id"), c.var.caller.id);
 	if (!session) return c.text("No such session.", 404);
-	if (session.owner !== c.var.caller.id)
-		return c.text("Only the session's owner changes it.", 403);
 	const notYours = notManaged(session, c.var.caller);
 	if (notYours) return c.text(notYours, 403);
-	const input = sessionInput(await bodyOf(c.req.raw));
-	if (!input) return c.text(sessionInputHelp, 400);
-	if (input.open === "link" && !isPerson(c.req.raw))
-		return c.text(onlyThePerson, 403);
-	const changed = { ...session, ...input };
+	const input = inputOf(await bodyOf(c.req.raw));
+	if (!input)
+		return c.text(
+			`The body is {"name":"…","open":"members"|"link"}, each optional, ${nameHelp}.`,
+			400,
+		);
+	if (input.open === "link" && session.open !== "link") {
+		const refused = notOpened(c.req.raw, session.groupOwner, c.var.caller);
+		if (refused) return c.text(refused, 403);
+	}
+	const changed = {
+		...session,
+		name: input.name ?? session.name,
+		open: input.open ?? session.open,
+	};
 	db.prepare("UPDATE owned_session SET name = ?, open = ? WHERE id = ?").run(
 		changed.name,
 		changed.open,
@@ -236,47 +717,11 @@ api.patch("/sessions/:id", async (c) => {
 });
 
 api.delete("/sessions/:id", (c) => {
-	const session = sessionOf(c.req.param("id"));
+	const session = sessionFor(c.req.param("id"), c.var.caller.id);
 	if (!session) return c.text("No such session.", 404);
-	if (session.owner !== c.var.caller.id)
-		return c.text("Only the session's owner deletes it.", 403);
 	const notYours = notManaged(session, c.var.caller);
 	if (notYours) return c.text(notYours, 403);
 	db.prepare("DELETE FROM owned_session WHERE id = ?").run(session.id);
-	return c.body(null, 204);
-});
-
-api.put("/sessions/:id/members/:name", async (c) => {
-	if (!isPerson(c.req.raw)) return c.text(onlyThePerson, 403);
-	const session = sessionOf(c.req.param("id"));
-	if (!session) return c.text("No such session.", 404);
-	if (session.owner !== c.var.caller.id)
-		return c.text("Only the session's owner adds members.", 403);
-	const notYours = notManaged(session, c.var.caller);
-	if (notYours) return c.text(notYours, 403);
-	const person = personByLogin(c.req.param("name"));
-	if (!person) return c.text("No such person.", 404);
-	if (person.id === session.owner)
-		return c.text("The owner is in the session already.", 400);
-	if (!areFriends(session.owner, person.id))
-		return c.text("Only friends of the owner become members.", 403);
-	db.prepare(
-		"INSERT OR IGNORE INTO session_member (session, user) VALUES (?, ?)",
-	).run(session.id, person.id);
-	return c.json(await sessionJson(session));
-});
-
-api.delete("/sessions/:id/members/:name", (c) => {
-	const session = sessionOf(c.req.param("id"));
-	if (!session) return c.text("No such session.", 404);
-	const person = personByLogin(c.req.param("name"));
-	if (!person) return c.text("No such person.", 404);
-	if (session.owner !== c.var.caller.id && person.id !== c.var.caller.id)
-		return c.text("Only the owner removes others from a session.", 403);
-	db.prepare("DELETE FROM session_member WHERE session = ? AND user = ?").run(
-		session.id,
-		person.id,
-	);
 	return c.body(null, 204);
 });
 
@@ -331,9 +776,9 @@ api.delete("/friends/:name", (c) => {
 	db.prepare(
 		`DELETE FROM friend WHERE ("from" = ? AND "to" = ?) OR ("from" = ? AND "to" = ?)`,
 	).run(me, person.id, person.id, me);
-	// Members are friends of the owner, so they leave each other's sessions too.
+	// Members are friends of the owner, so they leave each other's groups too.
 	db.prepare(
-		"DELETE FROM session_member WHERE (user = ? AND session IN (SELECT id FROM owned_session WHERE owner = ?)) OR (user = ? AND session IN (SELECT id FROM owned_session WHERE owner = ?))",
+		`DELETE FROM group_member WHERE (user = ? AND "group" IN (SELECT id FROM "group" WHERE owner = ?)) OR (user = ? AND "group" IN (SELECT id FROM "group" WHERE owner = ?))`,
 	).run(person.id, me, me, person.id);
 	return c.body(null, 204);
 });

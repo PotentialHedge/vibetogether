@@ -1,32 +1,26 @@
 import { Hono } from "hono";
 import { callerOfToken } from "./caller.ts";
-import { db } from "./db.ts";
+import { db, isMember } from "./db.ts";
 import { isAgentOf } from "./names.ts";
 import { live } from "./sessions.ts";
 
 /**
  * The relay's access service: whether a name may join a session, with a token or without,
  * and whether an owned session is still one of the sessions accounts own. Reached on the loopback only.
+ * The relay asks again on each request of a participant with a token, so membership is checked
+ * anew each time, through the session's project to its group: leaving a group ends access.
  */
 export const access = new Hono();
 
-type Session = { id: string; owner: string; open: "members" | "link" };
+type Session = { id: string; group: string; open: "members" | "link" };
 
 function sessionBySecret(secret: string): Session | undefined {
 	return db
 		.prepare(
-			`SELECT id, owner, open FROM owned_session WHERE secret = ? AND ${live}`,
+			`SELECT s.id, p."group" AS "group", s.open FROM owned_session s JOIN project p ON p.id = s.project
+			 WHERE s.secret = ? AND ${live}`,
 		)
 		.get(secret) as Session | undefined;
-}
-
-function isInSession(session: Session, user: string): boolean {
-	return (
-		session.owner === user ||
-		db
-			.prepare("SELECT 1 FROM session_member WHERE session = ? AND user = ?")
-			.get(session.id, user) !== undefined
-	);
 }
 
 access.post("/join", async (c) => {
@@ -77,11 +71,14 @@ access.post("/join", async (c) => {
 	if (owned?.open === "members") {
 		if (!caller)
 			return c.text(
-				"This session is open to its members only: join with a token of your account, as Authorization: Bearer <token>.",
+				"This session is open to its group's members only: join with a token of your account, as Authorization: Bearer <token>.",
 				403,
 			);
-		if (!isInSession(owned, caller.id))
-			return c.text(`${caller.login} is no member of this session.`, 403);
+		if (!isMember(owned.group, caller.id))
+			return c.text(
+				`${caller.login} is no member of this session's group.`,
+				403,
+			);
 	}
 	return c.json({ account: caller?.login ?? null });
 });

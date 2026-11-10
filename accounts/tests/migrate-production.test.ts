@@ -13,7 +13,8 @@ const database = join(
 const old = new DatabaseSync(database);
 old.exec(`
 	PRAGMA foreign_keys = ON;
-	CREATE TABLE user (id TEXT PRIMARY KEY);
+	CREATE TABLE user (id TEXT PRIMARY KEY, login TEXT);
+	CREATE TABLE session (id TEXT PRIMARY KEY, agent TEXT, person INTEGER);
 	CREATE TABLE room (
 		id TEXT PRIMARY KEY,
 		name TEXT NOT NULL,
@@ -37,7 +38,7 @@ old.exec(`
 		requested TEXT NOT NULL,
 		"from" TEXT NOT NULL
 	);
-	INSERT INTO user VALUES ('a'), ('b');
+	INSERT INTO user VALUES ('a', 'a'), ('b', 'b');
 	INSERT INTO room VALUES ('r_1', 'ben', 'a', 'secret1', '2026-11-09T00:00:00Z', 'members');
 	INSERT INTO room VALUES ('r_2', 'open', 'a', 'secret2', '2026-11-09T00:00:00Z', 'link');
 	INSERT INTO member VALUES ('r_1', 'b');
@@ -70,9 +71,17 @@ test("each room becomes a session with the same address, openness and members, a
 			{ id: "s_2", secret: "secret2", open: "link" },
 		],
 	);
-	assert.deepEqual(rows("SELECT * FROM session_member"), [
-		{ session: "s_1", user: "b" },
-	]);
+	// s_1's owner and member make a group; s_2, the owner's alone, goes into the owner's own.
+	assert.deepEqual(
+		rows(
+			`SELECT s.id, g.own, group_concat(m.user) AS people FROM owned_session s JOIN project p ON p.id = s.project
+			 JOIN "group" g ON g.id = p."group" JOIN group_member m ON m."group" = g.id GROUP BY s.id ORDER BY s.id`,
+		),
+		[
+			{ id: "s_1", own: 0, people: "a,b" },
+			{ id: "s_2", own: 1, people: "a" },
+		],
+	);
 	assert.deepEqual(rows('SELECT "from", "to" FROM friend'), [
 		{ from: "a", to: "b" },
 	]);

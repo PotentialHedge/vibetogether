@@ -12,7 +12,8 @@ const database = join(
 );
 const old = new DatabaseSync(database);
 old.exec(`
-	CREATE TABLE user (id TEXT PRIMARY KEY);
+	CREATE TABLE user (id TEXT PRIMARY KEY, login TEXT);
+	CREATE TABLE session (id TEXT PRIMARY KEY, agent TEXT, person INTEGER);
 	CREATE TABLE room (
 		id TEXT PRIMARY KEY,
 		name TEXT NOT NULL,
@@ -27,7 +28,7 @@ old.exec(`
 		created TEXT NOT NULL,
 		PRIMARY KEY ("from", "to")
 	);
-	INSERT INTO user VALUES ('a'), ('b');
+	INSERT INTO user VALUES ('a', 'a'), ('b', 'b');
 	INSERT INTO room VALUES ('r_1', 'ben', 'a', 'secret', '2026-11-09T00:00:00Z');
 	CREATE TABLE member (
 		room TEXT NOT NULL REFERENCES room(id) ON DELETE CASCADE,
@@ -59,12 +60,19 @@ test("an existing room becomes a session with the same address, open to its memb
 			.map((r) => ({ ...r })),
 		[{ id: "s_1", secret: "secret", open: "members" }],
 	);
+	// Its members and its owner make a group, which the owner owns.
 	assert.deepEqual(
 		db
-			.prepare("SELECT * FROM session_member")
+			.prepare(
+				`SELECT g.owner, g.name, m.user FROM owned_session s JOIN project p ON p.id = s.project
+				 JOIN "group" g ON g.id = p."group" JOIN group_member m ON m."group" = g.id ORDER BY m.user`,
+			)
 			.all()
 			.map((r) => ({ ...r })),
-		[{ session: "s_1", user: "b" }],
+		[
+			{ owner: "a", name: "ben", user: "a" },
+			{ owner: "a", name: "ben", user: "b" },
+		],
 	);
 	assert.equal(
 		db

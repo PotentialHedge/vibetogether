@@ -1,12 +1,11 @@
-import { randomBytes } from "node:crypto";
 import { config } from "./config.ts";
-import { db } from "./db.ts";
+import { db, newId } from "./db.ts";
 
-/** A session an account owns, as stored. */
+/** A session of a project, as stored. */
 export type SessionRow = {
 	id: string;
 	name: string;
-	owner: string;
+	project: string;
 	secret: string | null;
 	created: string;
 	open: "members" | "link";
@@ -20,10 +19,6 @@ export type SessionRow = {
  */
 export const live =
 	"(app_grant IS NULL OR app_grant IN (SELECT id FROM session WHERE person = 1))";
-
-export function newId(prefix: string): string {
-	return `${prefix}_${randomBytes(12).toString("base64url")}`;
-}
 
 /** A new owned session on the relay, so that the relay asks this service about it, and the secret in its address. */
 async function createOnRelay(): Promise<string> {
@@ -57,7 +52,7 @@ export async function secretOf(session: SessionRow): Promise<string> {
 }
 
 export async function createSession(
-	owner: string,
+	project: string,
 	name: string,
 	open: SessionRow["open"],
 	appGrant: string | null = null,
@@ -65,18 +60,18 @@ export async function createSession(
 	const session: SessionRow = {
 		id: newId("s"),
 		name,
-		owner,
+		project,
 		secret: null,
 		created: new Date().toISOString(),
 		open,
 		app_grant: appGrant,
 	};
 	db.prepare(
-		"INSERT INTO owned_session (id, name, owner, secret, created, open, app_grant) VALUES (?, ?, ?, ?, ?, ?, ?)",
+		"INSERT INTO owned_session (id, name, project, secret, created, open, app_grant) VALUES (?, ?, ?, ?, ?, ?, ?)",
 	).run(
 		session.id,
 		session.name,
-		session.owner,
+		session.project,
 		session.secret,
 		session.created,
 		session.open,

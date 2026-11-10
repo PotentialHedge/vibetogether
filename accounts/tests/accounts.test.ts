@@ -119,15 +119,41 @@ let luis: string;
 let ben: string;
 let luisToken: string;
 let benToken: string;
+/** The project each has in their own group, with the session "agents" in it. */
+let luisProject: string;
+let benProject: string;
+
+/** A new project of `someone`'s, in their own group or in `group`, by its id. */
+async function project(
+	someone: string,
+	name: string,
+	group?: string,
+): Promise<string> {
+	const created = await call(someone, "POST", "/api/projects", {
+		name,
+		...(group && { group }),
+	});
+	assert.equal(created.status, 201, created.text);
+	return created.json.id;
+}
+
+/** A new session in `inProject`, as the API returns it. */
+async function session(someone: string, name: string, inProject: string) {
+	const created = await call(someone, "POST", "/api/sessions", {
+		name,
+		project: inProject,
+	});
+	assert.equal(created.status, 201, created.text);
+	return created.json;
+}
 
 before(async () => {
 	({ cookie: luis, token: luisToken } = await person("luis"));
 	({ cookie: ben, token: benToken } = await person("ben"));
-	for (const someone of [luis, ben])
-		assert.equal(
-			(await call(someone, "POST", "/api/sessions", { name: "agents" })).status,
-			201,
-		);
+	luisProject = await project(luis, "vibetogether");
+	benProject = await project(ben, "vibetogether");
+	await session(luis, "agents", luisProject);
+	await session(ben, "agents", benProject);
 });
 
 test("a person signs in with GitHub, and is named by their login", async () => {
@@ -217,15 +243,42 @@ test("me", async () => {
 	});
 });
 
-test("an account starts with no session, and a session is open to its members by default", async () => {
+test("an account starts with its own group and no session, and a session is open to its group's members by default", async () => {
 	const { cookie: erin } = await person("erin");
 	assert.deepEqual((await call(erin, "GET", "/api/sessions")).json, []);
+	assert.deepEqual((await call(erin, "GET", "/api/projects")).json, []);
+	const [own, ...rest] = (await call(erin, "GET", "/api/groups")).json;
+	assert.deepEqual(rest, []);
+	assert.deepEqual(
+		{ ...own, id: undefined },
+		{ id: undefined, name: "erin", own: true, owner: "erin", members: [] },
+	);
 	const sessions = (await call(luis, "GET", "/api/sessions")).json;
 	assert.equal(sessions.length, 1);
 	assert.equal(sessions[0].name, "agents");
-	assert.equal(sessions[0].owner, "luis");
+	assert.deepEqual(sessions[0].project, {
+		id: luisProject,
+		name: "vibetogether",
+	});
+	assert.equal(sessions[0].group.name, "luis");
 	assert.equal(sessions[0].open, "members");
+	assert.equal(sessions[0].app, null);
+	assert.match(sessions[0].id, /^s_/);
 	assert.match(sessions[0].address, /\/v2\/s\/session-\d+$/);
+	// A session goes into a project, of a group of the caller's.
+	assert.equal(
+		(await call(luis, "POST", "/api/sessions", { name: "nowhere" })).status,
+		400,
+	);
+	assert.equal(
+		(
+			await call(luis, "POST", "/api/sessions", {
+				name: "theirs",
+				project: benProject,
+			})
+		).status,
+		404,
+	);
 });
 
 test("an agent gets a token by an OTP, joins its session, and is cut off once the token is revoked", async () => {
@@ -338,10 +391,15 @@ test("a session no account owns is open to anyone, and a token verifies the name
 	assert.equal(owned.status, 403);
 });
 
-test("friends are mutual, and only friends become members", async () => {
-	const [owned] = (await call(luis, "GET", "/api/sessions")).json;
+test("friends are mutual, only friends become members of a group, and leaving it ends access", async () => {
+	const created = await call(luis, "POST", "/api/groups", {
+		name: "Potential Hedge",
+	});
+	assert.equal(created.status, 201, created.text);
+	const group = created.json.id;
+	assert.deepEqual(created.json.members, []);
 	assert.equal(
-		(await call(luis, "PUT", `/api/sessions/${owned.id}/members/ben`)).status,
+		(await call(luis, "PUT", `/api/groups/${group}/members/ben`)).status,
 		403,
 	);
 
@@ -362,49 +420,114 @@ test("friends are mutual, and only friends become members", async () => {
 		]),
 		[["luis", "friends"]],
 	);
-
-	const added = await call(
-		luis,
-		"PUT",
-		`/api/sessions/${owned.id}/members/ben`,
-	);
-	assert.deepEqual(added.json.members, ["ben"]);
-	const session = owned.address.split("/").pop();
-	assert.deepEqual(
-		(
-			await call(null, "POST", "/agentwire/join", {
-				session,
-				name: "ben/claude",
-				token: benToken,
-				owned: true,
-			})
-		).json,
-		{
-			account: "ben",
-		},
-	);
-	assert.equal((await call(ben, "GET", "/api/sessions")).json.length, 2);
-
+	// Nobody joins a person's own group.
+	const [own] = (await call(luis, "GET", "/api/groups")).json;
+	assert.equal(own.own, true);
 	assert.equal(
-		(await call(ben, "DELETE", `/api/sessions/${owned.id}/members/ben`)).status,
+		(await call(luis, "PUT", `/api/groups/${own.id}/members/ben`)).status,
+		403,
+	);
+	// A group shows to its members only.
+	assert.equal(
+		(await call(ben, "PUT", `/api/groups/${group}/members/ben`)).status,
+		404,
+	);
+	const added = await call(luis, "PUT", `/api/groups/${group}/members/ben`);
+	assert.deepEqual(added.json.members, ["ben"]);
+	assert.equal(added.json.owner, "luis");
+
+	// A member creates projects and sessions in it, and every member joins them.
+	const shared = await project(ben, "collective", group);
+	const owned = await session(ben, "hedge", shared);
+	assert.deepEqual(owned.group, { id: group, name: "Potential Hedge" });
+	const address = owned.address.split("/").pop();
+	const join = (name: string, token: string) =>
+		call(null, "POST", "/agentwire/join", {
+			session: address,
+			name,
+			token,
+			owned: true,
+		});
+	assert.deepEqual((await join("luis/claude", luisToken)).json, {
+		account: "luis",
+	});
+	assert.deepEqual((await join("ben/claude", benToken)).json, {
+		account: "ben",
+	});
+	assert.equal((await call(ben, "GET", "/api/sessions")).json.length, 2);
+	// Only the group's owner adds members, deletes projects, and opens a session by its address.
+	assert.equal(
+		(await call(ben, "PUT", `/api/groups/${group}/members/luis`)).status,
+		403,
+	);
+	assert.equal(
+		(await call(ben, "DELETE", `/api/projects/${shared}`)).status,
+		403,
+	);
+	assert.equal(
+		(await call(ben, "PATCH", `/api/sessions/${owned.id}`, { open: "link" }))
+			.status,
+		403,
+	);
+	assert.equal(
+		(await call(ben, "PATCH", `/api/sessions/${owned.id}`, { name: "hedging" }))
+			.json.name,
+		"hedging",
+	);
+	// The owner stays.
+	assert.equal(
+		(await call(ben, "DELETE", `/api/groups/${group}/members/luis`)).status,
+		403,
+	);
+	assert.equal(
+		(await call(luis, "DELETE", `/api/groups/${group}/members/luis`)).status,
+		403,
+	);
+
+	// Leaving the group ends access at once, to the session and its project.
+	assert.equal(
+		(await call(ben, "DELETE", `/api/groups/${group}/members/ben`)).status,
 		204,
 	);
+	assert.equal((await join("ben/claude", benToken)).status, 403);
+	assert.deepEqual((await join("luis/claude", luisToken)).json, {
+		account: "luis",
+	});
 	assert.equal(
-		(
-			await call(null, "POST", "/agentwire/join", {
-				session,
-				name: "ben/claude",
-				token: benToken,
-				owned: true,
-			})
-		).status,
+		(await call(ben, "GET", `/api/projects/${shared}/file`)).status,
+		404,
+	);
+	assert.equal(
+		(await call(ben, "PATCH", `/api/sessions/${owned.id}`, { name: "back" }))
+			.status,
+		404,
+	);
+	assert.equal((await call(ben, "GET", "/api/sessions")).json.length, 1);
+
+	// Deleting the group, only the owner's in the browser, deletes its projects and sessions.
+	assert.equal(
+		(await call(luisToken, "DELETE", `/api/groups/${group}`)).status,
 		403,
+	);
+	assert.equal(
+		(await call(luis, "DELETE", `/api/groups/${own.id}`)).status,
+		403,
+	);
+	assert.equal(
+		(await call(luis, "DELETE", `/api/groups/${group}`)).status,
+		204,
+	);
+	assert.equal((await join("luis/claude", luisToken)).status, 403);
+	assert.equal(
+		(await call(luis, "GET", `/api/projects/${shared}/file`)).status,
+		404,
 	);
 });
 
-test("sessions are created, renamed and deleted by their owner", async () => {
+test("sessions are created, renamed and deleted by their group's members", async () => {
 	const created = await call(luis, "POST", "/api/sessions", {
 		name: "formoniq",
+		project: luisProject,
 	});
 	assert.equal(created.status, 201);
 	assert.equal(
@@ -413,7 +536,7 @@ test("sessions are created, renamed and deleted by their owner", async () => {
 				name: "mine",
 			})
 		).status,
-		403,
+		404,
 	);
 	assert.equal(
 		(
@@ -424,7 +547,12 @@ test("sessions are created, renamed and deleted by their owner", async () => {
 		"feec",
 	);
 	assert.equal(
-		(await call(luis, "POST", "/api/sessions", { name: " " })).status,
+		(
+			await call(luis, "POST", "/api/sessions", {
+				name: " ",
+				project: luisProject,
+			})
+		).status,
 		400,
 	);
 	assert.equal(
@@ -450,7 +578,10 @@ test("sessions are created, renamed and deleted by their owner", async () => {
 });
 
 test("a session open by its address lets anyone in, and only the person opens it", async () => {
-	const created = await call(luis, "POST", "/api/sessions", { name: "open" });
+	const created = await call(luis, "POST", "/api/sessions", {
+		name: "open",
+		project: luisProject,
+	});
 	const id = created.json.id;
 	const session = created.json.address.split("/").pop();
 	const join = (name: string, token: string | null) =>
@@ -469,7 +600,18 @@ test("a session open by its address lets anyone in, and only the person opens it
 		403,
 	);
 	assert.equal(
-		(await call(agent, "POST", "/api/sessions", { name: "x", open: "link" }))
+		(
+			await call(agent, "POST", "/api/sessions", {
+				name: "x",
+				project: luisProject,
+				open: "link",
+			})
+		).status,
+		403,
+	);
+	// The browser is the cookie alone: the sign-in's own token as a bearer is no browser.
+	assert.equal(
+		(await call(luisToken, "PATCH", `/api/sessions/${id}`, { open: "link" }))
 			.status,
 		403,
 	);
@@ -655,41 +797,124 @@ test("a token reaches none of Better Auth's endpoints for sessions, the user, co
 test("only the person adds friends and members, never an agent's token", async () => {
 	const token = await connect(ben, "helper");
 	assert.equal((await call(token, "PUT", "/api/friends/luis")).status, 403);
-	const [owned] = (await call(token, "GET", "/api/sessions")).json;
+	const group = (await call(ben, "POST", "/api/groups", { name: "helpers" }))
+		.json.id;
 	assert.equal(
-		(await call(token, "PUT", `/api/sessions/${owned.id}/members/luis`)).status,
+		(await call(token, "PUT", `/api/groups/${group}/members/luis`)).status,
 		403,
 	);
+	// Nor a bearer copy of the person's own sign-in.
+	assert.equal(
+		(await call(benToken, "PUT", `/api/groups/${group}/members/luis`)).status,
+		403,
+	);
+	assert.equal((await call(benToken, "PUT", "/api/friends/luis")).status, 403);
+	assert.equal((await call(ben, "DELETE", `/api/groups/${group}`)).status, 204);
 });
 
-test("unfriending takes each out of the other's sessions", async () => {
+test("unfriending takes each out of the other's groups", async () => {
 	const { cookie: carol } = await person("carol");
 	await call(luis, "PUT", "/api/friends/carol");
 	await call(carol, "PUT", "/api/friends/luis");
-	const [owned] = (await call(luis, "GET", "/api/sessions")).json;
+	const group = (await call(luis, "POST", "/api/groups", { name: "carol" }))
+		.json.id;
 	assert.deepEqual(
-		(await call(luis, "PUT", `/api/sessions/${owned.id}/members/carol`)).json
+		(await call(luis, "PUT", `/api/groups/${group}/members/carol`)).json
 			.members,
 		["carol"],
 	);
 	assert.equal((await call(carol, "DELETE", "/api/friends/luis")).status, 204);
 	assert.deepEqual(
-		(await call(luis, "GET", "/api/sessions")).json[0].members,
+		(await call(luis, "GET", "/api/groups")).json.find(
+			(g: any) => g.id === group,
+		).members,
 		[],
+	);
+	await call(luis, "DELETE", `/api/groups/${group}`);
+});
+
+test("a project holds at most 20 sessions", async () => {
+	const { cookie: dora } = await person("dora");
+	const doras = await project(dora, "many");
+	for (let i = 1; i <= 20; i++) await session(dora, `r${i}`, doras);
+	assert.equal(
+		(
+			await call(dora, "POST", "/api/sessions", {
+				name: "one too many",
+				project: doras,
+			})
+		).status,
+		403,
 	);
 });
 
-test("an account owns at most 20 sessions", async () => {
-	const { cookie: dora } = await person("dora");
-	for (let i = 1; i <= 20; i++)
-		assert.equal(
-			(await call(dora, "POST", "/api/sessions", { name: `r${i}` })).status,
-			201,
-		);
+test("the project file is its group's members' text: each write names the version it replaces, and keeps who wrote it", async () => {
+	const file = `/api/projects/${luisProject}/file`;
+	assert.deepEqual((await call(luis, "GET", file)).json, {
+		version: 0,
+		by: null,
+		via: null,
+		written: null,
+		text: "",
+	});
+	from = "192.0.2.50";
+	const agent = await connect(luis, "lwirth-server");
+	from = undefined;
+	const first = await call(agent, "PUT", file, {
+		text: "# Vibe Together\n",
+		replaces: 0,
+	});
+	assert.equal(first.status, 200, first.text);
+	assert.equal(first.json.version, 1);
+	assert.equal(first.json.by, "luis");
+	assert.equal(first.json.via, "lwirth-server");
+	// A stale write is refused.
+	const stale = await call(luis, "PUT", file, { text: "mine", replaces: 0 });
+	assert.equal(stale.status, 409);
+	assert.match(stale.text, /version 1/);
+	const second = await call(luis, "PUT", file, { text: "mine", replaces: 1 });
+	assert.equal(second.json.version, 2);
+	assert.equal(second.json.via, null);
+	assert.equal((await call(luis, "GET", file)).json.text, "mine");
 	assert.equal(
-		(await call(dora, "POST", "/api/sessions", { name: "one too many" }))
-			.status,
-		403,
+		(await call(luis, "GET", `${file}?version=1`)).json.text,
+		"# Vibe Together\n",
+	);
+	assert.deepEqual(
+		(await call(luis, "GET", `${file}/versions`)).json.map((v: any) => [
+			v.version,
+			v.by,
+			v.via,
+		]),
+		[
+			[2, "luis", null],
+			[1, "luis", "lwirth-server"],
+		],
+	);
+	assert.equal(
+		(await call(luis, "GET", `/api/projects`)).json.find(
+			(p: any) => p.id === luisProject,
+		).file.version,
+		2,
+	);
+	// At most 64 KiB, and only for the group's members.
+	assert.equal(
+		(
+			await call(luis, "PUT", file, {
+				text: "x".repeat(64 * 1024 + 1),
+				replaces: 2,
+			})
+		).status,
+		413,
+	);
+	assert.equal(
+		(await call(luis, "PUT", file, { text: "x", replaces: "2" })).status,
+		400,
+	);
+	assert.equal((await call(ben, "GET", file)).status, 404);
+	assert.equal(
+		(await call(benToken, "PUT", file, { text: "theirs", replaces: 2 })).status,
+		404,
 	);
 });
 
@@ -859,7 +1084,59 @@ test("an app acts as its person only with its secret, the person's approval, and
 	const created = await call(token, "POST", "/api/sessions", {
 		name: "Telegram",
 	});
+	assert.equal(created.status, 201, created.text);
 	assert.deepEqual(created.json.app, { id: listed.id, name: "messagent" });
+	// It goes into the app's project, of the person's own group.
+	assert.equal(created.json.project.name, "messagent");
+	assert.equal(created.json.group.name, "luis");
+	const appProject = created.json.project.id;
+	assert.equal(
+		(await call(luis, "GET", "/api/projects")).json.find(
+			(p: any) => p.id === appProject,
+		).app,
+		"messagent",
+	);
+	// The project is the app's: no session of anyone else's goes in, and it stays.
+	assert.equal(
+		(
+			await call(luis, "POST", "/api/sessions", {
+				name: "mine",
+				project: appProject,
+			})
+		).status,
+		403,
+	);
+	assert.equal(
+		(await call(luis, "DELETE", `/api/projects/${appProject}`)).status,
+		403,
+	);
+	// An app reaches no group, project or file of its person's.
+	assert.equal(
+		(
+			await call(token, "POST", "/api/sessions", {
+				name: "elsewhere",
+				project: luisProject,
+			})
+		).status,
+		403,
+	);
+	for (const [method, path] of [
+		["GET", `/api/projects/${luisProject}/file`],
+		["POST", "/api/projects"],
+		["POST", "/api/groups"],
+	] as const)
+		assert.equal(
+			(
+				await call(
+					token,
+					method,
+					path,
+					method === "GET" ? undefined : { name: "x" },
+				)
+			).status,
+			403,
+			path,
+		);
 	const kept = await call(token, "POST", "/api/sessions", { name: "kept" });
 	for (const someone of [luis, luisToken])
 		assert.equal(
@@ -881,7 +1158,7 @@ test("an app acts as its person only with its secret, the person's approval, and
 	);
 	// An app manages only its own sessions.
 	const [own] = (await call(luis, "GET", "/api/sessions")).json.filter(
-		(s: any) => s.app === null && s.owner === "luis",
+		(s: any) => s.app === null && s.group.name === "luis",
 	);
 	assert.equal(
 		(await call(token, "DELETE", `/api/sessions/${own.id}`)).status,
