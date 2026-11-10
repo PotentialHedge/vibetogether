@@ -1,1 +1,0 @@
-../../../../apps/messagent/for-agents.md

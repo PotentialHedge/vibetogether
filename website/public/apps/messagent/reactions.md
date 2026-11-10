@@ -1,1 +1,1 @@
-../../../../apps/messagent/reactions.md
+../../bridges/messagent/reactions.md

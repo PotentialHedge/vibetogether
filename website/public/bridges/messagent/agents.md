@@ -1,0 +1,1 @@
+../../../../bridges/messagent/for-agents.md

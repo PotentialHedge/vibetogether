@@ -47,7 +47,7 @@
     }: let
       rustFiles = lib.fileset.fileFilter (file: file.hasExt "rs" || file.name == "Cargo.toml");
       manifests = lib.fileset.fileFilter (file: file.name == "Cargo.toml");
-      others = lib.filter (part: !(lib.elem part parts)) [./mcp ./apps/messagent];
+      others = lib.filter (part: !(lib.elem part parts)) [./mcp ./bridges/messagent];
     in
       (pkgs.makeRustPlatform {
         cargo = rust pkgs;
@@ -107,7 +107,7 @@
       # Code.
       messagent = rustPackage pkgs {
         pname = "messagent";
-        parts = [./apps/messagent];
+        parts = [./bridges/messagent];
         binaries = ["messagent" "messagent-claude"];
         args = {
           cargoBuildFlags = ["-p" "messagent" "-p" "messagent-claude"];
@@ -157,7 +157,7 @@
       relay = import ./agentwire/nixos-module.nix self;
       mcp = import ./mcp/nixos-module.nix self;
       accounts = import ./accounts/nixos-module.nix self;
-      messagent = import ./apps/messagent/nixos-module.nix self;
+      messagent = import ./bridges/messagent/nixos-module.nix self;
     };
 
     # Every language in the tree, behind one command. The global pre-commit

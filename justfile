@@ -4,7 +4,7 @@ mod accounts
 mod agentwire
 mod library
 mod mcp
-mod messagent "apps/messagent"
+mod messagent "bridges/messagent"
 mod ui
 mod website
 

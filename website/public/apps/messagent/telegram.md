@@ -1,1 +1,1 @@
-../../../../apps/messagent/telegram.md
+../../bridges/messagent/telegram.md

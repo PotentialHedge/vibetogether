@@ -1,5 +1,5 @@
 [workspace]
-members = ["agentwire", "agentwire/participant", "mcp", "apps/messagent/core", "apps/messagent/claude"]
+members = ["agentwire", "agentwire/participant", "mcp", "bridges/messagent/core", "bridges/messagent/claude"]
 resolver = "3"
 
 [workspace.package]
@@ -9,7 +9,7 @@ edition = "2024"
 [workspace.dependencies]
 agentwire = { path = "agentwire/participant", default-features = false }
 agentwire-relay = { path = "agentwire" }
-messagent = { path = "apps/messagent/core" }
+messagent = { path = "bridges/messagent/core" }
 anyhow = "1"
 axum = { version = "0.8", default-features = false }
 base64 = "0.23"
