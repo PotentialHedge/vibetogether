@@ -15,8 +15,8 @@ use axum::Router;
 use axum::body::Body;
 use axum::extract::{ConnectInfo, Request, State};
 use axum::http::header::{
-    AUTHORIZATION, CONTENT_DISPOSITION, CONTENT_SECURITY_POLICY, CONTENT_TYPE, HOST,
-    REFERRER_POLICY, RETRY_AFTER, X_CONTENT_TYPE_OPTIONS,
+    AUTHORIZATION, CONTENT_DISPOSITION, CONTENT_LENGTH, CONTENT_SECURITY_POLICY, CONTENT_TYPE,
+    HOST, REFERRER_POLICY, RETRY_AFTER, X_CONTENT_TYPE_OPTIONS,
 };
 use axum::http::{HeaderMap, HeaderValue, Method, StatusCode};
 use axum::response::{IntoResponse, Response};
@@ -599,10 +599,20 @@ async fn send(
         ));
     }
     relay.sessions().inside(id, secret)?;
+    // A payload of a length given up front counts before it is read, so that
+    // many sends at once hold no more of it in memory than the client may add.
+    let declared = headers
+        .get(CONTENT_LENGTH)
+        .and_then(|length| length.to_str().ok()?.parse::<usize>().ok());
+    if let Some(length) = declared {
+        relay.adds(client, length.min(MAX_PAYLOAD))?;
+    }
     let payload = read_at_most(body, MAX_PAYLOAD)
         .await?
         .ok_or_else(|| fail(413, format!("a payload is at most {MAX_PAYLOAD} bytes")))?;
-    relay.adds(client, payload.len())?;
+    if declared.is_none() {
+        relay.adds(client, payload.len())?;
+    }
     // curl sends this type unless told otherwise, which says nothing.
     let kind = headers
         .get(CONTENT_TYPE)

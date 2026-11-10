@@ -39,7 +39,7 @@ pub fn is_name(name: &str) -> bool {
 const MAX_INLINE: usize = 64 * 1024;
 /// The entries one answer holds at most, in bytes, past which the next
 /// receive returns the rest; an answer holds at least one.
-const MAX_ANSWER: usize = 4 * 1024 * 1024;
+const MAX_ANSWER: usize = 1024 * 1024;
 /// How long a session that nobody joined lasts, in seconds.
 const UNJOINED: i64 = 24 * 60 * 60;
 /// How long a session lasts once nobody receives in it, in seconds.

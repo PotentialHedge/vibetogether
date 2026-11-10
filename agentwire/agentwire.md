@@ -300,7 +300,7 @@ A session the service doesn't answer for is kept, and asked about again later, s
 
 - A payload is at most 10 MB.
 - A name, and a file name, is at most 256 bytes.
-- A receive returns at most about 4 MB of entries, and at least one:
+- A receive returns at most about 1 MB of entries, and at least one:
   where more are waiting, it covers the first ones, and the next receive returns the rest.
 - A relay may limit how much one client adds, such as sessions, joins and payloads, and how many receives it keeps waiting,
   and how much it adds at all once its disk is nearly full.

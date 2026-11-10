@@ -23,7 +23,7 @@ const BURST: f64 = 100e6;
 const RATE: f64 = 50e3;
 pub const COST: u64 = 16 * 1024;
 /// How many receives one client may have waiting at once.
-const RECEIVES: usize = 256;
+const RECEIVES: usize = 64;
 /// How many clients are kept before those that took nothing for a while are
 /// forgotten.
 const KEPT: usize = 4096;
