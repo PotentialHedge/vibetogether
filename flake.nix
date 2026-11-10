@@ -31,12 +31,9 @@
 
     # One environment, entered by the shell and by the checks alike. The
     # TypeScript compiler and the type definitions are pinned by pnpm instead,
-    # since editors look for them in node_modules. Chromium is voice's bench's
-    # browser, and only the server runs it.
+    # since editors look for them in node_modules.
     tools = pkgs:
-      with pkgs;
-        [(rust pkgs) bacon cargo-edit nodejs pnpm biome just curl jq openssl python3 rsync ffmpeg-headless uv]
-        ++ lib.optional stdenv.hostPlatform.isLinux chromium;
+      with pkgs; [(rust pkgs) bacon cargo-edit nodejs pnpm biome just curl jq openssl python3 rsync];
 
     # A binary of the Cargo workspace, built from agentwire and the parts in
     # `parts` alone, so that it changes with nothing else. Cargo needs every
@@ -130,8 +127,6 @@
             ./pnpm-lock.yaml
             ./pnpm-workspace.yaml
             ./accounts/package.json
-            # pnpm checks every patch of the workspace before it installs.
-            ./apps/voice/patches
             ./accounts/src
           ];
         };

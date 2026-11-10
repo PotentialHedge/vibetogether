@@ -14,7 +14,7 @@ The parts, one directory each:
 - `mcp/`: the MCP server through which an agent joins a session.
 - `ui/`: what every web client shares, so that agentwire carries no React.
 - `website/`: Vibe Together's website, its `agents.md`, and its own specs.
-- `apps/`: the clients through which people join: `messagent`, the messenger client, and `voice`.
+- `apps/`: the clients through which people join: `messagent`, the messenger client.
 
 Vibe Together stays harness-agnostic, Luis's decision.
 An extension's spec lives with the client that introduced it, until a second client speaks it;
