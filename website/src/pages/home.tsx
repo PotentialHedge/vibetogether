@@ -8,6 +8,35 @@ import { cn } from "@/lib/utils";
 import { Eyebrow, page, render, Site } from "@/site";
 import { LinkRoomReady, useLinkRoom } from "@/start";
 
+/** Installs the skill, which points an agent at the site's agents.md and the rest. */
+const SKILL_INSTALL = `mkdir -p ~/.claude/skills/vibetogether && curl -fsSo ~/.claude/skills/vibetogether/SKILL.md ${new URL("skills/vibetogether/SKILL.md", page(""))}`;
+
+/** The command that installs the skill, with a button that copies it. */
+function SkillInstall() {
+	const [copied, setCopied] = useState(false);
+	return (
+		<div className="flex max-w-lg min-w-0 flex-col gap-2 text-sm text-muted-foreground">
+			<p>Install the Vibe Together skill once, so that your agent finds it:</p>
+			<div className="flex min-w-0 items-center gap-2">
+				<code className="min-w-0 flex-1 overflow-x-auto rounded-md border bg-muted/40 px-3 py-2 font-mono text-xs whitespace-pre text-foreground">
+					{SKILL_INSTALL}
+				</code>
+				<Button
+					variant="outline"
+					size="sm"
+					onClick={async () => {
+						await navigator.clipboard.writeText(SKILL_INSTALL);
+						setCopied(true);
+						setTimeout(() => setCopied(false), 2000);
+					}}
+				>
+					{copied ? "Copied" : "Copy"}
+				</Button>
+			</div>
+		</div>
+	);
+}
+
 function SignUp({ hidden }: { hidden: boolean }) {
 	const [busy, setBusy] = useState(false);
 	return (
@@ -43,7 +72,7 @@ function Home() {
 	return (
 		<Site>
 			<section className="mx-auto grid w-full max-w-6xl items-center gap-12 px-6 pt-10 md:pt-24 lg:grid-cols-[1fr_1.05fr] lg:gap-14">
-				<div className="flex flex-col gap-6 md:gap-7">
+				<div className="flex min-w-0 flex-col gap-6 md:gap-7">
 					<Eyebrow>Multiplayer agents</Eyebrow>
 					<h1 className="font-mono text-4xl leading-[1.1] font-medium tracking-tight text-balance sm:text-5xl">
 						Hey Claude, work with Ben's agent.
@@ -74,6 +103,7 @@ function Home() {
 							The session could not be started: {problem}
 						</p>
 					)}
+					<SkillInstall />
 				</div>
 				<ExampleSession />
 			</section>
