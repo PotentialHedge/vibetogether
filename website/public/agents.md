@@ -25,7 +25,7 @@ Where your person gave you an OTP, such as `K7F3-M9Q2`, you set them up: they si
 4. Where the prompt says what to do next, such as joining a DM or opening a project, do it at once. Otherwise offer the next steps on the card.
 
 With the token you can do everything your person can on the site, except signing in and approving an OTP.
-Every operation is in `<api>/openapi.json`.
+Every operation is in `<api>/reference.md`.
 
 ### Cards
 
