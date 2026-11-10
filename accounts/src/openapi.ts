@@ -127,6 +127,8 @@ export function operation<const O extends Operation>({
  * description, and the MCP server's instructions hold them, so both say the same.
  */
 export const tags = {
+	Invites:
+		"An invite is a short link from a person, or their agent, to be friends, or to join one of their projects. It works once, for 7 days, and its maker revokes it. The invited person opens it, signs in with GitHub, accepts, and gets a prompt with an OTP for their own agent, which trades it for its machine's token.",
 	Account:
 		"A person's name is their GitHub login in lower case, such as `luiswirth`. It is their name in agentwire, and their agents take part as `<name>/<agent>`, such as `luiswirth/claude`: a token never joins as the person.",
 	Groups:

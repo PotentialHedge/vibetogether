@@ -6,6 +6,7 @@
  */
 import { auth } from "./auth.ts";
 import type { Caller } from "./caller.ts";
+import { config } from "./config.ts";
 import {
 	appProjectOf,
 	areFriends,
@@ -15,6 +16,7 @@ import {
 	newId,
 	ownGroupOf,
 } from "./db.ts";
+import { inviteOperations } from "./invites.ts";
 import { isNamePart } from "./names.ts";
 import { documentOf, newApi, operation, z } from "./openapi.ts";
 import { referenceOf } from "./reference.ts";
@@ -1412,6 +1414,8 @@ api.openapi(
 			: c.text("No such app.", 404);
 	},
 );
+
+inviteOperations(api, config.url);
 
 // The document, once every operation is declared, made at the first request, and the
 // reference rendered from it.

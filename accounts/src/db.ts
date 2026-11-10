@@ -190,6 +190,26 @@ export function migrate(): void {
 			UNIQUE (a, b),
 			CHECK (a < b)
 		);
+
+		-- "code" is the invite's link, short and hard to guess, kept as it is so that its maker
+		-- sees it again. "project" is null for an invite to be friends. "accepted_by" is who
+		-- accepted it, once someone has: it is single-use.
+		CREATE TABLE IF NOT EXISTS invite (
+			code TEXT PRIMARY KEY,
+			inviter TEXT NOT NULL REFERENCES user(id) ON DELETE CASCADE,
+			project TEXT REFERENCES project(id) ON DELETE CASCADE,
+			created TEXT NOT NULL,
+			expires TEXT NOT NULL,
+			accepted_by TEXT REFERENCES user(id) ON DELETE CASCADE,
+			accepted TEXT
+		);
+		-- An OTP a person made for their agent, by the SHA-256 of its code, until it is used.
+		CREATE TABLE IF NOT EXISTS person_otp (
+			code TEXT PRIMARY KEY,
+			user TEXT NOT NULL REFERENCES user(id) ON DELETE CASCADE,
+			created TEXT NOT NULL,
+			expires TEXT NOT NULL
+		);
 	`);
 	for (const { id } of db.prepare("SELECT id FROM user").all() as {
 		id: string;
