@@ -77,6 +77,7 @@ pids+=($!)
 inject '{"from":42,"username":"luiswirth","text":"hello?"}'
 until_ 'said 42 | grep -q "approve it there"' || true
 check "a stranger is asked to link the chat" "$(said 42 | grep -c 'approve it there')" 1
+check "the bot sets its commands and descriptions" "$(calls | python3 -I -c 'import json,sys; print(sorted(c["method"] for c in json.load(sys.stdin) if c["method"].startswith("setMy")))')" "['setMyCommands', 'setMyDescription', 'setMyShortDescription']"
 code=$(said 42 | sed -n 's/.*shows the code \([A-Z0-9-]*\) and.*/\1/p' | head -1)
 page=$(as_person "$accounts/api/auth/device?user_code=$code")
 check "the page says the app asks to act as the person" "$(printf '%s' "$page" | field person)" True

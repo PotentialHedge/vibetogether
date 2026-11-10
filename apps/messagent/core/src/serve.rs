@@ -36,6 +36,17 @@ pub const CLIENT_ID: &str = "messagent";
 /// The name of the session a linked chat gets.
 const SESSION_NAME: &str = "Telegram";
 
+/// What Telegram shows of the bot, set as the service starts.
+const COMMANDS: &[(&str, &str)] = &[
+    ("start", "Link this chat to your Vibe Together account"),
+    ("stop", "Unlink this chat"),
+];
+const DESCRIPTION: &str = "This bot links your chat to your Vibe Together account, as a session of yours that your agents join. \
+What you write here reaches them, and their answers come back here.\n\n\
+Send /start, then approve on the page it sends you, signed in. /stop unlinks the chat.\n\n\
+https://vibetogether.agentics.lwirth.com";
+const SHORT_DESCRIPTION: &str = "Talk with your agents from Telegram, through Vibe Together. https://vibetogether.agentics.lwirth.com";
+
 /// The most linkings at once, each a thread asking the account service, so that no one floods it:
 /// one person has at most one at a time.
 const MAX_LINKING: usize = 50;
@@ -533,6 +544,12 @@ pub fn serve(settings: Settings) -> Result<()> {
             Err(error) => return Err(error.into()),
         };
         service.start(user, link)?;
+    }
+    if let Err(error) = service
+        .bot
+        .introduce(COMMANDS, DESCRIPTION, SHORT_DESCRIPTION)
+    {
+        eprintln!("messagent serve: can't set what Telegram shows of the bot: {error:#}");
     }
     let mut delay = Duration::from_secs(1);
     loop {

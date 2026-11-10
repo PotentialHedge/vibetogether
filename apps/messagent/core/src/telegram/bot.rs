@@ -183,6 +183,27 @@ impl Bot {
         self.call("getMe", json!({}))
     }
 
+    /// Sets what Telegram shows of the bot: its commands, as `(command, what it does)`,
+    /// the description in an empty chat with it, and the short one on its profile.
+    pub fn introduce(
+        &self,
+        commands: &[(&str, &str)],
+        description: &str,
+        short_description: &str,
+    ) -> Result<()> {
+        let commands: Vec<Value> = commands
+            .iter()
+            .map(|(command, description)| json!({"command": command, "description": description}))
+            .collect();
+        self.call::<bool>("setMyCommands", json!({"commands": commands}))?;
+        self.call::<bool>("setMyDescription", json!({"description": description}))?;
+        self.call::<bool>(
+            "setMyShortDescription",
+            json!({"short_description": short_description}),
+        )?;
+        Ok(())
+    }
+
     /// Waits up to `POLL_SECONDS` for updates from `offset` on,
     /// and confirms those before it, which Telegram then forgets.
     pub fn get_updates(&self, offset: i64) -> Result<Vec<Update>> {
