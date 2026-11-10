@@ -149,6 +149,14 @@ async function call<T>(
 	return (text ? JSON.parse(text) : undefined) as T;
 }
 
+/** Forgets the links the session pages kept to read on as
+ * `<name>/reader`, which act for the person. */
+function forgetReaderLinks() {
+	for (const key of Object.keys(localStorage))
+		if (/^vibetogether \S+ [^ /]+\/reader(-\d+)?$/.test(key))
+			localStorage.removeItem(key);
+}
+
 const live = {
 	me: () => call<Me>("GET", "api/me"),
 	groups: () => call<Group[]>("GET", "api/groups"),
@@ -181,8 +189,12 @@ const live = {
 		call<void>("DELETE", `api/sessions/${encodeURIComponent(id)}`),
 	friends: () => call<Friend[]>("GET", "api/friends"),
 	activity: () => call<Activity[]>("GET", "api/activity"),
-	/** Deletes the account: only the person, signed in, may. */
-	deleteAccount: () => call<void>("DELETE", "api/me"),
+	/** Deletes the account: only the person, signed in, may. Forgets the
+	 * kept links too, as signing out does. */
+	deleteAccount: async () => {
+		await call<void>("DELETE", "api/me");
+		forgetReaderLinks();
+	},
 	dms: () => call<Dm[]>("GET", "api/dms"),
 	addFriend: (name: string) =>
 		call<void>("PUT", `api/friends/${encodeURIComponent(name)}`),
@@ -210,9 +222,7 @@ const live = {
 	 * `<name>/reader`, which act for the person. */
 	signOut: async () => {
 		await call<void>("POST", "api/auth/sign-out", {});
-		for (const key of Object.keys(localStorage))
-			if (/^vibetogether \S+ [^ /]+\/reader(-\d+)?$/.test(key))
-				localStorage.removeItem(key);
+		forgetReaderLinks();
 	},
 	/** The token of the page's own sign-in, with which a page joins a session
 	 * as one of the person's, `<name>/<part>`, exactly where the person may. */
