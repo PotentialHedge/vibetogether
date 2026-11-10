@@ -109,7 +109,7 @@ function who(operation: Operation): string {
 	const ways = (operation.security ?? []).flatMap((way) => Object.keys(way));
 	if (ways.length === 0) return "Anyone, with no token.";
 	if (!ways.includes("token"))
-		return "Only the person, signed in in the browser.";
+		return "Only the person, signed in in the browser: a token gets 403.";
 	return "";
 }
 

@@ -85,7 +85,8 @@ const Project = z
 				"The app whose sessions it holds alone, such as `messagent`.",
 		}),
 		repos: z.array(z.string()).meta({
-			description: "The GitHub repositories it points at, as URLs.",
+			description:
+				"The GitHub repositories it points at, each as its URL, however it was given.",
 		}),
 	})
 	.openapi("Project");
@@ -158,10 +159,16 @@ const Activity = z
 	.object({
 		agent: z
 			.string()
-			.meta({ description: "The name of the token or app that did it." }),
+			.meta({
+				description:
+					"The name of the token or app that made it, such as the machine's or the MCP client's: every agent on a machine shares its token.",
+			}),
 		token: z
 			.string()
-			.meta({ description: "Its id, as the tokens or apps list it." }),
+			.meta({
+				description:
+					"The id of that token or app, as `list_tokens` or `list_apps` gives it, never the token itself.",
+			}),
 		operation: z
 			.string()
 			.meta({ description: "The operation's id, such as `add_friend`." }),
@@ -438,7 +445,7 @@ api.openapi(
 		path: "/overview",
 		summary: "Show everything at once",
 		description:
-			"The account, its groups each with its projects and their sessions, its DMs and its friends: all an agent needs to find a session, in one request.",
+			"The account, its groups each with its projects and their sessions, its DMs and its friends: all an agent needs to find a session, in one request, with the ids the other operations take.",
 		responses: {
 			200: json(
 				z.object({
@@ -602,7 +609,7 @@ api.openapi(
 		path: "/groups/{id}",
 		summary: "Rename a group",
 		description:
-			"Renames a group. Any member does this, but one's own group is named after them.",
+			"Renames a group. Any member does this; one's own group can't be renamed, since it is named after them.",
 		request: {
 			...path({ id: Id("g", "group") }),
 			...body(z.object({ name: Name })),
