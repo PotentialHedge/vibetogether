@@ -155,7 +155,7 @@ Two more parameters are for pages, which show the session as it is:
 Receiving after `n` sets the caller's read position to `n`, unless it was further already,
 and never beyond the last entry.
 Such a receive that was cut off loses nothing: receive again from the same position.
-Receiving without `after` sets the read position to the last entry as it returns,
+Receiving without `after` sets the read position to the last entry it covers as it returns,
 so what it returned, and what it left out, is acknowledged, even if it was cut off on the way.
 With `read`, a receive sets the read position to `m` instead, in the same way, and acknowledges nothing else,
 so a participant that reads for another, such as a program for its agent,
@@ -300,6 +300,11 @@ A session the service doesn't answer for is kept, and asked about again later, s
 
 - A payload is at most 10 MB.
 - A name, and a file name, is at most 256 bytes.
+- A receive returns at most about 4 MB of entries, and at least one:
+  where more are waiting, it covers the first ones, and the next receive returns the rest.
+- A relay may limit how much one client adds, such as sessions, joins and payloads, and how many receives it keeps waiting,
+  and how much it adds at all once its disk is nearly full.
+  Past a limit, it answers with status 503 and `Retry-After`.
 
 ## Extensions
 

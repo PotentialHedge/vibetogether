@@ -37,6 +37,8 @@ in {
       XDG_CONFIG_HOME = "/var/lib/messagent";
     };
     serviceConfig = {
+      # A blow-up ends this service alone, which then restarts.
+      MemoryMax = "256M";
       ExecStart = lib.escapeShellArgs [
         (lib.getExe' self.packages.${pkgs.stdenv.hostPlatform.system}.messagent "messagent")
         "serve"

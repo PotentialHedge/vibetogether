@@ -2,16 +2,18 @@
 //! HTTP, with every session in one SQLite database.
 
 mod access;
+mod limits;
 mod sessions;
 
 use std::borrow::Cow;
+use std::net::{IpAddr, SocketAddr};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
 use axum::Router;
 use axum::body::Body;
-use axum::extract::{Request, State};
+use axum::extract::{ConnectInfo, Request, State};
 use axum::http::header::{
     AUTHORIZATION, CONTENT_DISPOSITION, CONTENT_SECURITY_POLICY, CONTENT_TYPE, HOST,
     REFERRER_POLICY, RETRY_AFTER, X_CONTENT_TYPE_OPTIONS,
@@ -23,7 +25,8 @@ use serde::Serialize;
 use tokio::time::{sleep, timeout};
 
 use access::{Access, Verdict};
-use sessions::{Answer, MAX_NAME, Receive, Sessions, Ticket, is_name, is_token};
+use limits::{COST, Limits};
+use sessions::{Answer, MAX_NAME, Receive, Sessions, Ticket, is_name, is_secret};
 
 /// The transport's version, the first part of every session's path: a
 /// breaking change bumps it, and the relay serves only the current one.
@@ -55,12 +58,23 @@ const CORS: [(&str, &str); 5] = [
 pub struct Fail {
     status: StatusCode,
     why: Cow<'static, str>,
+    /// For a 503, in how many seconds to try again, by default a minute.
+    retry: Option<u64>,
 }
 
 fn fail(status: u16, why: impl Into<Cow<'static, str>>) -> Fail {
     Fail {
         status: StatusCode::from_u16(status).expect("a status is valid"),
         why: why.into(),
+        retry: None,
+    }
+}
+
+/// A refusal of a request over the relay's limits, which may pass in `retry` seconds.
+fn busy(why: impl Into<Cow<'static, str>>, retry: u64) -> Fail {
+    Fail {
+        retry: Some(retry.max(1)),
+        ..fail(503, why)
     }
 }
 
@@ -81,7 +95,7 @@ impl IntoResponse for Fail {
         if self.status == StatusCode::SERVICE_UNAVAILABLE {
             response
                 .headers_mut()
-                .insert(RETRY_AFTER, HeaderValue::from_static("60"));
+                .insert(RETRY_AFTER, HeaderValue::from(self.retry.unwrap_or(60)));
         }
         response
     }
@@ -99,10 +113,16 @@ pub struct Options {
     /// The access service's URL, which decides who may be in an owned session,
     /// and whether it still exists.
     pub access: Option<String>,
+    /// The bytes that stay free on the database's filesystem: below them,
+    /// the relay refuses whatever adds to it.
+    pub min_free: Option<u64>,
 }
 
 pub struct Relay {
     sessions: Mutex<Sessions>,
+    limits: Mutex<Limits>,
+    database: Option<PathBuf>,
+    min_free: Option<u64>,
     files: Option<PathBuf>,
     access: Option<Access>,
 }
@@ -111,9 +131,36 @@ impl Relay {
     pub fn open(options: Options) -> rusqlite::Result<Arc<Self>> {
         Ok(Arc::new(Self {
             sessions: Mutex::new(Sessions::open(options.database.as_deref())?),
+            limits: Mutex::default(),
+            database: options.database,
+            min_free: options.min_free,
             files: options.files,
             access: options.access.as_deref().map(Access::new),
         }))
+    }
+
+    /// Lets `client` add a session, a participant or an entry of `bytes`, if
+    /// the disk has room for it and the client hasn't added too much lately.
+    fn adds(&self, client: Option<IpAddr>, bytes: usize) -> Result<(), Fail> {
+        let bytes = bytes as u64;
+        if let (Some(min_free), Some(database)) = (self.min_free, &self.database)
+            && limits::free(database).is_some_and(|free| free < min_free + bytes)
+        {
+            return Err(busy("the relay is out of room for now", 300));
+        }
+        if let Some(client) = client
+            && let Err(retry) = self.limits().take(client, COST + bytes)
+        {
+            return Err(busy(
+                format!("this client added too much lately: try again in {retry} seconds"),
+                retry,
+            ));
+        }
+        Ok(())
+    }
+
+    fn limits(&self) -> MutexGuard<'_, Limits> {
+        self.limits.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
     /// The file `name` of the directory the relay serves its spec and script from.
@@ -251,23 +298,32 @@ impl Relay {
 /// A waiting receive, which its caller abandons by going away.
 struct Waiting<'a> {
     relay: &'a Relay,
+    client: Option<IpAddr>,
     ticket: Ticket,
 }
 
 impl Drop for Waiting<'_> {
     fn drop(&mut self) {
         _ = self.relay.sessions().abandon(&self.ticket);
+        if let Some(client) = self.client {
+            self.relay.limits().waited(client);
+        }
     }
 }
 
 async fn handle(State(relay): State<Arc<Relay>>, request: Request) -> Response {
     let started = std::time::Instant::now();
+    let peer = request
+        .extensions()
+        .get::<ConnectInfo<SocketAddr>>()
+        .map(|info| info.0);
+    let client = limits::client(peer, request.headers());
     let (method, target) = (request.method().clone(), logged(request.uri()));
     let receiving = request.method() == Method::GET && in_session(request.uri().path());
     let mut response = if request.method() == Method::OPTIONS {
         StatusCode::NO_CONTENT.into_response()
     } else {
-        route(&relay, request)
+        route(&relay, client, request)
             .await
             .unwrap_or_else(IntoResponse::into_response)
     };
@@ -284,7 +340,7 @@ async fn handle(State(relay): State<Arc<Relay>>, request: Request) -> Response {
     response
 }
 
-/// A request's target as the log keeps it: a session's token and a participant's
+/// A request's target as the log keeps it: a session's address and a participant's
 /// secret are secrets, so they are left out, and so are the query's values, which
 /// hold names; the operation and the query's keys stay.
 fn logged(uri: &axum::http::Uri) -> String {
@@ -395,7 +451,7 @@ fn gone(origin: &str) -> Fail {
     )
 }
 
-async fn route(relay: &Relay, request: Request) -> Result<Response, Fail> {
+async fn route(relay: &Relay, client: Option<IpAddr>, request: Request) -> Result<Response, Fail> {
     let (parts, body) = request.into_parts();
     let origin = origin(&parts.headers);
     let query = parts.uri.query().unwrap_or("");
@@ -410,6 +466,7 @@ async fn route(relay: &Relay, request: Request) -> Result<Response, Fail> {
         [VERSION, "s"] if parts.method == Method::POST => {
             takes(query, "creating a session", &["owned"])?;
             let owned = param(query, "owned").is_some();
+            relay.adds(client, 0)?;
             let id = relay.sessions().create(owned)?;
             Ok(text(format!("{origin}/{VERSION}/s/{id}\n"), PLAIN))
         }
@@ -417,6 +474,7 @@ async fn route(relay: &Relay, request: Request) -> Result<Response, Fail> {
             let link = format!("{origin}/{VERSION}/s/{id}");
             session(
                 relay,
+                client,
                 id,
                 rest,
                 &parts.method,
@@ -435,6 +493,7 @@ async fn route(relay: &Relay, request: Request) -> Result<Response, Fail> {
 #[allow(clippy::too_many_arguments)]
 async fn session(
     relay: &Relay,
+    client: Option<IpAddr>,
     id: &str,
     rest: &[&str],
     method: &Method,
@@ -443,7 +502,7 @@ async fn session(
     body: Body,
     link: &str,
 ) -> Result<Response, Fail> {
-    if !is_token(id) {
+    if !is_secret(id) {
         return Err(fail(404, "no such session"));
     }
     let [secret, operation @ ..] = rest else {
@@ -461,6 +520,7 @@ async fn session(
     match (*secret, operation) {
         ("join", []) if post => {
             takes(query, "a join", &["as"])?;
+            relay.adds(client, 0)?;
             let name = param(query, "as");
             let mut account = None;
             if let (Some(access), Some(name)) = (&relay.access, name.as_deref())
@@ -489,7 +549,7 @@ async fn session(
         }
         (_, []) if post => {
             takes(query, "a send", &["filename"])?;
-            send(relay, id, secret, headers, query, body).await
+            send(relay, client, id, secret, headers, query, body).await
         }
         (_, []) if get => {
             takes(
@@ -497,10 +557,11 @@ async fn session(
                 "a receive",
                 &["after", "read", "wait", "only", "skip", "own", "presence"],
             )?;
-            receive(relay, id, secret, query).await
+            receive(relay, client, id, secret, query).await
         }
         (_, ["join"]) if post => {
             takes(query, "joining again", &[])?;
+            relay.adds(client, 0)?;
             let joined = relay.sessions().rejoin(id, secret, &me)?;
             Ok(json(&joined))
         }
@@ -523,6 +584,7 @@ async fn session(
 
 async fn send(
     relay: &Relay,
+    client: Option<IpAddr>,
     id: &str,
     secret: &str,
     headers: &HeaderMap,
@@ -540,6 +602,7 @@ async fn send(
     let payload = read_at_most(body, MAX_PAYLOAD)
         .await?
         .ok_or_else(|| fail(413, format!("a payload is at most {MAX_PAYLOAD} bytes")))?;
+    relay.adds(client, payload.len())?;
     // curl sends this type unless told otherwise, which says nothing.
     let kind = headers
         .get(CONTENT_TYPE)
@@ -570,7 +633,13 @@ async fn read_at_most(mut body: Body, limit: usize) -> Result<Option<Vec<u8>>, F
     Ok((size <= limit).then_some(payload))
 }
 
-async fn receive(relay: &Relay, id: &str, secret: &str, query: &str) -> Result<Response, Fail> {
+async fn receive(
+    relay: &Relay,
+    client: Option<IpAddr>,
+    id: &str,
+    secret: &str,
+    query: &str,
+) -> Result<Response, Fail> {
     let after = match param(query, "after") {
         None => None,
         Some(after) => Some(number(&after).ok_or_else(|| fail(400, "after is a number"))?),
@@ -606,8 +675,22 @@ async fn receive(relay: &Relay, id: &str, secret: &str, query: &str) -> Result<R
         only: types("only")?,
         skip: types("skip")?,
     };
-    let (ticket, mut answered) = relay.sessions().receive(id, secret, receive)?;
-    let waiting = Waiting { relay, ticket };
+    if let Some(client) = client
+        && !relay.limits().wait(client)
+    {
+        return Err(busy("this client has too many receives waiting", 60));
+    }
+    let started = relay.sessions().receive(id, secret, receive);
+    let (ticket, mut answered) = started.inspect_err(|_| {
+        if let Some(client) = client {
+            relay.limits().waited(client);
+        }
+    })?;
+    let waiting = Waiting {
+        relay,
+        client,
+        ticket,
+    };
     let answer = match wait {
         None => answered.await,
         Some(wait) => match timeout(wait, &mut answered).await {

@@ -37,6 +37,9 @@ pub fn is_name(name: &str) -> bool {
     }
 }
 const MAX_INLINE: usize = 64 * 1024;
+/// The entries one answer holds at most, in bytes, past which the next
+/// receive returns the rest; an answer holds at least one.
+const MAX_ANSWER: usize = 4 * 1024 * 1024;
 /// How long a session that nobody joined lasts, in seconds.
 const UNJOINED: i64 = 24 * 60 * 60;
 /// How long a session lasts once nobody receives in it, in seconds.
@@ -165,15 +168,15 @@ pub struct Payload {
     pub body: Vec<u8>,
 }
 
-/// A secret of 128 random bits: a session's id, or a participant's own part
+/// A secret of 128 random bits: a session's address, or a participant's own part
 /// of the session's link.
-fn token() -> String {
+fn secret() -> String {
     let mut random = [0; 16];
     getrandom::fill(&mut random).expect("the system has randomness");
     URL_SAFE_NO_PAD.encode(random)
 }
 
-pub fn is_token(text: &str) -> bool {
+pub fn is_secret(text: &str) -> bool {
     text.len() == 22
         && text
             .bytes()
@@ -269,7 +272,7 @@ impl Sessions {
 
     /// A new session, owned or not: only an owned one depends on the access service.
     pub fn create(&mut self, owned: bool) -> Result<String, Fail> {
-        let id = token();
+        let id = secret();
         self.db.execute(
             "INSERT INTO sessions (id, created, received, owned)
              VALUES (?, unixepoch(), unixepoch(), ?)",
@@ -433,7 +436,7 @@ impl Sessions {
         if !is_name(name) {
             return Err(fail(400, NAME_RULE));
         }
-        let secret = token();
+        let secret = secret();
         let transaction = self.db.unchecked_transaction()?;
         let taken = transaction
             .prepare_cached("SELECT 1 FROM participants WHERE session = ? AND name = ?")?
@@ -811,7 +814,12 @@ impl Sessions {
                  WHERE session = ? AND n > ? AND (? OR sender != ?) ORDER BY n",
             )?;
             let mut rows = entries.query(params![session, after, own, name])?;
+            let mut cut = None;
             while let Some(row) = rows.next()? {
+                if lines.len() >= MAX_ANSWER {
+                    cut = Some(row.get::<_, i64>(0)? - 1);
+                    break;
+                }
                 if !waiting.receive.wants(&row.get::<_, String>(3)?) {
                     continue;
                 }
@@ -833,14 +841,18 @@ impl Sessions {
             // A receive from the read position acknowledges what it returns,
             // and what it leaves out, since its caller keeps no position of its
             // own; one that says what it read acknowledges only that.
+            // A cut answer acknowledges only up to its cut.
             if waiting.receive.after.is_none() && waiting.receive.read.is_none() {
-                read = Some(
-                    self.db
-                        .prepare_cached(
-                            "SELECT COALESCE(MAX(n), 0) FROM entries WHERE session = ?",
-                        )?
-                        .query_row([session], |row| row.get(0))?,
-                );
+                read = match cut {
+                    Some(cut) => Some(cut),
+                    None => Some(
+                        self.db
+                            .prepare_cached(
+                                "SELECT COALESCE(MAX(n), 0) FROM entries WHERE session = ?",
+                            )?
+                            .query_row([session], |row| row.get(0))?,
+                    ),
+                };
             }
         }
         Ok(Some((lines, read)))
@@ -1004,7 +1016,7 @@ mod tests {
 
     #[test]
     fn a_database_from_before_opens() {
-        let path = std::env::temp_dir().join(format!("agentwire-{}.db", token()));
+        let path = std::env::temp_dir().join(format!("agentwire-{}.db", secret()));
         Connection::open(&path)
             .unwrap()
             .execute_batch(
@@ -1017,5 +1029,53 @@ mod tests {
         assert!(sessions.enter("old").is_err());
         drop(sessions);
         std::fs::remove_file(&path).unwrap();
+    }
+
+    #[test]
+    fn a_long_answer_is_cut_and_the_next_receive_returns_the_rest() {
+        let mut sessions = Sessions::open(None).unwrap();
+        let session = sessions.create(false).ok().unwrap();
+        let mut secrets = Vec::new();
+        for name in ["luis", "ben"] {
+            let joined = sessions
+                .join(&session, Some(name), "link", None, None, false)
+                .ok()
+                .unwrap();
+            secrets.push(joined.link.rsplit('/').next().unwrap().to_owned());
+        }
+        let text = "a".repeat(60 * 1024);
+        for _ in 0..100 {
+            let sent = sessions.send(&session, &secrets[1], "text/plain", None, text.as_bytes());
+            assert!(sent.is_ok());
+        }
+        let mut entries = 0;
+        let mut answers = 0;
+        // Ben's join, and his 100 entries.
+        while entries < 101 {
+            let receive = Receive {
+                after: None,
+                read: None,
+                own: false,
+                presence: false,
+                only: vec![],
+                skip: vec![],
+            };
+            let (ticket, mut answered) = sessions
+                .receive(&session, &secrets[0], receive)
+                .ok()
+                .unwrap();
+            let Ok(Answer::Lines(lines, read)) = answered.try_recv() else {
+                panic!("a receive with entries waiting answers at once");
+            };
+            assert!(lines.len() <= MAX_ANSWER + 64 * 1024 + 4096);
+            let got = lines.lines().count() - 1;
+            assert!(got > 0);
+            entries += got;
+            answers += 1;
+            assert_eq!(read, Some(entries as i64 + 1));
+            assert!(sessions.settle(&ticket, read).is_ok());
+        }
+        assert_eq!(entries, 101);
+        assert!(answers > 1);
     }
 }

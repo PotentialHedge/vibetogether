@@ -109,6 +109,8 @@ pub type Result<T> = std::result::Result<T, Error>;
 #[derive(Debug, Clone, Default)]
 pub struct Client {
     http: reqwest::Client,
+    /// The address of the client a program acts for, as its proxy named it.
+    on_behalf_of: Option<String>,
 }
 
 impl Client {
@@ -117,12 +119,30 @@ impl Client {
     }
 
     fn post(&self, url: impl reqwest::IntoUrl) -> RequestBuilder {
-        self.http.post(url).timeout(REQUEST)
+        let request = self.http.post(url).timeout(REQUEST);
+        match &self.on_behalf_of {
+            Some(address) => request.header("x-forwarded-for", address),
+            None => request,
+        }
+    }
+
+    /// This client, acting for a client of the caller's own at `address`, such
+    /// as a server's caller: what it adds, a session, a join or an entry, is
+    /// named as that client's in `X-Forwarded-For`, which a relay on the same
+    /// machine counts against that client's limits.
+    pub fn on_behalf_of(&self, address: &str) -> Self {
+        Self {
+            on_behalf_of: Some(address.to_owned()),
+            ..self.clone()
+        }
     }
 
     /// A client on an HTTP client of the caller's.
     pub fn with(http: reqwest::Client) -> Self {
-        Self { http }
+        Self {
+            http,
+            on_behalf_of: None,
+        }
     }
 
     /// Creates a session on the relay at `relay`, and returns its link.

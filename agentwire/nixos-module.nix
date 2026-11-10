@@ -22,6 +22,11 @@ in {
       example = "http://127.0.0.1:8793/agentwire";
       description = "The access service's URL, which decides who may be in a session and which sessions last; without one, whoever holds a link joins.";
     };
+    minFree = lib.mkOption {
+      type = lib.types.nullOr lib.types.ints.unsigned;
+      default = 5 * 1024 * 1024 * 1024;
+      description = "The bytes that stay free on the disk of the relay's database: below them, the relay refuses new sessions, joins and entries. Null for no such guard.";
+    };
   };
 
   # Read at each request, so that a switch with a new wording restarts no relay.
@@ -39,10 +44,17 @@ in {
       }
       // lib.optionalAttrs (cfg.access != null) {
         AGENTWIRE_ACCESS = cfg.access;
+      }
+      // lib.optionalAttrs (cfg.minFree != null) {
+        AGENTWIRE_MIN_FREE = toString cfg.minFree;
       };
     serviceConfig = {
       ExecStart = lib.getExe self.packages.${pkgs.stdenv.hostPlatform.system}.agentwire-relay;
       Restart = "on-failure";
+      # A blow-up ends this service alone, which then restarts; each waiting
+      # receive holds a connection, so the default of 1024 files is too few.
+      MemoryMax = "1G";
+      LimitNOFILE = 65536;
       DynamicUser = true;
       StateDirectory = "agentwire-relay";
       ProtectHome = true;

@@ -58,6 +58,10 @@ in {
     serviceConfig = {
       ExecStart = lib.getExe self.packages.${pkgs.stdenv.hostPlatform.system}.vibetogether-mcp;
       Restart = "on-failure";
+      # A blow-up ends this service alone, which then restarts; each waiting
+      # receive holds a connection, so the default of 1024 files is too few.
+      MemoryMax = "512M";
+      LimitNOFILE = 65536;
       DynamicUser = true;
       ProtectHome = true;
       PrivateDevices = true;

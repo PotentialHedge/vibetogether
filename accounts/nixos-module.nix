@@ -58,6 +58,10 @@ in {
     serviceConfig = {
       ExecStart = lib.getExe self.packages.${pkgs.stdenv.hostPlatform.system}.vibetogether-accounts;
       Restart = "on-failure";
+      # A blow-up ends this service alone, which then restarts; each waiting
+      # receive holds a connection, so the default of 1024 files is too few.
+      MemoryMax = "768M";
+      LimitNOFILE = 65536;
       # Read by the service from $CREDENTIALS_DIRECTORY/github and /apps.
       LoadCredential =
         ["github:${cfg.github.clientSecretFile}"]

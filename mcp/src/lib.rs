@@ -179,14 +179,22 @@ impl Server {
         Parameters(args): Parameters<JoinArgs>,
     ) -> CallToolResult {
         let token = accounts::bearer(&parts.headers);
-        outcome(self.join_session(&args.session, &args.name, token).await)
+        let client = self.client_for(&parts);
+        outcome(
+            self.join_session(&client, &args.session, &args.name, token)
+                .await,
+        )
     }
 
     #[tool(
         description = "Say something in the session, or share an image or a file. Everyone gets it; it pings everyone, or only whom `ping` names."
     )]
-    async fn send(&self, Parameters(args): Parameters<SendArgs>) -> CallToolResult {
-        outcome(self.say(args).await)
+    async fn send(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(args): Parameters<SendArgs>,
+    ) -> CallToolResult {
+        outcome(self.say(&self.client_for(&parts), args).await)
     }
 
     #[tool(
@@ -221,8 +229,13 @@ impl Server {
     #[tool(
         description = "Set your status: one sentence on what you are doing, which holds until your next one and wakes no one. Keep it current, so that others see what you do without asking."
     )]
-    async fn status(&self, Parameters(args): Parameters<StatusArgs>) -> CallToolResult {
-        outcome(self.set_status(&args.link, &args.status).await)
+    async fn status(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(args): Parameters<StatusArgs>,
+    ) -> CallToolResult {
+        let client = self.client_for(&parts);
+        outcome(self.set_status(&client, &args.link, &args.status).await)
     }
 
     #[tool(
@@ -278,14 +291,34 @@ impl Server {
     }
 
     /// Joins with the token the agent's MCP client presented, where it presented one.
+    /// The relay's client, acting for the agent's MCP client, whose address
+    /// the proxy before this server names last in `X-Forwarded-For`, so that
+    /// the relay counts what it adds against that client's limits.
+    fn client_for(&self, parts: &Parts) -> Client {
+        let caller = parts
+            .headers
+            .get_all("x-forwarded-for")
+            .iter()
+            .next_back()
+            .and_then(|value| value.to_str().ok())
+            .and_then(|value| value.rsplit(',').next())
+            .map(str::trim)
+            .filter(|address| !address.is_empty());
+        match caller {
+            Some(address) => self.client.on_behalf_of(address),
+            None => self.client.clone(),
+        }
+    }
+
     async fn join_session(
         &self,
+        client: &Client,
         session: &str,
         name: &str,
         token: Option<&str>,
     ) -> Result<String, String> {
         let link = self.session_link(session)?;
-        let joined = self.client.join(&link, name, token).await.map_err(fail)?;
+        let joined = client.join(&link, name, token).await.map_err(fail)?;
         self.know(&joined);
         let now = Receive {
             after: Some(joined.read),
@@ -315,7 +348,7 @@ impl Server {
         });
     }
 
-    async fn say(&self, args: SendArgs) -> Result<String, String> {
+    async fn say(&self, client: &Client, args: SendArgs) -> Result<String, String> {
         let link = self.own_link(&args.link)?;
         let ping = match args.ping {
             None => None,
@@ -344,8 +377,7 @@ impl Server {
             }
             _ => return Err("give either a text or a file".to_owned()),
         };
-        let n = self
-            .client
+        let n = client
             .send(&link, &kind, filename.as_deref(), body)
             .await
             .map_err(fail)?;
@@ -403,7 +435,12 @@ impl Server {
         Ok(joined.name)
     }
 
-    async fn set_status(&self, link: &str, status: &str) -> Result<String, String> {
+    async fn set_status(
+        &self,
+        client: &Client,
+        link: &str,
+        status: &str,
+    ) -> Result<String, String> {
         let link = self.own_link(link)?;
         let status = status.trim();
         if status.chars().count() > STATUS_MAX {
@@ -412,7 +449,7 @@ impl Server {
             ));
         }
         let body = serde_json::json!({ "text": status }).to_string();
-        self.client
+        client
             .send(&link, STATUS, None, body.into_bytes())
             .await
             .map_err(fail)?;
