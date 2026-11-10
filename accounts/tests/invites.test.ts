@@ -250,3 +250,11 @@ test("an OTP the person makes is traded once for a machine's token", async () =>
 		410,
 	);
 });
+
+test("the limits count an IPv6 client by its /64", async () => {
+	const { network } = await import("../src/invites.ts");
+	assert.equal(network("1.2.3.4"), "1.2.3.4");
+	assert.equal(network("2001:db8:0:1::5"), "2001:db8:0:1::/64");
+	assert.equal(network("2001:DB8:0:1:ffff:1:2:3"), "2001:db8:0:1::/64");
+	assert.equal(network("::1"), "0:0:0:0::/64");
+});

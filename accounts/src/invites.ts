@@ -359,12 +359,29 @@ export async function redeemOtp(
 
 // The operations.
 
+/** The network an address counts by: an IPv4 address itself, and an IPv6
+ * address's /64, which one client holds whole, as the relay counts. */
+export function network(address: string): string {
+	if (!address.includes(":")) return address;
+	const [head = "", tail = ""] = address.split("::");
+	const left = head ? head.split(":") : [];
+	const right = tail ? tail.split(":") : [];
+	const groups = address.includes("::")
+		? [...left, ...Array(8 - left.length - right.length).fill("0"), ...right]
+		: left;
+	return `${groups
+		.slice(0, 4)
+		.map((g) => g.toLowerCase().replace(/^0+(?=.)/, ""))
+		.join(":")}::/64`;
+}
+
 /** At most `max` requests per minute from one address, for the operations anyone calls. */
 function perAddress(max: number) {
 	const seen = new Map<string, { start: number; n: number }>();
 	return (request: Request): boolean => {
-		const address =
-			request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? "";
+		const address = network(
+			request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? "",
+		);
 		const now = Date.now();
 		if (seen.size > 10_000) seen.clear();
 		const entry = seen.get(address);

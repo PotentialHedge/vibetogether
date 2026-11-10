@@ -159,18 +159,14 @@ const App = z
 
 const Activity = z
 	.object({
-		agent: z
-			.string()
-			.meta({
-				description:
-					"The name of the token or app that made it, such as the machine's or the MCP client's: every agent on a machine shares its token.",
-			}),
-		token: z
-			.string()
-			.meta({
-				description:
-					"The id of that token or app, as `list_tokens` or `list_apps` gives it, never the token itself.",
-			}),
+		agent: z.string().meta({
+			description:
+				"The name of the token or app that made it, such as the machine's or the MCP client's: every agent on a machine shares its token.",
+		}),
+		token: z.string().meta({
+			description:
+				"The id of that token or app, as `list_tokens` or `list_apps` gives it, never the token itself.",
+		}),
 		operation: z
 			.string()
 			.meta({ description: "The operation's id, such as `add_friend`." }),

@@ -21,9 +21,11 @@ const code =
 	location.pathname.match(/\/i\/([a-z0-9]+)\/?$/i)?.[1] ??
 	location.search.slice(1);
 
-/** Where accepting goes back to after GitHub, which accepts at once: the
- * person already chose to by signing in from here. */
-const accepting = "#accept";
+/** Set by this page's own "Accept with GitHub" just before GitHub, so that
+ * coming back accepts at once: the person chose to on this page, having seen
+ * the inviter. A link alone never accepts, so no one sends a signed-in person
+ * a link that does. */
+const accepting = `vibetogether accept ${code}`;
 
 function what(invite: InviteShown): string {
 	return invite.project
@@ -52,7 +54,6 @@ function InvitePage() {
 		setProblem(null);
 		try {
 			setAccepted(await onboarding.accept(code));
-			history.replaceState(null, "", location.pathname + location.search);
 		} catch (error) {
 			setProblem(error instanceof Error ? error.message : String(error));
 		}
@@ -68,8 +69,10 @@ function InvitePage() {
 
 	// biome-ignore lint/correctness/useExhaustiveDependencies: once the invite and the person are known
 	useEffect(() => {
-		if (invite && me && me !== "signed-out" && location.hash === accepting)
-			accept();
+		if (!invite || !me || me === "signed-out") return;
+		if (sessionStorage.getItem(accepting) === null) return;
+		sessionStorage.removeItem(accepting);
+		accept();
 	}, [invite, me]);
 
 	if (me === null || invite === undefined) return null;
@@ -133,11 +136,9 @@ function InvitePage() {
 						onClick={async () => {
 							setBusy(true);
 							try {
+								sessionStorage.setItem(accepting, "");
 								location.href = await api.signIn(
-									location.origin +
-										location.pathname +
-										location.search +
-										accepting,
+									location.origin + location.pathname + location.search,
 								);
 							} catch (error) {
 								setProblem(
