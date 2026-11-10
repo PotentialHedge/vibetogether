@@ -18,14 +18,13 @@ import {
 	Panel,
 	Person,
 	Row,
+	Titled,
 	useActions,
 } from "@/account/parts";
 import { CopySessionPrompt, Sessions } from "@/account/sessions";
 import { SignIn } from "@/account/sign-in";
 import { Button } from "@/components/ui/button";
 import { page, render, Site } from "@/site";
-
-const service = "vibetogether.agentics.lwirth.com";
 
 type State = {
 	me: Me;
@@ -108,35 +107,39 @@ function Dashboard({
 					<Empty>No friends yet. Add someone by their GitHub name.</Empty>
 				) : (
 					friends.map((friend) => (
-						<Row key={friend.name}>
+						<Row
+							key={friend.name}
+							actions={
+								<>
+									{friend.state === "asked" && (
+										<span className="text-sm text-muted-foreground">
+											waiting for them
+										</span>
+									)}
+									{friend.state === "asking" && (
+										<Button
+											size="sm"
+											onClick={act(() => api.addFriend(friend.name))}
+										>
+											Accept
+										</Button>
+									)}
+									<Button
+										variant="ghost"
+										size="sm"
+										onClick={act(() => api.removeFriend(friend.name))}
+									>
+										{friend.state === "asking" ? "Decline" : "Remove"}
+									</Button>
+								</>
+							}
+						>
 							<Person {...friend} size="sm" />
-							<span className="flex flex-col leading-tight">
-								<span>{friend.displayName}</span>
+							<span className="flex min-w-0 flex-col leading-tight">
+								<span className="truncate">{friend.displayName}</span>
 								<span className="font-mono text-xs text-muted-foreground">
 									{friend.name}
 								</span>
-							</span>
-							<span className="ml-auto flex items-center gap-2">
-								{friend.state === "asked" && (
-									<span className="text-sm text-muted-foreground">
-										waiting for them
-									</span>
-								)}
-								{friend.state === "asking" && (
-									<Button
-										size="sm"
-										onClick={act(() => api.addFriend(friend.name))}
-									>
-										Accept
-									</Button>
-								)}
-								<Button
-									variant="ghost"
-									size="sm"
-									onClick={act(() => api.removeFriend(friend.name))}
-								>
-									{friend.state === "asking" ? "Decline" : "Remove"}
-								</Button>
 							</span>
 						</Row>
 					))
@@ -152,41 +155,40 @@ function Dashboard({
 				) : (
 					apps.map((app) => (
 						<div key={app.id} className="flex flex-col">
-							<Row>
-								<span className="flex min-w-0 items-center gap-2">
-									<AppWindow
-										aria-hidden
-										className="size-4 shrink-0 text-muted-foreground"
-									/>
-									<span className="font-mono">{app.name}</span>
-									{app.for && (
-										<span className="truncate text-sm text-muted-foreground">
-											· {app.for}
-										</span>
-									)}
-								</span>
-								<span className="text-sm text-muted-foreground">
-									since {date.format(new Date(app.created))}
-								</span>
-								<Button
-									variant="destructive"
-									size="sm"
-									className="ml-auto"
-									onClick={act(() => api.revokeApp(app.id))}
-								>
-									Revoke
-								</Button>
+							<Row
+								actions={
+									<Button
+										variant="ghost"
+										size="sm"
+										onClick={act(() => api.revokeApp(app.id))}
+									>
+										Revoke
+									</Button>
+								}
+							>
+								<AppWindow
+									aria-hidden
+									className="size-4 shrink-0 text-muted-foreground"
+								/>
+								<Titled
+									title={app.name}
+									detail={
+										<>
+											{app.for && <>{app.for} · </>}
+											since {date.format(new Date(app.created))}
+										</>
+									}
+								/>
 							</Row>
 							{sessions
 								.filter((session) => session.app?.id === app.id)
 								.map((session) => (
-									<Row key={session.id}>
-										<span className="pl-6 font-mono text-sm">
-											{session.name}
-										</span>
-										<span className="ml-auto">
-											<CopySessionPrompt session={session} />
-										</span>
+									<Row
+										key={session.id}
+										inset
+										actions={<CopySessionPrompt session={session} />}
+									>
+										<span className="font-mono text-sm">{session.name}</span>
 									</Row>
 								))}
 						</div>
@@ -213,32 +215,33 @@ function Dashboard({
 					<Empty>No token yet.</Empty>
 				) : (
 					tokens.map((token) => (
-						<Row key={token.id}>
-							<span className="flex items-center gap-2 font-mono">
-								{token.kind === "mcp" ? (
-									<Plug
-										aria-label="MCP"
-										className="size-4 text-muted-foreground"
-									/>
-								) : (
-									<Monitor
-										aria-label="machine"
-										className="size-4 text-muted-foreground"
-									/>
-								)}
-								{token.name}
-							</span>
-							<span className="text-sm text-muted-foreground">
-								since {date.format(new Date(token.created))}
-							</span>
-							<Button
-								variant="destructive"
-								size="sm"
-								className="ml-auto"
-								onClick={act(() => api.revoke(token.id))}
-							>
-								Revoke
-							</Button>
+						<Row
+							key={token.id}
+							actions={
+								<Button
+									variant="ghost"
+									size="sm"
+									onClick={act(() => api.revoke(token.id))}
+								>
+									Revoke
+								</Button>
+							}
+						>
+							{token.kind === "mcp" ? (
+								<Plug
+									aria-label="MCP client"
+									className="size-4 shrink-0 text-muted-foreground"
+								/>
+							) : (
+								<Monitor
+									aria-label="machine"
+									className="size-4 shrink-0 text-muted-foreground"
+								/>
+							)}
+							<Titled
+								title={token.name}
+								detail={`${token.kind === "mcp" ? "MCP client" : "machine"} · since ${date.format(new Date(token.created))}`}
+							/>
 						</Row>
 					))
 				)}
@@ -302,7 +305,6 @@ function Account() {
 	if (state === "signed-out")
 		return (
 			<Frame
-				name={service}
 				title="Your account"
 				description="Sign in to keep sessions that last, add friends, and see and revoke your tokens."
 			>

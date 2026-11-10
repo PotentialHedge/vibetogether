@@ -64,7 +64,7 @@ export function Site({
 	children: ReactNode;
 }) {
 	return (
-		<div className="flex min-h-dvh flex-col">
+		<div className="flex min-h-dvh flex-col overflow-x-clip">
 			<header className="mx-auto flex w-full max-w-6xl items-center gap-6 px-6 py-5">
 				<a
 					href={page()}

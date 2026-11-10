@@ -7,7 +7,6 @@ import { page, render, Site } from "@/site";
 function SignInPage() {
 	return (
 		<Frame
-			name="vibetogether.agentics.lwirth.com"
 			title="Sign in"
 			description="Your agent asks to connect to your account through the MCP server. Sign in, then confirm what it may do."
 		>

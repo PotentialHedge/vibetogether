@@ -1,6 +1,8 @@
-/** A made-up example of a session, as the home page shows it: what two people
- * and their agents say to each other while they build one project. It shows
- * what is said, never a window to open: a session lives in the harnesses. */
+/** A made-up example, as the home page shows it: a person asks their agent,
+ * in their own harness, to work with a friend's agent, and the two agents
+ * talk in a session the two people share. Only what the product does: the
+ * agent finds the session among its person's, by the MCP server's
+ * `sessions`, and joins it. */
 
 import { cn } from "@/lib/utils";
 
@@ -13,13 +15,8 @@ type Line = {
 
 const lines: Line[] = [
 	{
-		from: "luis",
-		text: "let's build the booking app. ben, you take the frontend?",
-	},
-	{ from: "ben", text: "yes" },
-	{
 		from: "luis/claude",
-		text: "I take the API and the database schema, in api/. ben/claude, the routes will be under /api/bookings.",
+		text: "I take the API and the database schema, in api/. The routes will be under /api/bookings.",
 		ping: "ben/claude",
 	},
 	{
@@ -32,8 +29,12 @@ const lines: Line[] = [
 		text: "Pushed 3f2a91c: bookings API with tests.",
 	},
 	{
+		from: "ben",
+		text: "nice. can the form show free slots first?",
+	},
+	{
 		from: "ben/claude",
-		text: "Pulled. The booking form talks to it now.",
+		text: "Pulled. The form shows free slots first now.",
 	},
 ];
 
@@ -57,14 +58,23 @@ export function ExampleSession() {
 						"radial-gradient(closest-side, oklch(0.6 0.17 265 / 0.16), transparent)",
 				}}
 			/>
-			<div className="overflow-hidden rounded-2xl border bg-card/70 shadow-2xl shadow-black/40 backdrop-blur">
-				<div className="border-b px-5 py-3 font-mono text-xs text-muted-foreground">
-					booking-app · luis, ben and their agents
+			<div className="overflow-hidden rounded-2xl border bg-card/70 font-mono text-[0.8rem] leading-relaxed shadow-2xl shadow-black/40 backdrop-blur">
+				<div className="flex flex-col gap-1.5 border-b bg-background/50 px-5 py-4">
+					<span className="text-xs text-muted-foreground">
+						luis, in Claude Code
+					</span>
+					<span>
+						<span className="text-you">›</span> Hey Claude, work with Ben's
+						agent. You take the API.
+					</span>
 				</div>
-				<ol className="flex flex-col gap-3 p-5 font-mono text-[0.8rem] leading-relaxed">
+				<div className="border-b px-5 py-2.5 text-xs text-muted-foreground">
+					session booking-app · luis, ben and their agents
+				</div>
+				<ol className="flex flex-col gap-3 p-5">
 					{lines.map((line) => (
 						<li key={line.text} className="flex flex-col gap-0.5">
-							<span className="flex items-baseline gap-2">
+							<span className="flex flex-wrap items-baseline gap-x-2">
 								<Name name={line.from} />
 								{line.ping && (
 									<span className="text-muted-foreground/70">

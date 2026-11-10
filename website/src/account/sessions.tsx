@@ -115,86 +115,90 @@ export function Sessions({
 					(friend) => !session.members.includes(friend.name),
 				);
 				return (
-					<Row key={session.id}>
-						<span className="font-mono">{session.name}</span>
-						{!own && (
-							<span className="text-sm text-muted-foreground">
-								by {session.owner}
-							</span>
-						)}
-						<span className="flex flex-wrap items-center gap-1.5">
-							{session.members.map((member) => (
-								<Badge key={member} variant="secondary" className="font-mono">
-									{member}
-									{own && (
-										<button
-											type="button"
-											aria-label={`Remove ${member}`}
-											className="ml-1 text-muted-foreground hover:text-foreground"
-											onClick={act(() => api.removeMember(session.id, member))}
-										>
-											×
-										</button>
+					<Row
+						key={session.id}
+						actions={
+							<>
+								{own ? (
+									<OpenSwitch
+										value={session.open}
+										onChange={(open) =>
+											act(() => api.changeSession(session.id, { open }))()
+										}
+									/>
+								) : (
+									session.open === "link" && (
+										<span className="font-mono text-xs text-muted-foreground">
+											open by link
+										</span>
+									)
+								)}
+								<CopySessionPrompt session={session} />
+								{own && addable.length > 0 && (
+									<select
+										aria-label="Add a friend"
+										className="h-7 rounded-md border bg-background px-2 font-mono text-xs text-muted-foreground"
+										value=""
+										onChange={(event) => {
+											const name = event.target.value;
+											if (name) act(() => api.addMember(session.id, name))();
+										}}
+									>
+										<option value="">add a friend</option>
+										{addable.map((friend) => (
+											<option key={friend.name} value={friend.name}>
+												{friend.name}
+											</option>
+										))}
+									</select>
+								)}
+								<Button
+									variant="ghost"
+									size="sm"
+									onClick={act(() =>
+										own
+											? api.deleteSession(session.id)
+											: api.removeMember(session.id, me.name),
 									)}
-								</Badge>
-							))}
-							{own && session.members.length === 0 && (
-								<span className="text-sm text-muted-foreground">
-									no one else yet
-								</span>
-							)}
-						</span>
-						<span className="ml-auto flex items-center gap-2">
-							{own ? (
-								<OpenSwitch
-									value={session.open}
-									onChange={(open) =>
-										act(() => api.changeSession(session.id, { open }))()
-									}
-								/>
-							) : (
-								session.open === "link" && (
-									<span className="font-mono text-xs text-muted-foreground">
-										open by link
+								>
+									{own ? "Delete" : "Leave"}
+								</Button>
+							</>
+						}
+					>
+						<span className="flex min-w-0 flex-col gap-2">
+							<span className="flex items-baseline gap-2">
+								<span className="truncate font-mono">{session.name}</span>
+								{!own && (
+									<span className="text-sm text-muted-foreground">
+										by {session.owner}
 									</span>
-								)
-							)}
-							<CopySessionPrompt session={session} />
-							{own && addable.length > 0 && (
-								<select
-									aria-label="Add a friend"
-									className="h-7 rounded-md border bg-background px-2 font-mono text-xs text-muted-foreground"
-									value=""
-									onChange={(event) => {
-										const name = event.target.value;
-										if (name) act(() => api.addMember(session.id, name))();
-									}}
-								>
-									<option value="">add a friend</option>
-									{addable.map((friend) => (
-										<option key={friend.name} value={friend.name}>
-											{friend.name}
-										</option>
-									))}
-								</select>
-							)}
-							{own ? (
-								<Button
-									variant="ghost"
-									size="sm"
-									onClick={act(() => api.deleteSession(session.id))}
-								>
-									Delete
-								</Button>
-							) : (
-								<Button
-									variant="ghost"
-									size="sm"
-									onClick={act(() => api.removeMember(session.id, me.name))}
-								>
-									Leave
-								</Button>
-							)}
+								)}
+							</span>
+							<span className="flex flex-wrap items-center gap-1.5">
+								{session.members.map((member) => (
+									<Badge key={member} variant="secondary" className="font-mono">
+										{member}
+										{own && (
+											<button
+												type="button"
+												aria-label={`Remove ${member}`}
+												className="ml-1 text-muted-foreground hover:text-foreground"
+												onClick={act(() =>
+													api.removeMember(session.id, member),
+												)}
+											>
+												×
+											</button>
+										)}
+									</Badge>
+								))}
+								{own && session.members.length === 0 && (
+									<span className="text-sm text-muted-foreground">
+										no one else yet
+									</span>
+								)}
+							</span>
 						</span>
 					</Row>
 				);

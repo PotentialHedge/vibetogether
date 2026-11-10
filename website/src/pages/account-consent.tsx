@@ -2,9 +2,8 @@ import { useEffect, useState } from "react";
 import { Frame } from "ui/onboard";
 import { api } from "@/account/api";
 import { SignIn, useMe } from "@/account/sign-in";
+import { Button } from "@/components/ui/button";
 import { page, render, Site } from "@/site";
-
-const service = "vibetogether.agentics.lwirth.com";
 
 function hostOf(url: string | null): string | null {
 	if (!url) return null;
@@ -38,7 +37,6 @@ function ConsentPage() {
 	if (me === "signed-out")
 		return (
 			<Frame
-				name={service}
 				title="Sign in"
 				description="An agent asks for access to your account. Sign in first."
 			>
@@ -58,7 +56,6 @@ function ConsentPage() {
 
 	return (
 		<Frame
-			name={service}
 			title="Allow access?"
 			description="Allow only an agent you are connecting yourself, right now."
 		>
@@ -85,22 +82,21 @@ function ConsentPage() {
 					revoke it on your account page.
 				</p>
 				<div className="flex gap-3">
-					<button
-						type="button"
+					<Button
+						size="xl"
 						disabled={busy || !redirect}
-						className="h-11 rounded-xl bg-primary px-6 font-medium text-primary-foreground transition-all hover:bg-primary/85 active:translate-y-px disabled:opacity-50"
 						onClick={() => answer(true)}
 					>
 						Allow
-					</button>
-					<button
-						type="button"
+					</Button>
+					<Button
+						size="xl"
+						variant="outline"
 						disabled={busy}
-						className="h-11 rounded-xl border px-6 font-medium transition-all hover:bg-muted active:translate-y-px disabled:opacity-50"
 						onClick={() => answer(false)}
 					>
 						Deny
-					</button>
+					</Button>
 				</div>
 			</div>
 			{problem && <p className="text-sm text-destructive">{problem}</p>}

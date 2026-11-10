@@ -1,16 +1,16 @@
 /** Signing in, as every page of the account has it. */
 
 import { useEffect, useState } from "react";
-import { api, type Me, Unauthorized } from "@/account/api";
+import { api, type Me } from "@/account/api";
+import { Button } from "@/components/ui/button";
 
 /** The person signed in, "signed-out", or null while it is not known yet. */
 export function useMe(): Me | "signed-out" | null {
 	const [me, setMe] = useState<Me | "signed-out" | null>(null);
 	useEffect(() => {
-		api.me().then(setMe, (error) => {
-			if (error instanceof Unauthorized) setMe("signed-out");
-			else throw error;
-		});
+		// Anything but a person, such as the account service out of reach,
+		// shows as signed out, so that signing in is always offered.
+		api.me().then(setMe, () => setMe("signed-out"));
 	}, []);
 	return me;
 }
@@ -42,10 +42,10 @@ export function SignIn({
 	const [problem, setProblem] = useState<string | null>(null);
 	return (
 		<div className="flex flex-col gap-3">
-			<button
-				type="button"
+			<Button
+				size="xl"
 				disabled={busy}
-				className="flex h-12 items-center justify-center gap-2.5 self-start rounded-xl bg-primary px-6 font-medium text-primary-foreground transition-all hover:bg-primary/85 active:translate-y-px disabled:opacity-50"
+				className="self-start"
 				onClick={async () => {
 					setBusy(true);
 					try {
@@ -56,9 +56,9 @@ export function SignIn({
 					}
 				}}
 			>
-				<GitHubIcon className="size-5" />
+				<GitHubIcon />
 				Sign in with GitHub
-			</button>
+			</Button>
 			{problem && <p className="text-sm text-destructive">{problem}</p>}
 		</div>
 	);

@@ -6,8 +6,10 @@
 import { type ReactNode, useState } from "react";
 
 export type OnboardProps = {
-	/** The service, as the person knows it, such as `voice.agentics.lwirth.com`. */
-	name: string;
+	/** The service, as the person knows it, such as `voice.agentics.lwirth.com`.
+	 * Without one, the page sits inside a site of its own, which already
+	 * names the service: see `Frame`. */
+	name?: string;
 	/** What the person gets, in a few words. */
 	title: string;
 	/** One or two sentences on it. */
@@ -154,18 +156,53 @@ export function Named({
 }
 
 /** The look every page of a person's onboarding shares, for a service's own
- * steps too. */
+ * steps too. With `name`, it is the whole page: the service's name above, a
+ * glow, and a footer. Without one, it sits inside a site's own header and
+ * footer, which already name the service. */
 export function Frame({
 	name,
 	title,
 	description,
 	children,
 }: {
-	name: string;
+	name?: string | undefined;
 	title: string;
 	description: string;
 	children: ReactNode;
 }) {
+	const body = (
+		<div className="relative flex w-full max-w-xl flex-col gap-10">
+			<header className="flex flex-col gap-4">
+				{name && (
+					<span className="font-mono text-sm text-muted-foreground">
+						{name}
+					</span>
+				)}
+				<h1 className="text-4xl font-semibold tracking-tight text-balance sm:text-5xl">
+					{title}
+				</h1>
+				<p className="text-lg text-pretty text-muted-foreground">
+					{description}
+				</p>
+			</header>
+			{children}
+			{name && (
+				<footer className="text-xs text-muted-foreground">
+					<a
+						className="underline-offset-4 hover:text-foreground hover:underline"
+						href="https://vibetogether.agentics.lwirth.com"
+					>
+						Vibe Together
+					</a>
+					: bring your own agent
+				</footer>
+			)}
+		</div>
+	);
+	if (!name)
+		return (
+			<div className="flex justify-center px-6 pt-12 md:pt-20">{body}</div>
+		);
 	return (
 		<div className="relative flex min-h-dvh items-center justify-center overflow-hidden px-6 py-16">
 			<div
@@ -176,29 +213,7 @@ export function Frame({
 						"radial-gradient(60rem 30rem at 50% -10%, var(--onboard-glow, oklch(0.6 0.17 265 / 0.22)), transparent 70%)",
 				}}
 			/>
-			<div className="relative flex w-full max-w-xl flex-col gap-10">
-				<header className="flex flex-col gap-4">
-					<span className="font-mono text-sm text-muted-foreground">
-						{name}
-					</span>
-					<h1 className="text-4xl font-semibold tracking-tight text-balance sm:text-5xl">
-						{title}
-					</h1>
-					<p className="text-lg text-pretty text-muted-foreground">
-						{description}
-					</p>
-				</header>
-				{children}
-				<footer className="text-xs text-muted-foreground">
-					<a
-						className="underline-offset-4 hover:text-foreground hover:underline"
-						href="https://vibetogether.agentics.lwirth.com"
-					>
-						Vibe Together
-					</a>
-					: bring your own agent
-				</footer>
-			</div>
+			{body}
 		</div>
 	);
 }

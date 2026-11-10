@@ -2,15 +2,9 @@ import { useCallback, useEffect, useState } from "react";
 import { Frame } from "ui/onboard";
 import { api, type Device } from "@/account/api";
 import { SignIn, useMe } from "@/account/sign-in";
+import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { render, Site } from "@/site";
-
-const service = "vibetogether.agentics.lwirth.com";
-
-const primary =
-	"h-11 rounded-xl bg-primary px-6 font-medium text-primary-foreground transition-all hover:bg-primary/85 active:translate-y-px disabled:opacity-50";
-const secondary =
-	"h-11 rounded-xl border px-6 font-medium transition-all hover:bg-muted active:translate-y-px disabled:opacity-50";
 
 const relative = new Intl.RelativeTimeFormat(undefined, { numeric: "auto" });
 
@@ -50,7 +44,6 @@ function DevicePage() {
 	if (me === "signed-out")
 		return (
 			<Frame
-				name={service}
 				title="Connect your agent"
 				description="An agent asks for your account with an OTP. Sign in first, then decide."
 			>
@@ -61,7 +54,6 @@ function DevicePage() {
 	if (outcome)
 		return (
 			<Frame
-				name={service}
 				title={
 					outcome === "denied"
 						? "Request denied"
@@ -99,7 +91,6 @@ function DevicePage() {
 		};
 		return (
 			<Frame
-				name={service}
 				title={claimed.person ? "Approve this app?" : "Approve this code?"}
 				description={
 					claimed.person
@@ -138,8 +129,12 @@ function DevicePage() {
 								<dd className="break-words">{claimed.for}</dd>
 							</>
 						)}
-						<dt className="text-muted-foreground">code</dt>
-						<dd>{claimed.user_code}</dd>
+						{!claimed.person && (
+							<>
+								<dt className="text-muted-foreground">code</dt>
+								<dd>{claimed.user_code}</dd>
+							</>
+						)}
 						<dt className="text-muted-foreground">asked</dt>
 						<dd>{claimed.requested ? ago(claimed.requested) : "unknown"}</dd>
 						<dt className="text-muted-foreground">from</dt>
@@ -151,16 +146,12 @@ function DevicePage() {
 							: "Approve only if your own agent gave you this code just now. If someone sent you this link, deny it."}
 					</p>
 					<div className="flex gap-3">
-						<button type="button" className={primary} onClick={() => act(true)}>
+						<Button size="xl" onClick={() => act(true)}>
 							Approve
-						</button>
-						<button
-							type="button"
-							className={secondary}
-							onClick={() => act(false)}
-						>
+						</Button>
+						<Button size="xl" variant="outline" onClick={() => act(false)}>
 							Deny
-						</button>
+						</Button>
 					</div>
 				</div>
 				{problem && <p className="text-sm text-destructive">{problem}</p>}
@@ -170,7 +161,6 @@ function DevicePage() {
 
 	return (
 		<Frame
-			name={service}
 			title="Connect your agent"
 			description="Enter the code your agent gave you."
 		>
@@ -188,9 +178,9 @@ function DevicePage() {
 					value={code}
 					onChange={(event) => setCode(event.target.value)}
 				/>
-				<button type="submit" className={primary} disabled={!code.trim()}>
+				<Button type="submit" size="xl" disabled={!code.trim()}>
 					Continue
-				</button>
+				</Button>
 			</form>
 			{problem && (
 				<p className="text-sm text-destructive">

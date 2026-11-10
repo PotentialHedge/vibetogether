@@ -34,7 +34,6 @@ export function useLinkRoom() {
 export function LinkRoomReady({ link }: { link: string }) {
 	return (
 		<Onboard
-			name="vibetogether.agentics.lwirth.com"
 			title="Your session is ready"
 			description="Copy the prompt into your agent, and send it to the others, who paste it into theirs."
 			link={link}

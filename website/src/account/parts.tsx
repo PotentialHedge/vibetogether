@@ -5,6 +5,7 @@ import { type ReactNode, useState } from "react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { cn } from "@/lib/utils";
 
 export function Person({
 	name,
@@ -40,7 +41,7 @@ export function Panel({
 }) {
 	return (
 		<section className="flex flex-col gap-4">
-			<div className="flex flex-wrap items-end justify-between gap-3">
+			<div className="flex flex-wrap items-end justify-between gap-x-6 gap-y-3">
 				<div className="flex flex-col gap-1">
 					<h2 className="font-mono text-lg font-medium tracking-tight">
 						{title}
@@ -58,11 +59,54 @@ export function Panel({
 	);
 }
 
-export function Row({ children }: { children: ReactNode }) {
+/** One thing in a panel: what it is, and on the right what can be done with
+ * it, which goes below it where the two don't fit side by side. */
+export function Row({
+	children,
+	actions,
+	inset = false,
+}: {
+	children: ReactNode;
+	actions?: ReactNode;
+	/** Whether it belongs to the row above, such as an app's session. */
+	inset?: boolean;
+}) {
 	return (
-		<div className="flex flex-wrap items-center gap-x-4 gap-y-2 px-5 py-4">
-			{children}
+		<div
+			className={cn(
+				"flex flex-wrap items-center gap-x-4 gap-y-3 px-5 py-4",
+				inset && "py-3 pl-11",
+			)}
+		>
+			<div className="flex min-w-0 flex-1 basis-40 flex-wrap items-center gap-x-3 gap-y-1.5">
+				{children}
+			</div>
+			{actions && (
+				<div className="ml-auto flex flex-wrap items-center justify-end gap-2">
+					{actions}
+				</div>
+			)}
 		</div>
+	);
+}
+
+/** A row's title, with what it is about under it. */
+export function Titled({
+	title,
+	detail,
+}: {
+	title: ReactNode;
+	detail?: ReactNode;
+}) {
+	return (
+		<span className="flex min-w-0 flex-col leading-tight">
+			<span className="truncate font-mono">{title}</span>
+			{detail && (
+				<span className="mt-1 truncate text-sm text-muted-foreground">
+					{detail}
+				</span>
+			)}
+		</span>
 	);
 }
 
@@ -84,7 +128,7 @@ export function AddByName({
 	const [problem, setProblem] = useState<string | null>(null);
 	return (
 		<form
-			className="flex flex-wrap items-center gap-2"
+			className="flex w-full flex-wrap items-center gap-2 sm:w-auto"
 			onSubmit={async (event) => {
 				event.preventDefault();
 				const chosen = name.trim().toLowerCase();
@@ -98,9 +142,8 @@ export function AddByName({
 				}
 			}}
 		>
-			{problem && <span className="text-sm text-destructive">{problem}</span>}
 			<Input
-				className="h-8 w-44 font-mono"
+				className="h-8 min-w-0 flex-1 font-mono sm:w-44 sm:flex-none"
 				placeholder={placeholder}
 				value={name}
 				onChange={(event) => setName(event.target.value)}
@@ -108,6 +151,9 @@ export function AddByName({
 			<Button type="submit" variant="outline" disabled={!name.trim()}>
 				{label}
 			</Button>
+			{problem && (
+				<span className="basis-full text-sm text-destructive">{problem}</span>
+			)}
 		</form>
 	);
 }
