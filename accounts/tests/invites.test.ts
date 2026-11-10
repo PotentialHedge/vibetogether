@@ -169,7 +169,7 @@ test("an invite is revoked by its maker alone", async () => {
 	);
 });
 
-test("an invite to a project makes a member of its group, and only its owner makes one", async () => {
+test("an invite to a project makes a member of its group, and any member makes one", async () => {
 	const luis = await person("proj-luis");
 	const ben = await person("proj-ben");
 	const tristan = await person("proj-tristan");
@@ -193,9 +193,17 @@ test("an invite to a project makes a member of its group, and only its owner mak
 	assert.equal(accepted.json.project.id, project);
 	const groups = await call(ben.token, "GET", "/api/groups");
 	assert.ok(groups.json.some((g: { id: string }) => g.id === group));
-	// A member who isn't the owner invites to no project of the group.
+	// Groups are flat: any member invites.
 	assert.equal(
 		(await call(ben.token, "POST", "/api/invites", { project })).status,
+		201,
+	);
+	// A project of one's own group takes no one else.
+	const mine = (
+		await call(ben.token, "POST", "/api/projects", { name: "solo" })
+	).json.id;
+	assert.equal(
+		(await call(ben.token, "POST", "/api/invites", { project: mine })).status,
 		403,
 	);
 	// Nobody outside the group learns of it.

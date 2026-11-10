@@ -48,6 +48,7 @@ type InviteRow = {
 };
 
 type ProjectOf = {
+	own: number;
 	id: string;
 	name: string;
 	group: string;
@@ -59,18 +60,19 @@ type ProjectOf = {
 function projectOf(id: string): ProjectOf | undefined {
 	return db
 		.prepare(
-			`SELECT p.id, p.name, p.app, g.id AS "group", g.name AS groupName, g.owner
+			`SELECT p.id, p.name, p.app, g.id AS "group", g.name AS groupName, g.owner, g.own
 			 FROM project p JOIN "group" g ON g.id = p."group" WHERE p.id = ?`,
 		)
 		.get(id) as ProjectOf | undefined;
 }
 
 /**
- * Who may invite to a project: for now only its group's owner, since only friends of the owner
- * become members. The one place this is decided, until Luis says otherwise.
+ * Who may invite to a project: any member of its group, since groups are flat, Luis's decision
+ * (2026-11-10, "let's go flat"); never into a person's own group, which is them alone, nor an
+ * app's project.
  */
 export function mayInviteTo(project: ProjectOf, user: string): boolean {
-	return project.owner === user && project.app === null;
+	return isMember(project.group, user) && !project.own && project.app === null;
 }
 
 export type Invite = {
@@ -125,7 +127,7 @@ export function createInvite(
 			throw new Refused("No such project.", 404);
 		if (!mayInviteTo(p, inviter))
 			throw new Refused(
-				"Only the owner of the project's group invites to it.",
+				"A project of your own group, or of an app, takes no one else: invite to be friends instead.",
 				403,
 			);
 	}
