@@ -1,8 +1,10 @@
-/** The account's settings: friends, apps and tokens, and signing out. */
+/** The account's settings: tokens, apps, friends, what agents changed, signing
+ * out and deleting the account. */
 
 import { AppWindow, ArrowLeft, Monitor, Plug } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import {
+	type Activity,
 	type App,
 	api,
 	demo,
@@ -32,20 +34,35 @@ type State = {
 	friends: Friend[];
 	tokens: Token[];
 	apps: App[];
+	activity: Activity[];
 };
 
 async function load(): Promise<State> {
-	const [me, sessions, friends, tokens, apps] = await Promise.all([
+	const [me, sessions, friends, tokens, apps, activity] = await Promise.all([
 		api.me(),
 		api.sessions(),
 		api.friends(),
 		api.tokens(),
 		api.apps(),
+		api.activity(),
 	]);
-	return { me, sessions, friends, tokens, apps };
+	return { me, sessions, friends, tokens, apps, activity };
 }
 
 const date = new Intl.DateTimeFormat(undefined, { dateStyle: "medium" });
+const when = new Intl.DateTimeFormat(undefined, {
+	dateStyle: "medium",
+	timeStyle: "short",
+});
+
+/** An operation's arguments, as `key value` pairs. */
+const argumentsOf = (args: Record<string, unknown>) =>
+	Object.entries(args)
+		.map(
+			([key, value]) =>
+				`${key} ${typeof value === "string" ? value : JSON.stringify(value)}`,
+		)
+		.join(" · ");
 
 /** How many sessions an app manages, in words. */
 const count = (n: number) => `${n} session${n === 1 ? "" : "s"}`;
@@ -59,7 +76,7 @@ function Settings({
 	state: State;
 	reload: () => Promise<void>;
 }) {
-	const { me, sessions, friends, tokens, apps } = state;
+	const { me, sessions, friends, tokens, apps, activity } = state;
 	const { problem, act } = useActions(reload);
 	const [minted, setMinted] = useState<Minted | null>(null);
 	const sessionsOf = (id: string) =>
@@ -250,7 +267,76 @@ function Settings({
 					))
 				)}
 			</Panel>
+
+			<Panel
+				title="Activity"
+				description="What your agents changed in your account, newest first."
+			>
+				{activity.length === 0 ? (
+					<Empty>Nothing yet.</Empty>
+				) : (
+					activity.map((change) => (
+						<Row
+							key={`${change.created} ${change.token} ${change.operation} ${JSON.stringify(change.arguments)}`}
+						>
+							<Titled
+								title={change.operation}
+								detail={`${change.agent} · ${when.format(new Date(change.created))}${Object.keys(change.arguments).length ? ` · ${argumentsOf(change.arguments)}` : ""}`}
+							/>
+						</Row>
+					))
+				)}
+			</Panel>
+
+			<DeleteAccount />
 		</div>
+	);
+}
+
+/** Deleting the account, after a second click that says what goes with it. */
+function DeleteAccount() {
+	const [asked, setAsked] = useState(false);
+	const [problem, setProblem] = useState<string | null>(null);
+	return (
+		<section className="flex flex-col gap-3 border-t pt-8 pb-4">
+			<h2 className="font-mono text-lg font-medium tracking-tight">
+				Delete account
+			</h2>
+			<p className="max-w-xl text-sm text-pretty text-muted-foreground">
+				This deletes your account with its tokens and DMs, and every group you
+				are the last member of, with its projects and sessions. You leave the
+				other groups. It can't be undone.
+			</p>
+			<div className="flex flex-wrap gap-2">
+				{asked ? (
+					<>
+						<Button
+							variant="destructive"
+							onClick={async () => {
+								try {
+									await api.deleteAccount();
+									location.href = page();
+								} catch (error) {
+									setProblem(
+										error instanceof Error ? error.message : String(error),
+									);
+								}
+							}}
+						>
+							Yes, delete my account
+						</Button>
+						<Button variant="ghost" onClick={() => setAsked(false)}>
+							Cancel
+						</Button>
+					</>
+				) : (
+					<Button variant="destructive" onClick={() => setAsked(true)}>
+						Delete account
+					</Button>
+				)}
+			</div>
+			{problem && <p className="text-sm text-destructive">{problem}</p>}
+		</section>
 	);
 }
 

@@ -381,11 +381,6 @@ function ProjectItem({
 						>
 							<span className="text-muted-foreground/60">#</span>
 							<span className="min-w-0 flex-1 truncate">{session.name}</span>
-							{session.open === "link" && (
-								<span className="text-[0.65rem] text-muted-foreground/70">
-									link
-								</span>
-							)}
 						</button>
 					</li>
 				))}

@@ -39,16 +39,12 @@ export type Session = {
 	group: Named;
 	/** Who created it, who may delete it, as may the group's owner. */
 	creator?: string | null;
-	/** Who may join: its group's members only, or anyone with its address. */
-	open: Open;
 	/** Its URL on the relay, hard to guess: it identifies the session, and is its secret. */
 	address: string;
 	/** The app that owns it for the person, such as messagent for a Telegram
 	 * chat, which manages it; none for the person's own. */
 	app?: { id: string; name: string } | null;
 };
-
-export type Open = "members" | "link";
 
 /** Two friends' DM: one session for the two of them and their agents, in no
  * group or project. */
@@ -58,6 +54,18 @@ export type Dm = {
 	friend: string;
 	/** Its URL on the relay, as a session's. */
 	address: string;
+};
+
+/** A change an agent or app made in the account, through its token. */
+export type Activity = {
+	/** The token's or app's name, such as the machine's. */
+	agent: string;
+	/** The token's or app's id. */
+	token: string;
+	/** The operation's id, such as `add_friend`. */
+	operation: string;
+	arguments: Record<string, unknown>;
+	created: string;
 };
 
 export type Friend = {
@@ -167,11 +175,14 @@ const live = {
 	sessions: () => call<Session[]>("GET", "api/sessions"),
 	createSession: (project: string, name: string) =>
 		call<Session>("POST", "api/sessions", { name, project }),
-	changeSession: (id: string, change: { name?: string; open?: Open }) =>
+	changeSession: (id: string, change: { name: string }) =>
 		call<Session>("PATCH", `api/sessions/${encodeURIComponent(id)}`, change),
 	deleteSession: (id: string) =>
 		call<void>("DELETE", `api/sessions/${encodeURIComponent(id)}`),
 	friends: () => call<Friend[]>("GET", "api/friends"),
+	activity: () => call<Activity[]>("GET", "api/activity"),
+	/** Deletes the account: only the person, signed in, may. */
+	deleteAccount: () => call<void>("DELETE", "api/me"),
 	dms: () => call<Dm[]>("GET", "api/dms"),
 	addFriend: (name: string) =>
 		call<void>("PUT", `api/friends/${encodeURIComponent(name)}`),
@@ -250,13 +261,13 @@ function mock(): Api {
 			id: "g_0",
 			name: "luiswirth",
 			own: true,
-			members: [],
+			members: ["luiswirth"],
 		},
 		{
 			id: "g_1",
 			name: "Potential Hedge",
 			own: false,
-			members: ["benarmstrong", "tristangabl"],
+			members: ["luiswirth", "benarmstrong", "tristangabl"],
 		},
 	];
 	const named = (id: string) =>
@@ -290,7 +301,6 @@ function mock(): Api {
 			id: "s_0",
 			name: "Telegram",
 			...inProject("p_0"),
-			open: "members",
 			address: "",
 			app: { id: "a_1", name: "messagent" },
 		},
@@ -298,17 +308,15 @@ function mock(): Api {
 			id: "s_1",
 			name: "notes",
 			...inProject("p_1"),
-			open: "members",
 			address: "",
 		},
 		{
 			id: "s_2",
 			name: "agents",
 			...inProject("p_2"),
-			open: "members",
 			address: "",
 		},
-		{ id: "s_3", name: "demo", ...inProject("p_2"), open: "link", address: "" },
+		{ id: "s_3", name: "demo", ...inProject("p_2"), address: "" },
 	];
 	let friends: Friend[] = [
 		{
@@ -431,7 +439,6 @@ function mock(): Api {
 				name,
 				...inProject(project),
 				creator: me.name,
-				open: "members" as Open,
 				address: "",
 			};
 			sessions = [...sessions, session];
@@ -447,6 +454,23 @@ function mock(): Api {
 			sessions = sessions.filter((session) => session.id !== id);
 		},
 		friends: async () => friends,
+		activity: async () => [
+			{
+				agent: "lwirth-macbook",
+				token: "t_1",
+				operation: "add_friend",
+				arguments: { name: "tristangabl" },
+				created: new Date(Date.now() - 3 * 3600_000).toISOString(),
+			},
+			{
+				agent: "Claude Code",
+				token: "o_1",
+				operation: "create_session",
+				arguments: { project: "p_2", name: "demo" },
+				created: new Date(Date.now() - 26 * 3600_000).toISOString(),
+			},
+		],
+		deleteAccount: done,
 		dms: async () =>
 			friends
 				.filter((friend) => friend.state === "friends")
