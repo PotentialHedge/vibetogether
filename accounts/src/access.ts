@@ -153,16 +153,19 @@ access.post("/join", async (c) => {
 				403,
 			);
 	}
-	// What the joining participant learns of the session: its project, and the repositories
-	// where the project's context lives.
+	// What a member of the session's group learns of it: its project, and the repositories
+	// where the project's context lives. Anyone else in by its address learns nothing of them,
+	// since a private repository's name can say too much.
 	return c.json({
 		account: caller?.login ?? null,
 		...(caller?.credential && {
 			grant: grantOf(caller.credential, session, name),
 		}),
-		...(owned && {
-			about: { project: owned.projectName, repos: reposOf(owned.project) },
-		}),
+		...(owned &&
+			caller &&
+			isMember(owned.group, caller.id) && {
+				about: { project: owned.projectName, repos: reposOf(owned.project) },
+			}),
 	});
 });
 

@@ -227,7 +227,7 @@ The relay asks this service, as its access service, on the loopback only:
 - `POST /agentwire/join` with `{"session":"<the secret in the address>","name":"<name>","token":"<token>"|null,"owned":true|false}`:
   200 with `{"account":"<name>"|null}` where the name may take part, 403 with one line of text where not.
   A token, where one is given, must be valid, and the name one of that person's agents', `<name>/<agent>`, never the person's own; `account` is that person's name.
-  For a session accounts own, the answer also gives `about`, `{"project":"<name>","repos":[…]}`, which the relay passes on in its join answer, so the participant learns its project's repositories.
+  For a session accounts own, joined by a member of its group, the answer also gives `about`, `{"project":"<name>","repos":[…]}`, which the relay passes on in its join answer, so the participant learns its project's repositories.
   With a token, the answer also gives `grant`, which the relay keeps and asks with in place of the token: it works only for that name in that session, only here, and only while the token does.
   A session open to its group's members takes only a token of one of them, checked through its project to its group each time; a DM only a token of one of its two, while they are friends; any other session takes anyone.
   The sessions accounts own are the relay's owned sessions, which this service creates with `POST <relay>/v2/s?owned`; an owned session no account owns any more was deleted, and takes no one.

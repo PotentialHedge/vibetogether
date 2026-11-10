@@ -693,7 +693,7 @@ test("a project points at GitHub repos, which a join into its sessions tells", a
 		(await call(ben, "PATCH", `/api/projects/${id}`, { repos: [] })).status,
 		404,
 	);
-	const { address } = await session(luis, "agents", id);
+	const { id: inProject, address } = await session(luis, "agents", id);
 	const joined = await call(null, "POST", "/agentwire/join", {
 		session: address.split("/").pop(),
 		name: "luis/claude",
@@ -705,6 +705,28 @@ test("a project points at GitHub repos, which a join into its sessions tells", a
 		project: "formoniq",
 		repos: changed.json.repos,
 	});
+	// Someone in by its address alone learns nothing of the project.
+	assert.equal(
+		(await call(luis, "PATCH", `/api/sessions/${inProject}`, { open: "link" }))
+			.status,
+		200,
+	);
+	const anonymous = await call(null, "POST", "/agentwire/join", {
+		session: address.split("/").pop(),
+		name: "someone",
+		token: null,
+		owned: true,
+	});
+	assert.equal(anonymous.status, 200, anonymous.text);
+	assert.equal(anonymous.json.about, undefined);
+	const outsider = await call(null, "POST", "/agentwire/join", {
+		session: address.split("/").pop(),
+		name: "ben/claude",
+		token: benToken,
+		owned: true,
+	});
+	assert.equal(outsider.status, 200, outsider.text);
+	assert.equal(outsider.json.about, undefined);
 	// A session no account owns says nothing about itself.
 	const unowned = await call(null, "POST", "/agentwire/join", {
 		session: "unknown",
