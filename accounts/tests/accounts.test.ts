@@ -884,8 +884,13 @@ test("an agent adds friends and members, which its person sees, and which are li
 		(await call(dora, "DELETE", `/api/groups/${group}/members/dot`)).status,
 		204,
 	);
+	// The last member leaves only by deleting the group.
 	assert.equal(
 		(await call(ben, "DELETE", `/api/groups/${group}/members/ben`)).status,
+		409,
+	);
+	assert.equal(
+		(await call(token, "DELETE", `/api/groups/${group}`)).status,
 		204,
 	);
 	assert.equal(

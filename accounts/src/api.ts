@@ -687,7 +687,7 @@ api.openapi(
 		path: "/groups/{id}/members/{name}",
 		summary: "Remove a member from a group",
 		description:
-			"Removes a member from a group, the caller included, as one leaves it. Any member does this; a group whose last member leaves is deleted.",
+			"Removes a member from a group, the caller included, as one leaves it. Any member does this. The last member leaves only by deleting the group, with its projects and sessions.",
 		request: path({ id: Id("g", "group"), name: Login }),
 		responses: done,
 	}),
@@ -700,17 +700,22 @@ api.openapi(
 		const person = personByLogin(name);
 		if (!person) return c.text("No such person.", 404);
 		if (group.own) return c.text("Your own group holds you alone.", 403);
-		db.prepare(`DELETE FROM group_member WHERE "group" = ? AND user = ?`).run(
-			group.id,
-			person.id,
-		);
+		if (!isMember(group.id, person.id)) return c.text("No such member.", 404);
+		// Deleting a group deletes its sessions, so it is said explicitly, never a side effect of leaving.
 		if (
 			count(
 				`SELECT count(*) AS n FROM group_member WHERE "group" = ?`,
 				group.id,
-			) === 0
+			) === 1
 		)
-			db.prepare(`DELETE FROM "group" WHERE id = ?`).run(group.id);
+			return c.text(
+				"This is the group's last member: delete the group instead, which deletes its projects and sessions.",
+				409,
+			);
+		db.prepare(`DELETE FROM group_member WHERE "group" = ? AND user = ?`).run(
+			group.id,
+			person.id,
+		);
 		return c.body(null, 204);
 	},
 );
