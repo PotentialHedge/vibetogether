@@ -1,6 +1,6 @@
 # vibetogether-accounts
 
-Vibe Together's account service: people sign in with GitHub, and their account holds their groups with their projects and sessions, their friends and their tokens.
+Vibe Together's account service: people sign in with GitHub, and their account holds their groups with their projects and sessions, their friends with a DM each, and their tokens.
 It is the agentwire relay's access service, which the relay asks who may join a session and whether an owned session is still an account's.
 Its interface is `api.md`. Vibe Together's design (`../AGENTS.md`), whose Accounts entry holds Luis's decisions: read it before working here.
 

@@ -63,6 +63,10 @@ async fn projects(headers: HeaderMap) -> (StatusCode, String) {
     )
 }
 
+async fn dms(headers: HeaderMap) -> (StatusCode, String) {
+    for_luis(&headers, r#"[{"id":"s_3","friend":"ben","address":"D"}]"#)
+}
+
 async fn sessions(headers: HeaderMap) -> (StatusCode, String) {
     for_luis(
         &headers,
@@ -126,6 +130,7 @@ async fn world() -> World {
     let service = serve(
         axum::Router::new()
             .route("/api/me", get(me))
+            .route("/api/dms", get(dms))
             .route("/api/groups", get(groups))
             .route("/api/projects", get(projects))
             .route("/api/sessions", get(sessions))
@@ -296,7 +301,7 @@ async fn listing_the_rooms_asks_to_sign_in_first() {
         .unwrap();
     assert_eq!(
         text(&listed),
-        r#"{"groups":[{"id":"g_1","name":"luis","own":true,"owner":"luis","members":[],"projects":[{"id":"p_2","name":"messagent","app":"messagent","sessions":[{"id":"s_2","name":"Telegram","address":"T","open":"members","app":"messagent"}]}]},{"id":"g_2","name":"Potential Hedge","own":false,"owner":"luis","members":["ben"],"projects":[{"id":"p_1","name":"vibetogether","app":null,"sessions":[{"id":"s_1","name":"agents","address":"L","open":"members","app":null}]}]}]}"#
+        r#"{"dms":[{"id":"s_3","friend":"ben","address":"D"}],"groups":[{"id":"g_1","name":"luis","own":true,"owner":"luis","members":[],"projects":[{"id":"p_2","name":"messagent","app":"messagent","sessions":[{"id":"s_2","name":"Telegram","address":"T","open":"members","app":"messagent"}]}]},{"id":"g_2","name":"Potential Hedge","own":false,"owner":"luis","members":["ben"],"projects":[{"id":"p_1","name":"vibetogether","app":null,"sessions":[{"id":"s_1","name":"agents","address":"L","open":"members","app":null}]}]}]}"#
     );
 }
 

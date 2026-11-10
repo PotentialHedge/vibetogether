@@ -73,6 +73,14 @@ struct Listed {
     app: Option<Named>,
 }
 
+/// A DM, as the service lists it: the session of the account's person and one friend.
+#[derive(Deserialize)]
+struct ListedDm {
+    id: String,
+    friend: String,
+    address: Option<String>,
+}
+
 #[derive(Deserialize)]
 struct Named {
     id: String,
@@ -191,15 +199,22 @@ impl Accounts {
         answer.json().await.map_err(unreachable)
     }
 
-    /// The groups of the account whose token is `token`, each with its projects and their
-    /// sessions, as the agent reads them: JSON, since every name is someone's to choose.
+    /// The DMs of the account whose token is `token`, one per friend, and its groups, each with
+    /// its projects and their sessions, as the agent reads them: JSON, since every name is
+    /// someone's to choose.
     pub(crate) async fn sessions(&self, token: &str) -> Result<String, String> {
-        let (groups, projects, sessions) = tokio::try_join!(
+        let (dms, groups, projects, sessions) = tokio::try_join!(
+            self.get(token, "dms"),
             self.get(token, "groups"),
             self.get(token, "projects"),
             self.get(token, "sessions"),
         )?;
         let parse = |_| "the account service answered something unexpected".to_owned();
+        let dms: Vec<ListedDm> = serde_json::from_value(dms).map_err(parse)?;
+        let dms: Vec<Value> = dms
+            .into_iter()
+            .map(|dm| serde_json::json!({"id": dm.id, "friend": dm.friend, "address": dm.address}))
+            .collect();
         let groups: Vec<ListedGroup> = serde_json::from_value(groups).map_err(parse)?;
         let projects: Vec<ListedProject> = serde_json::from_value(projects).map_err(parse)?;
         let sessions: Vec<Listed> = serde_json::from_value(sessions).map_err(parse)?;
@@ -221,7 +236,7 @@ impl Accounts {
                 serde_json::json!({"id": group.id, "name": group.name, "own": group.own, "owner": group.owner, "members": group.members, "projects": projects})
             })
             .collect();
-        Ok(serde_json::json!({ "groups": groups }).to_string())
+        Ok(serde_json::json!({ "dms": dms, "groups": groups }).to_string())
     }
 
     fn challenge(&self, invalid: bool) -> Response {

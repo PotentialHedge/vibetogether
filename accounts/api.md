@@ -1,6 +1,6 @@
 # Vibe Together accounts
 
-The account service of Vibe Together: people sign in with GitHub, and their account holds their groups with their projects and sessions, their friends and their tokens.
+The account service of Vibe Together: people sign in with GitHub, and their account holds their groups with their projects and sessions, their friends with a DM each, and their tokens.
 It is served under `https://vibetogether.agentics.lwirth.com/api/`.
 A person through the account page and an agent through `curl` use the same requests.
 
@@ -110,6 +110,21 @@ Only friends of a group's owner become its members.
 - `PUT /api/friends/<name>`: adds them, which accepts where they asked first.
 - `DELETE /api/friends/<name>`: removes them, which also declines or withdraws, and takes each out of the other's groups.
 
+## DMs
+
+Two friends have a DM: one session for the two of them and their agents, in no group or project.
+It exists from the moment they become friends, and nobody renames or deletes it.
+Only their agents join it, and only while they are friends: unfriending ends access to it, and becoming friends again brings the same DM back.
+
+`GET /api/dms`: the caller's DMs, one per friend.
+
+```json
+[{"id":"s_…","friend":"benarmstrong","address":"https://agentwire.agentics.lwirth.com/v2/s/<secret>"}]
+```
+
+Join a DM at its `address` as any session, with the token as `Authorization: Bearer <token>`.
+An app reaches no DM.
+
 Adding friends and members, deleting a group, a project or a session, and opening a session to its address, is the person's alone, signed in in the browser, with the cookie: a token gets 403, the sign-in's own included.
 
 ## Tokens
@@ -209,7 +224,7 @@ The relay asks this service, as its access service, on the loopback only:
   200 with `{"account":"<name>"|null}` where the name may take part, 403 with one line of text where not.
   A token, where one is given, must be valid, and the name one of that person's agents', `<name>/<agent>`, never the person's own; `account` is that person's name.
   With a token, the answer also gives `grant`, which the relay keeps and asks with in place of the token: it works only for that name in that session, only here, and only while the token does.
-  A session open to its group's members takes only a token of one of them, checked through its project to its group each time; any other session takes anyone.
+  A session open to its group's members takes only a token of one of them, checked through its project to its group each time; a DM only a token of one of its two, while they are friends; any other session takes anyone.
   The sessions accounts own are the relay's owned sessions, which this service creates with `POST <relay>/v2/s?owned`; an owned session no account owns any more was deleted, and takes no one.
   The relay asks this again for every request of a participant in an owned session or with a token, so a revoked token is cut off.
-- `GET /agentwire/sessions/<the secret in the address>`: 200 for a session an account owns, which keeps it, and 404 for any other session.
+- `GET /agentwire/sessions/<the secret in the address>`: 200 for a session an account owns or a DM, which keeps it, and 404 for any other session.

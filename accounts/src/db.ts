@@ -148,6 +148,19 @@ export function migrate(): void {
 			created TEXT NOT NULL,
 			PRIMARY KEY ("from", "to")
 		);
+		-- Two friends' DM, one session per pair, "a" the lesser id. It is no group's: only the two
+		-- and their agents join it, and only while they are friends. It outlasts their friendship,
+		-- so that becoming friends again brings it back as it was.
+		-- "secret" is the secret part of its address on the relay, as a session's.
+		CREATE TABLE IF NOT EXISTS dm (
+			id TEXT PRIMARY KEY,
+			a TEXT NOT NULL REFERENCES user(id) ON DELETE CASCADE,
+			b TEXT NOT NULL REFERENCES user(id) ON DELETE CASCADE,
+			secret TEXT UNIQUE,
+			created TEXT NOT NULL,
+			UNIQUE (a, b),
+			CHECK (a < b)
+		);
 	`);
 	for (const { id } of db.prepare("SELECT id FROM user").all() as {
 		id: string;
@@ -160,6 +173,40 @@ export function migrate(): void {
 		db.exec(
 			"ALTER TABLE owned_session ADD COLUMN creator TEXT REFERENCES user(id) ON DELETE SET NULL",
 		);
+	// Databases from before DMs: friends from then on have theirs.
+	for (const { a, b } of db
+		.prepare(
+			`SELECT f."from" AS a, f."to" AS b FROM friend f
+			 JOIN friend r ON r."from" = f."to" AND r."to" = f."from" WHERE f."from" < f."to"`,
+		)
+		.all() as { a: string; b: string }[])
+		dmOf(a, b);
+}
+
+/** Whether `a` and `b` are friends: each has added the other. */
+export function areFriends(a: string, b: string): boolean {
+	return (
+		(
+			db
+				.prepare(
+					`SELECT count(*) AS n FROM friend WHERE ("from" = ? AND "to" = ?) OR ("from" = ? AND "to" = ?)`,
+				)
+				.get(a, b, b, a) as { n: number }
+		).n === 2
+	);
+}
+
+/** The id of the DM of `x` and `y`, made where it doesn't exist yet, without an address until it is listed. */
+export function dmOf(x: string, y: string): string {
+	const [a, b] = x < y ? [x, y] : [y, x];
+	db.prepare(
+		"INSERT OR IGNORE INTO dm (id, a, b, created) VALUES (?, ?, ?, ?)",
+	).run(newId("s"), a, b, new Date().toISOString());
+	return (
+		db.prepare("SELECT id FROM dm WHERE a = ? AND b = ?").get(a, b) as {
+			id: string;
+		}
+	).id;
 }
 
 /** The id of the person's own group, made where it doesn't exist yet. */

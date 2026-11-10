@@ -227,7 +227,7 @@ impl Server {
     }
 
     #[tool(
-        description = "List your person's Vibe Together groups, each with its projects and their sessions: a session's address is what join takes, its id is how your person names it, and its app is the one behind it, such as messagent for your person's Telegram chat. The first call asks your person to sign in."
+        description = "List your person's Vibe Together DMs, one session with each friend of theirs, and their groups, each with its projects and their sessions: a session's address is what join takes, its id is how your person names it, and its app is the one behind it, such as messagent for your person's Telegram chat. The first call asks your person to sign in."
     )]
     async fn sessions(&self, Extension(parts): Extension<Parts>) -> CallToolResult {
         match self.account(&parts) {

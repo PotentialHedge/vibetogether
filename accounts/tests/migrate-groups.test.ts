@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
 
-// A database in production's schema from before groups (`production-schema.sql`, copied from
+// A database in production's schema from before groups (`production-schema-before-groups.sql`, copied from
 // lwirth-cloud on 2026-11-10), holding sessions like production's then, and a few more cases.
 const database = join(
 	mkdtempSync(join(tmpdir(), "vibetogether-accounts-")),
@@ -14,7 +14,7 @@ const database = join(
 const old = new DatabaseSync(database);
 old.exec("PRAGMA foreign_keys = ON");
 old.exec(
-	readFileSync(new URL("production-schema.sql", import.meta.url), "utf8"),
+	readFileSync(new URL("production-schema-before-groups.sql", import.meta.url), "utf8"),
 );
 const user = old.prepare(
 	`INSERT INTO user (id, name, email, emailVerified, createdAt, updatedAt, login) VALUES (?, ?, ?, 1, 0, 0, ?)`,

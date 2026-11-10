@@ -2,7 +2,7 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 import { Hono } from "hono";
 import { type Caller, callerOfCredential, callerOfToken } from "./caller.ts";
 import { config } from "./config.ts";
-import { db, isMember } from "./db.ts";
+import { areFriends, db, isMember } from "./db.ts";
 import { isAgentOf } from "./names.ts";
 import { live } from "./sessions.ts";
 
@@ -15,6 +15,7 @@ import { live } from "./sessions.ts";
 export const access = new Hono();
 
 type Session = { id: string; group: string; open: "members" | "link" };
+type Dm = { id: string; a: string; b: string };
 
 function sessionBySecret(secret: string): Session | undefined {
 	return db
@@ -23,6 +24,12 @@ function sessionBySecret(secret: string): Session | undefined {
 			 WHERE s.secret = ? AND ${live}`,
 		)
 		.get(secret) as Session | undefined;
+}
+
+function dmBySecret(secret: string): Dm | undefined {
+	return db
+		.prepare("SELECT id, a, b FROM dm WHERE secret = ?")
+		.get(secret) as Dm | undefined;
 }
 
 /**
@@ -104,6 +111,25 @@ access.post("/join", async (c) => {
 			`The token is ${caller.login}'s, so it joins only as ${caller.login}/<agent>.`,
 			403,
 		);
+	// A DM takes its two friends' agents alone, and only while they are friends.
+	const dm = dmBySecret(session);
+	if (dm) {
+		if (!caller || caller.app)
+			return c.text(
+				"This is a DM of two friends: join with a token of one of them, as Authorization: Bearer <token>.",
+				403,
+			);
+		if (caller.id !== dm.a && caller.id !== dm.b)
+			return c.text(`This DM is not ${caller.login}'s.`, 403);
+		if (!areFriends(dm.a, dm.b))
+			return c.text("The two of this DM are no longer friends.", 403);
+		return c.json({
+			account: caller.login,
+			...(caller.credential && {
+				grant: grantOf(caller.credential, session, name),
+			}),
+		});
+	}
 	const owned = sessionBySecret(session);
 	// Every owned session is an account's, so one the service doesn't know was deleted.
 	if (!owned && body?.owned === true)
@@ -129,7 +155,7 @@ access.post("/join", async (c) => {
 });
 
 access.get("/sessions/:session", (c) =>
-	sessionBySecret(c.req.param("session"))
+	sessionBySecret(c.req.param("session")) || dmBySecret(c.req.param("session"))
 		? c.json({})
 		: c.text("No such session.", 404),
 );

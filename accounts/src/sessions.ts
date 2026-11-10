@@ -39,16 +39,19 @@ async function createOnRelay(): Promise<string> {
 
 /**
  * The secret of the session's address, created on the relay where it has none yet,
- * such as when the relay could not be reached as the session was created.
+ * such as when the relay could not be reached as the session was created, or for a DM.
  */
-export async function secretOf(session: SessionRow): Promise<string> {
+export async function secretOf(
+	session: { id: string; secret: string | null },
+	table: "owned_session" | "dm" = "owned_session",
+): Promise<string> {
 	if (session.secret) return session.secret;
 	const secret = await createOnRelay();
 	db.prepare(
-		"UPDATE owned_session SET secret = ? WHERE id = ? AND secret IS NULL",
+		`UPDATE ${table} SET secret = ? WHERE id = ? AND secret IS NULL`,
 	).run(secret, session.id);
 	const stored = db
-		.prepare("SELECT secret FROM owned_session WHERE id = ?")
+		.prepare(`SELECT secret FROM ${table} WHERE id = ?`)
 		.get(session.id) as { secret: string } | undefined;
 	return stored?.secret ?? secret;
 }

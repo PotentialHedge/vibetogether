@@ -2,7 +2,15 @@ import { Hono } from "hono";
 import { auth } from "./auth.ts";
 import { type Caller, callerOf } from "./caller.ts";
 import { config } from "./config.ts";
-import { appProjectOf, db, isMember, newId, ownGroupOf } from "./db.ts";
+import {
+	appProjectOf,
+	areFriends,
+	db,
+	dmOf,
+	isMember,
+	newId,
+	ownGroupOf,
+} from "./db.ts";
 import { isNamePart } from "./names.ts";
 import {
 	addressOf,
@@ -28,18 +36,6 @@ function loginOf(id: string): string {
 			login: string;
 		}
 	).login;
-}
-
-function areFriends(a: string, b: string): boolean {
-	return (
-		(
-			db
-				.prepare(
-					`SELECT count(*) AS n FROM friend WHERE ("from" = ? AND "to" = ?) OR ("from" = ? AND "to" = ?)`,
-				)
-				.get(a, b, b, a) as { n: number }
-		).n === 2
-	);
 }
 
 type GroupRow = {
@@ -635,6 +631,8 @@ api.put("/friends/:name", async (c) => {
 	db.prepare(
 		`INSERT OR IGNORE INTO friend ("from", "to", created) VALUES (?, ?, ?)`,
 	).run(me, person.id, new Date().toISOString());
+	// Friends have a DM from the start.
+	if (areFriends(me, person.id)) dmOf(me, person.id);
 	return c.body(null, 204);
 });
 
@@ -650,6 +648,41 @@ api.delete("/friends/:name", (c) => {
 		`DELETE FROM group_member WHERE (user = ? AND "group" IN (SELECT id FROM "group" WHERE owner = ?)) OR (user = ? AND "group" IN (SELECT id FROM "group" WHERE owner = ?))`,
 	).run(person.id, me, me, person.id);
 	return c.body(null, 204);
+});
+
+// DMs: one session per pair of friends, with the two people and their agents alone, and no
+// group or project: to its people it is a DM, Luis's decision (2026-11-10). Unfriending ends
+// access to it, and becoming friends again brings it back. Nobody renames or deletes one.
+// An app reaches none, since it is no agent of the person's.
+
+type DmRow = { id: string; secret: string | null; friend: string };
+
+api.get("/dms", async (c) => {
+	const { id: me, app } = c.var.caller;
+	if (app) return c.text(notForApps, 403);
+	const dms = db
+		.prepare(
+			`SELECT d.id, d.secret, u.login AS friend FROM dm d
+			 JOIN user u ON u.id = CASE WHEN d.a = ? THEN d.b ELSE d.a END
+			 WHERE ? IN (d.a, d.b)
+			 AND EXISTS (SELECT 1 FROM friend WHERE "from" = d.a AND "to" = d.b)
+			 AND EXISTS (SELECT 1 FROM friend WHERE "from" = d.b AND "to" = d.a)
+			 ORDER BY u.login`,
+		)
+		.all(me, me) as DmRow[];
+	return c.json(
+		await Promise.all(
+			dms.map(async (dm) => {
+				let address: string | null = null;
+				try {
+					address = addressOf(await secretOf(dm, "dm"));
+				} catch (error) {
+					console.error(`DM ${dm.id} has no address yet:`, error);
+				}
+				return { id: dm.id, friend: dm.friend, address };
+			}),
+		),
+	);
 });
 
 // Tokens: each a machine's, a Better Auth session named after the machine, from an OTP or minted

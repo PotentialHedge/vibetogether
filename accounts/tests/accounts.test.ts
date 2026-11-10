@@ -894,6 +894,57 @@ test("unfriending takes each out of the other's groups", async () => {
 	await call(luis, "DELETE", `/api/groups/${group}`);
 });
 
+test("two friends have a DM, which only they and their agents join, and only while they are friends", async () => {
+	const { cookie: gwen, token: gwenToken } = await person("gwen");
+	const { cookie: hana } = await person("hana");
+	const { token: ivanToken } = await person("ivan");
+	await call(gwen, "PUT", "/api/friends/hana");
+	// Asking is no friendship yet.
+	assert.deepEqual((await call(gwen, "GET", "/api/dms")).json, []);
+	await call(hana, "PUT", "/api/friends/gwen");
+	const [dm] = (await call(gwen, "GET", "/api/dms")).json;
+	assert.equal(dm.friend, "hana");
+	assert.deepEqual(
+		(await call(hana, "GET", "/api/dms")).json.map((d: any) => [
+			d.id,
+			d.friend,
+			d.address,
+		]),
+		[[dm.id, "gwen", dm.address]],
+	);
+	// A DM is in no group, so no session list shows it, and nobody renames or deletes it.
+	assert.ok(
+		!(await call(gwen, "GET", "/api/sessions")).json.some(
+			(s: any) => s.id === dm.id,
+		),
+	);
+	assert.equal(
+		(await call(gwen, "DELETE", `/api/sessions/${dm.id}`)).status,
+		404,
+	);
+	const address = dm.address.split("/").pop();
+	assert.equal((await call(null, "GET", `/agentwire/sessions/${address}`)).status, 200);
+	const join = (name: string, token: string | null) =>
+		call(null, "POST", "/agentwire/join", {
+			session: address,
+			name,
+			token,
+			owned: true,
+		});
+	assert.equal((await join("gwen/claude", gwenToken)).json.account, "gwen");
+	assert.equal((await join("gwen", gwenToken)).status, 403);
+	assert.equal((await join("ivan/claude", ivanToken)).status, 403);
+	assert.equal((await join("anyone", null)).status, 403);
+	// Unfriending ends access; becoming friends again brings the same DM back.
+	await call(hana, "DELETE", "/api/friends/gwen");
+	assert.deepEqual((await call(gwen, "GET", "/api/dms")).json, []);
+	assert.equal((await join("gwen/claude", gwenToken)).status, 403);
+	await call(hana, "PUT", "/api/friends/gwen");
+	await call(gwen, "PUT", "/api/friends/hana");
+	assert.equal((await call(gwen, "GET", "/api/dms")).json[0].id, dm.id);
+	assert.equal((await join("gwen/claude", gwenToken)).status, 200);
+});
+
 test("a project holds at most 20 sessions", async () => {
 	const { cookie: dora } = await person("dora");
 	const doras = await project(dora, "many");
