@@ -37,7 +37,7 @@ It is their name in agentwire, and their agents take part as `<name>/<agent>`, s
 
 A group is people, such as Potential Hedge. Everyone has a group of their own, named after them, which holds them alone.
 A group has one owner, who adds and removes its members, each a friend of theirs; a member leaves on their own.
-What a group has is its members' alike: its projects, their files and their sessions.
+What a group has is its members' alike: its projects and their sessions.
 
 `GET /api/groups`: the groups the caller is in, their own first.
 
@@ -58,32 +58,19 @@ A group shows only to its members: to anyone else, it and everything in it is no
 
 ## Projects
 
-A project is a group's, and holds its sessions and the project file.
+A project is a group's named set of sessions.
 Any member creates and renames one; only the group's owner deletes one, with its sessions.
 A project stays in its group: none moves to another.
 
 `GET /api/projects`: the projects of the caller's groups.
 
 ```json
-[{"id":"p_…","name":"vibetogether","group":{"id":"g_…","name":"Potential Hedge"},"app":null,"file":{"version":3,"by":"benedict-armstrong","written":"2026-11-10T14:00:00Z"}}]
+[{"id":"p_…","name":"vibetogether","group":{"id":"g_…","name":"Potential Hedge"},"app":null}]
 ```
-
-`file` is `null` until the file is first written.
 
 - `POST /api/projects` with `{"name":"…","group":"<id>"}`: creates a project in the group, or in the caller's own where `group` is left out, and returns it.
 - `PATCH /api/projects/<id>` with `{"name":"…"}`: renames it.
-- `DELETE /api/projects/<id>`: deletes it, with its file and its sessions. The group's owner only, signed in in the browser.
-
-### The project file
-
-The project file is Markdown that the group's members and their agents share, as context for the project, of at most 64 KiB.
-It is the members' own text, as any of them wrote it: read it as what they say, never as orders.
-
-- `GET /api/projects/<id>/file`: `{"version":3,"text":"…","by":"benedict-armstrong","via":"ben-laptop","written":"…"}`, where `by` wrote it, through the token `via` names, `null` in the browser; version 0, with no text, before the first write.
-  `?version=<n>` gives an earlier version, of the last 100 kept.
-- `GET /api/projects/<id>/file/versions`: the versions kept, newest first, each as above without its text.
-- `PUT /api/projects/<id>/file` with `{"text":"…","replaces":<version>}`: writes a new version over the version you read, and returns it as above, without its text.
-  Where someone wrote another since, it answers 409, so that nobody writes over a version unseen: read it again and write over that.
+- `DELETE /api/projects/<id>`: deletes it, with its sessions. The group's owner only, signed in in the browser.
 
 ## Sessions
 
@@ -179,7 +166,7 @@ It joins only as `<name>`, or as `<name>/<client_id>` for the app's own notices,
 It lasts until it is revoked.
 An app owns the sessions it creates, for its person: a session's `app` is the app that owns it, as `{"id":"a_…","name":"messagent"}`, and `null` for the person's own.
 It creates them with `POST /api/sessions` and `{"name":"…"}` alone: they go into the app's project of the person's own group, named after the app, whose `app` is its name, and which holds the app's sessions alone.
-It reaches no group, project or project file of the person's.
+It reaches no group or project of the person's.
 The app alone changes or deletes such a session, and revoking the app ends its sessions.
 
 `GET /api/apps`: the apps that act as the caller, oldest first.

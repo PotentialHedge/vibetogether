@@ -554,7 +554,8 @@ test("friends are mutual, only friends become members of a group, and leaving it
 	assert.equal((await join("ben/claude", benToken)).status, 403);
 	assert.equal((await join("luis/claude", luisToken)).json.account, "luis");
 	assert.equal(
-		(await call(ben, "GET", `/api/projects/${shared}/file`)).status,
+		(await call(ben, "PATCH", `/api/projects/${shared}`, { name: "back" }))
+			.status,
 		404,
 	);
 	assert.equal(
@@ -579,8 +580,10 @@ test("friends are mutual, only friends become members of a group, and leaving it
 	);
 	assert.equal((await join("luis/claude", luisToken)).status, 403);
 	assert.equal(
-		(await call(luis, "GET", `/api/projects/${shared}/file`)).status,
-		404,
+		(await call(luis, "GET", "/api/projects")).json.some(
+			(p: any) => p.id === shared,
+		),
+		false,
 	);
 });
 
@@ -906,76 +909,6 @@ test("a project holds at most 20 sessions", async () => {
 	);
 });
 
-test("the project file is its group's members' text: each write names the version it replaces, and keeps who wrote it", async () => {
-	const file = `/api/projects/${luisProject}/file`;
-	assert.deepEqual((await call(luis, "GET", file)).json, {
-		version: 0,
-		by: null,
-		via: null,
-		written: null,
-		text: "",
-	});
-	from = "192.0.2.50";
-	const agent = await connect(luis, "lwirth-server");
-	from = undefined;
-	const first = await call(agent, "PUT", file, {
-		text: "# Vibe Together\n",
-		replaces: 0,
-	});
-	assert.equal(first.status, 200, first.text);
-	assert.equal(first.json.version, 1);
-	assert.equal(first.json.by, "luis");
-	assert.equal(first.json.via, "lwirth-server");
-	// A stale write is refused.
-	const stale = await call(luis, "PUT", file, { text: "mine", replaces: 0 });
-	assert.equal(stale.status, 409);
-	assert.match(stale.text, /version 1/);
-	const second = await call(luis, "PUT", file, { text: "mine", replaces: 1 });
-	assert.equal(second.json.version, 2);
-	assert.equal(second.json.via, null);
-	assert.equal((await call(luis, "GET", file)).json.text, "mine");
-	assert.equal(
-		(await call(luis, "GET", `${file}?version=1`)).json.text,
-		"# Vibe Together\n",
-	);
-	assert.deepEqual(
-		(await call(luis, "GET", `${file}/versions`)).json.map((v: any) => [
-			v.version,
-			v.by,
-			v.via,
-		]),
-		[
-			[2, "luis", null],
-			[1, "luis", "lwirth-server"],
-		],
-	);
-	assert.equal(
-		(await call(luis, "GET", `/api/projects`)).json.find(
-			(p: any) => p.id === luisProject,
-		).file.version,
-		2,
-	);
-	// At most 64 KiB, and only for the group's members.
-	assert.equal(
-		(
-			await call(luis, "PUT", file, {
-				text: "x".repeat(64 * 1024 + 1),
-				replaces: 2,
-			})
-		).status,
-		413,
-	);
-	assert.equal(
-		(await call(luis, "PUT", file, { text: "x", replaces: "2" })).status,
-		400,
-	);
-	assert.equal((await call(ben, "GET", file)).status, 404);
-	assert.equal(
-		(await call(benToken, "PUT", file, { text: "theirs", replaces: 2 })).status,
-		404,
-	);
-});
-
 test("an OTP's page says when and from where it was asked for", async () => {
 	const response = await app.request("/api/auth/device/code", {
 		method: "POST",
@@ -1168,7 +1101,7 @@ test("an app acts as its person only with its secret, the person's approval, and
 		(await call(luis, "DELETE", `/api/projects/${appProject}`)).status,
 		403,
 	);
-	// An app reaches no group, project or file of its person's.
+	// An app reaches no group or project of its person's.
 	assert.equal(
 		(
 			await call(token, "POST", "/api/sessions", {
@@ -1179,19 +1112,11 @@ test("an app acts as its person only with its secret, the person's approval, and
 		403,
 	);
 	for (const [method, path] of [
-		["GET", `/api/projects/${luisProject}/file`],
 		["POST", "/api/projects"],
 		["POST", "/api/groups"],
 	] as const)
 		assert.equal(
-			(
-				await call(
-					token,
-					method,
-					path,
-					method === "GET" ? undefined : { name: "x" },
-				)
-			).status,
+			(await call(token, method, path, { name: "x" })).status,
 			403,
 			path,
 		);

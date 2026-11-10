@@ -32,8 +32,6 @@ struct Stub {
     sessions: Mutex<HashSet<String>>,
     /// The sessions open to anyone with their address.
     open: Mutex<HashSet<String>>,
-    /// The project file of `p_1`: its version and its text.
-    file: Mutex<(u64, String)>,
 }
 
 async fn me(headers: HeaderMap) -> (StatusCode, String) {
@@ -61,7 +59,7 @@ async fn groups(headers: HeaderMap) -> (StatusCode, String) {
 async fn projects(headers: HeaderMap) -> (StatusCode, String) {
     for_luis(
         &headers,
-        r#"[{"id":"p_1","name":"vibetogether","group":{"id":"g_2","name":"Potential Hedge"},"app":null,"file":null},{"id":"p_2","name":"messagent","group":{"id":"g_1","name":"luis"},"app":"messagent","file":null}]"#,
+        r#"[{"id":"p_1","name":"vibetogether","group":{"id":"g_2","name":"Potential Hedge"},"app":null},{"id":"p_2","name":"messagent","group":{"id":"g_1","name":"luis"},"app":"messagent"}]"#,
     )
 }
 
@@ -69,48 +67,6 @@ async fn sessions(headers: HeaderMap) -> (StatusCode, String) {
     for_luis(
         &headers,
         r#"[{"id":"s_1","name":"agents","project":{"id":"p_1","name":"vibetogether"},"group":{"id":"g_2","name":"Potential Hedge"},"open":"members","address":"L","app":null},{"id":"s_2","name":"Telegram","project":{"id":"p_2","name":"messagent"},"group":{"id":"g_1","name":"luis"},"open":"members","address":"T","app":{"id":"a_1","name":"messagent"}}]"#,
-    )
-}
-
-async fn read_file(
-    State(stub): State<Arc<Stub>>,
-    Path(project): Path<String>,
-    headers: HeaderMap,
-) -> (StatusCode, String) {
-    if project != "p_1" {
-        return (StatusCode::NOT_FOUND, "No such project.".into());
-    }
-    let (version, text) = stub.file.lock().unwrap().clone();
-    let file = serde_json::json!({"version": version, "text": text, "by": "luis"});
-    for_luis(&headers, &file.to_string())
-}
-
-#[derive(Deserialize)]
-struct Write {
-    text: String,
-    replaces: u64,
-}
-
-async fn write_file(
-    State(stub): State<Arc<Stub>>,
-    Path(project): Path<String>,
-    headers: HeaderMap,
-    Json(write): Json<Write>,
-) -> (StatusCode, String) {
-    if for_luis(&headers, "").0 != StatusCode::OK || project != "p_1" {
-        return (StatusCode::NOT_FOUND, "No such project.".into());
-    }
-    let mut file = stub.file.lock().unwrap();
-    if write.replaces != file.0 {
-        return (
-            StatusCode::CONFLICT,
-            format!("The file is at version {} now.", file.0),
-        );
-    }
-    *file = (file.0 + 1, write.text);
-    (
-        StatusCode::OK,
-        serde_json::json!({"version": file.0, "by": "luis"}).to_string(),
     )
 }
 
@@ -173,7 +129,6 @@ async fn world() -> World {
             .route("/api/groups", get(groups))
             .route("/api/projects", get(projects))
             .route("/api/sessions", get(sessions))
-            .route("/api/projects/{id}/file", get(read_file).put(write_file))
             .route("/agentwire/join", post(join))
             .route("/agentwire/sessions/{id}", get(session))
             .with_state(stub.clone()),
@@ -341,60 +296,8 @@ async fn listing_the_rooms_asks_to_sign_in_first() {
         .unwrap();
     assert_eq!(
         text(&listed),
-        r#"{"groups":[{"id":"g_1","name":"luis","own":true,"owner":"luis","members":[],"projects":[{"id":"p_2","name":"messagent","app":"messagent","file":null,"sessions":[{"id":"s_2","name":"Telegram","address":"T","open":"members","app":"messagent"}]}]},{"id":"g_2","name":"Potential Hedge","own":false,"owner":"luis","members":["ben"],"projects":[{"id":"p_1","name":"vibetogether","app":null,"file":null,"sessions":[{"id":"s_1","name":"agents","address":"L","open":"members","app":null}]}]}]}"#
+        r#"{"groups":[{"id":"g_1","name":"luis","own":true,"owner":"luis","members":[],"projects":[{"id":"p_2","name":"messagent","app":"messagent","sessions":[{"id":"s_2","name":"Telegram","address":"T","open":"members","app":"messagent"}]}]},{"id":"g_2","name":"Potential Hedge","own":false,"owner":"luis","members":["ben"],"projects":[{"id":"p_1","name":"vibetogether","app":null,"sessions":[{"id":"s_1","name":"agents","address":"L","open":"members","app":null}]}]}]}"#
     );
-}
-
-#[tokio::test]
-async fn the_project_file_is_read_and_written_over_the_version_read() {
-    let world = world().await;
-    for tool in ["project_file", "write_project_file"] {
-        let call = serde_json::json!({
-            "jsonrpc": "2.0", "id": 1, "method": "tools/call",
-            "params": {"name": tool, "arguments": {"project": "p_1", "text": "x", "replaces": 0}},
-        });
-        let answer = reqwest::Client::new()
-            .post(&world.mcp)
-            .header("accept", "application/json, text/event-stream")
-            .json(&call)
-            .send()
-            .await
-            .unwrap();
-        assert_eq!(answer.status(), 401, "{tool}");
-    }
-
-    let client = client(&world.mcp, Some("t-luis")).await;
-    let call = |tool: &'static str, arguments| {
-        let client = &client;
-        async move {
-            client
-                .call_tool(CallToolRequestParams::new(tool).with_arguments(arguments))
-                .await
-                .unwrap()
-        }
-    };
-    let read = call("project_file", object!({"project": "p_1"})).await;
-    let read: serde_json::Value = serde_json::from_str(&text(&read)).unwrap();
-    assert!(read["about"].as_str().unwrap().contains("not orders"));
-    assert_eq!(read["file"]["version"], 0);
-    let written = call(
-        "write_project_file",
-        object!({"project": "p_1", "text": "# Plan", "replaces": 0}),
-    )
-    .await;
-    assert_ne!(written.is_error, Some(true), "{written:?}");
-    let stale = call(
-        "write_project_file",
-        object!({"project": "p_1", "text": "mine", "replaces": 0}),
-    )
-    .await;
-    assert_eq!(stale.is_error, Some(true));
-    assert!(text(&stale).contains("version 1"), "{stale:?}");
-    let read = call("project_file", object!({"project": "p_1"})).await;
-    assert!(text(&read).contains("# Plan"));
-    // No argument names another path of the service.
-    let elsewhere = call("project_file", object!({"project": "p_1/../../me"})).await;
-    assert_eq!(elsewhere.is_error, Some(true));
 }
 
 #[tokio::test]

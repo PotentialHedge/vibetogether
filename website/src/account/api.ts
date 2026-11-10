@@ -22,24 +22,13 @@ export type Group = {
 /** A reference to a group or a project, as a session or a project names it. */
 export type Named = { id: string; name: string };
 
-/** A group's, with its sessions and its file. */
+/** A group's named set of sessions. */
 export type Project = {
 	id: string;
 	name: string;
 	group: Named;
 	/** The app whose sessions it holds, in the person's own group. */
 	app: string | null;
-	/** The latest version of its file, none before the first write. */
-	file: { version: number; by: string; written: string } | null;
-};
-
-/** A version of a project's file, with who wrote it, and through which token. */
-export type ProjectFile = {
-	version: number;
-	text: string;
-	by: string | null;
-	via: string | null;
-	written: string | null;
 };
 
 export type Session = {
@@ -162,13 +151,6 @@ const live = {
 		call<Project>("POST", "api/projects", { name, group }),
 	deleteProject: (id: string) =>
 		call<void>("DELETE", `api/projects/${encodeURIComponent(id)}`),
-	projectFile: (id: string) =>
-		call<ProjectFile>("GET", `api/projects/${encodeURIComponent(id)}/file`),
-	writeProjectFile: (id: string, text: string, replaces: number) =>
-		call<ProjectFile>("PUT", `api/projects/${encodeURIComponent(id)}/file`, {
-			text,
-			replaces,
-		}),
 	sessions: () => call<Session[]>("GET", "api/sessions"),
 	createSession: (project: string, name: string) =>
 		call<Session>("POST", "api/sessions", { name, project }),
@@ -273,29 +255,15 @@ function mock(): Api {
 			name: "messagent",
 			group: named("g_0"),
 			app: "messagent",
-			file: null,
 		},
-		{ id: "p_1", name: "notes", group: named("g_0"), app: null, file: null },
+		{ id: "p_1", name: "notes", group: named("g_0"), app: null },
 		{
 			id: "p_2",
 			name: "vibetogether",
 			group: named("g_1"),
 			app: null,
-			file: { version: 3, by: "benarmstrong", written: "2026-11-10T14:00:00Z" },
 		},
 	];
-	const files = new Map<string, ProjectFile>([
-		[
-			"p_2",
-			{
-				version: 3,
-				text: "# Vibe Together\n\nThe demo is on Thursday.\n",
-				by: "benarmstrong",
-				via: "ben-laptop",
-				written: "2026-11-10T14:00:00Z",
-			},
-		],
-	]);
 	const inProject = (id: string) => {
 		const project = projects.find((p) => p.id === id) as Project;
 		return {
@@ -419,7 +387,6 @@ function mock(): Api {
 				name,
 				group: named(group),
 				app: null,
-				file: null,
 			};
 			projects = [...projects, project];
 			return project;
@@ -427,33 +394,6 @@ function mock(): Api {
 		deleteProject: async (id) => {
 			projects = projects.filter((project) => project.id !== id);
 			sessions = sessions.filter((session) => session.project.id !== id);
-		},
-		projectFile: async (id) =>
-			files.get(id) ?? {
-				version: 0,
-				text: "",
-				by: null,
-				via: null,
-				written: null,
-			},
-		writeProjectFile: async (id, text, replaces) => {
-			const current = files.get(id)?.version ?? 0;
-			if (replaces !== current)
-				throw new Error(
-					`The file is at version ${current} now, not ${replaces}.`,
-				);
-			const file = {
-				version: current + 1,
-				text,
-				by: me.name,
-				via: null,
-				written: new Date().toISOString(),
-			};
-			files.set(id, file);
-			projects = projects.map((project) =>
-				project.id === id ? { ...project, file } : project,
-			);
-			return file;
 		},
 		sessions: async () => sessions,
 		createSession: async (project, name) => {

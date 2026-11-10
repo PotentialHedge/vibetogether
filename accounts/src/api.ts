@@ -1,4 +1,4 @@
-import { type Context, Hono } from "hono";
+import { Hono } from "hono";
 import { auth } from "./auth.ts";
 import { type Caller, callerOf } from "./caller.ts";
 import { config } from "./config.ts";
@@ -111,43 +111,15 @@ function groupJson(group: GroupRow) {
 	};
 }
 
-type FileRow = {
-	version: number;
-	text: string;
-	author: string;
-	via: string | null;
-	written: string;
-};
-
-function fileOf(project: string, version?: number): FileRow | undefined {
-	return (
-		version === undefined
-			? db
-					.prepare(
-						"SELECT * FROM project_file WHERE project = ? ORDER BY version DESC LIMIT 1",
-					)
-					.get(project)
-			: db
-					.prepare(
-						"SELECT * FROM project_file WHERE project = ? AND version = ?",
-					)
-					.get(project, version)
-	) as FileRow | undefined;
-}
-
 function projectJson(project: ProjectRow) {
 	const group = db
 		.prepare(`SELECT name FROM "group" WHERE id = ?`)
 		.get(project.group) as { name: string };
-	const file = fileOf(project.id);
 	return {
 		id: project.id,
 		name: project.name,
 		group: { id: project.group, name: group.name },
 		app: project.app,
-		file: file
-			? { version: file.version, by: file.author, written: file.written }
-			: null,
 	};
 }
 
@@ -212,26 +184,6 @@ async function bodyOf(request: Request): Promise<unknown> {
 	}
 }
 
-/** The name of the token the caller acts by, such as its machine or MCP client, as `/tokens` lists it. */
-function tokenName(caller: Caller): string | null {
-	const { token } = caller;
-	if (!token) return null;
-	if (token.startsWith("o_")) {
-		const row = db
-			.prepare(
-				`SELECT c.name FROM oauthAccessToken t LEFT JOIN oauthClient c ON c.clientId = t.clientId WHERE ${grantKey} = ? LIMIT 1`,
-			)
-			.get(Buffer.from(token.slice(2), "base64url").toString()) as
-			| { name: string | null }
-			| undefined;
-		return row?.name ?? "an MCP client";
-	}
-	const row = db
-		.prepare("SELECT agent FROM session WHERE id = ?")
-		.get(token.slice(2)) as { agent: string | null } | undefined;
-	return row?.agent ?? null;
-}
-
 export const api = new Hono<Env>();
 
 /**
@@ -287,7 +239,7 @@ const maxMembers = 50;
 const maxProjects = 50;
 const maxSessions = 20;
 
-/** An app acts as its person only in its own sessions: groups, projects and their files stay the person's. */
+/** An app acts as its person only in its own sessions: groups and projects stay the person's. */
 const notForApps = "An app manages only its own sessions.";
 
 api.get("/groups", (c) => {
@@ -349,7 +301,7 @@ api.patch("/groups/:id", async (c) => {
 	return c.json(groupJson({ ...group, name: input.name }));
 });
 
-// With its projects, their files and their sessions, so only the person, signed in in the browser.
+// With its projects and their sessions, so only the person, signed in in the browser.
 api.delete("/groups/:id", (c) => {
 	if (!isPerson(c.req.raw)) return c.text(onlyThePerson, 403);
 	const group = groupFor(c.req.param("id"), c.var.caller.id);
@@ -408,7 +360,7 @@ api.delete("/groups/:id/members/:name", (c) => {
 	return c.body(null, 204);
 });
 
-// Projects: each a group's, with its sessions and its file. Any member creates and renames one,
+// Projects: each a group's named set of sessions. Any member creates and renames one,
 // and only the group's owner deletes one. A project never moves to another group.
 
 api.get("/projects", (c) => {
@@ -475,7 +427,7 @@ api.patch("/projects/:id", async (c) => {
 	return c.json(projectJson({ ...project, name: input.name }));
 });
 
-// With its file and its sessions, so only the person, signed in in the browser.
+// With its sessions, so only the person, signed in in the browser.
 api.delete("/projects/:id", (c) => {
 	if (!isPerson(c.req.raw)) return c.text(onlyThePerson, 403);
 	const project = projectFor(c.req.param("id"), c.var.caller.id);
@@ -495,106 +447,6 @@ api.delete("/projects/:id", (c) => {
 		return c.text("Only the group's owner deletes its projects.", 403);
 	db.prepare("DELETE FROM project WHERE id = ?").run(project.id);
 	return c.body(null, 204);
-});
-
-// The project file: Markdown the group's members share, as context for their agents.
-// Each write names the version it replaces, so that nobody writes over a version unseen;
-// each version keeps who wrote it, and the last `keptVersions` are kept.
-
-/** The most bytes of a project file, in UTF-8. */
-const maxFile = 64 * 1024;
-const keptVersions = 100;
-
-function fileJson(file: FileRow | undefined, withText: boolean) {
-	return {
-		version: file?.version ?? 0,
-		by: file?.author ?? null,
-		via: file?.via ?? null,
-		written: file?.written ?? null,
-		...(withText && { text: file?.text ?? "" }),
-	};
-}
-
-/** The project of a request for its file, or the answer that refuses it. */
-function fileProject(c: Context<Env>): ProjectRow | Response {
-	const project = projectFor(c.req.param("id") ?? "", c.var.caller.id);
-	if (!project) return c.text("No such project.", 404);
-	if (c.var.caller.app)
-		return c.text(
-			"A project's file is for its group's members and their agents, never for an app.",
-			403,
-		);
-	return project;
-}
-
-api.get("/projects/:id/file", (c) => {
-	const project = fileProject(c);
-	if (project instanceof Response) return project;
-	const asked = c.req.query("version");
-	if (asked === undefined) return c.json(fileJson(fileOf(project.id), true));
-	const version = Number(asked);
-	const file = Number.isSafeInteger(version)
-		? fileOf(project.id, version)
-		: undefined;
-	if (!file)
-		return c.text("No such version: it may be too old to be kept.", 404);
-	return c.json(fileJson(file, true));
-});
-
-api.get("/projects/:id/file/versions", (c) => {
-	const project = fileProject(c);
-	if (project instanceof Response) return project;
-	const files = db
-		.prepare(
-			"SELECT * FROM project_file WHERE project = ? ORDER BY version DESC",
-		)
-		.all(project.id) as FileRow[];
-	return c.json(files.map((file) => fileJson(file, false)));
-});
-
-api.put("/projects/:id/file", async (c) => {
-	const project = fileProject(c);
-	if (project instanceof Response) return project;
-	const help = `The body is {"text":"…","replaces":<version>}, with the version you read, 0 for none yet, and at most ${maxFile} bytes of text.`;
-	const length = Number(c.req.header("content-length") ?? 0);
-	if (length > 4 * maxFile) return c.text(help, 413);
-	const body = (await bodyOf(c.req.raw)) as
-		| { text?: unknown; replaces?: unknown }
-		| undefined
-		| null;
-	const text = body?.text;
-	const replaces = body?.replaces;
-	if (typeof text !== "string" || !Number.isSafeInteger(replaces))
-		return c.text(help, 400);
-	if (Buffer.byteLength(text) > maxFile) return c.text(help, 413);
-	const current = fileOf(project.id)?.version ?? 0;
-	if (replaces !== current)
-		return c.text(
-			`The file is at version ${current} now, not ${replaces}: read it again, and write over what you read.`,
-			409,
-		);
-	const file: FileRow = {
-		version: current + 1,
-		text,
-		author: c.var.caller.login,
-		via: tokenName(c.var.caller),
-		written: new Date().toISOString(),
-	};
-	db.prepare(
-		"INSERT INTO project_file (project, version, text, author, via, written) VALUES (?, ?, ?, ?, ?, ?)",
-	).run(
-		project.id,
-		file.version,
-		file.text,
-		file.author,
-		file.via,
-		file.written,
-	);
-	db.prepare("DELETE FROM project_file WHERE project = ? AND version <= ?").run(
-		project.id,
-		file.version - keptVersions,
-	);
-	return c.json(fileJson(file, false));
 });
 
 // Sessions: each a project's, open to its group's members only, or to anyone with its address.

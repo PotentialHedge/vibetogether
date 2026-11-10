@@ -33,7 +33,7 @@ export function newId(prefix: string): string {
 
 /**
  * The service's own tables, which refer to Better Auth's users: groups, their projects, and the
- * projects' sessions and files, and friends. Better Auth's own `session` is a sign-in, so an
+ * projects' sessions, and friends. Better Auth's own `session` is a sign-in, so an
  * account's session is an `owned_session`.
  */
 export function migrate(): void {
@@ -104,7 +104,7 @@ export function migrate(): void {
 			user TEXT NOT NULL REFERENCES user(id) ON DELETE CASCADE,
 			PRIMARY KEY ("group", user)
 		);
-		-- A group's, with its sessions and its file. "app" is the app whose sessions it holds,
+		-- A group's named set of sessions. "app" is the app whose sessions it holds,
 		-- by its client_id, in the person's own group: such a project holds that app's sessions alone.
 		CREATE TABLE IF NOT EXISTS project (
 			id TEXT PRIMARY KEY,
@@ -114,17 +114,6 @@ export function migrate(): void {
 			created TEXT NOT NULL
 		);
 		CREATE UNIQUE INDEX IF NOT EXISTS project_app ON project ("group", app) WHERE app IS NOT NULL;
-		-- The project file's versions, the latest last. "author" is the writer's login, kept as
-		-- text so that the history outlives an account, and "via" the token's name, null in the browser.
-		CREATE TABLE IF NOT EXISTS project_file (
-			project TEXT NOT NULL REFERENCES project(id) ON DELETE CASCADE,
-			version INTEGER NOT NULL,
-			text TEXT NOT NULL,
-			author TEXT NOT NULL,
-			via TEXT,
-			written TEXT NOT NULL,
-			PRIMARY KEY (project, version)
-		);
 		-- "secret" is the secret part of the session's address on the relay.
 		-- "open" is who may join: its group's members only, or anyone with its address.
 		-- "creator" is who created it, who with the group's owner may delete it.

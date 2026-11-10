@@ -1,7 +1,7 @@
 /** The account's groups, with their projects and sessions, and making new
  * ones. */
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import {
 	api,
 	demo,
@@ -10,7 +10,6 @@ import {
 	type Me,
 	type Open,
 	type Project,
-	type ProjectFile,
 	type Session,
 } from "@/account/api";
 import { AddByName, Empty, Panel, Row, Titled } from "@/account/parts";
@@ -83,77 +82,6 @@ function OpenSwitch({
 	);
 }
 
-/** A project's file: its group's shared context, which any member writes over the version they read. */
-function ProjectFileEditor({
-	project,
-	close,
-	reload,
-}: {
-	project: Project;
-	close: () => void;
-	reload: () => Promise<void>;
-}) {
-	const [file, setFile] = useState<ProjectFile | null>(null);
-	const [text, setText] = useState("");
-	const [problem, setProblem] = useState<string | null>(null);
-	useEffect(() => {
-		api.projectFile(project.id).then(
-			(read) => {
-				setFile(read);
-				setText(read.text);
-			},
-			(error) => setProblem(String(error)),
-		);
-	}, [project.id]);
-	if (!file)
-		return (
-			<span className="text-sm text-muted-foreground">
-				{problem ?? "Reading the file…"}
-			</span>
-		);
-	return (
-		<div className="flex basis-full flex-col gap-2">
-			<textarea
-				aria-label={`The file of ${project.name}`}
-				className="min-h-40 w-full rounded-lg border bg-background/80 px-3 py-2 font-mono text-sm"
-				value={text}
-				onChange={(event) => setText(event.target.value)}
-			/>
-			<div className="flex flex-wrap items-center gap-2">
-				<span className="mr-auto text-sm text-muted-foreground">
-					{file.by
-						? `Version ${file.version}, by ${file.by}${file.via ? ` through ${file.via}` : ""}.`
-						: "Not written yet."}{" "}
-					Every member and their agents read it.
-				</span>
-				{problem && (
-					<span className="basis-full text-sm text-destructive">{problem}</span>
-				)}
-				<Button variant="ghost" size="sm" onClick={close}>
-					Close
-				</Button>
-				<Button
-					size="sm"
-					onClick={async () => {
-						setProblem(null);
-						try {
-							await api.writeProjectFile(project.id, text, file.version);
-							close();
-							await reload();
-						} catch (error) {
-							setProblem(
-								`${error instanceof Error ? error.message : String(error)} Copy your text, then open the file again.`,
-							);
-						}
-					}}
-				>
-					Save
-				</Button>
-			</div>
-		</div>
-	);
-}
-
 function SessionRow({
 	me,
 	session,
@@ -210,7 +138,7 @@ function SessionRow({
 	);
 }
 
-/** A project, its file when open, and its sessions. */
+/** A project, and its sessions. */
 function ProjectRows({
 	me,
 	project,
@@ -226,7 +154,6 @@ function ProjectRows({
 	act: (action: () => Promise<unknown>) => () => Promise<void>;
 	reload: () => Promise<void>;
 }) {
-	const [editing, setEditing] = useState(false);
 	return (
 		<div className="flex flex-col divide-y">
 			<Row
@@ -240,13 +167,6 @@ function ProjectRows({
 								await reload();
 							}}
 						/>
-						<Button
-							variant="outline"
-							size="sm"
-							onClick={() => setEditing(!editing)}
-						>
-							File
-						</Button>
 						{isOwner && (
 							<Button
 								variant="ghost"
@@ -259,24 +179,8 @@ function ProjectRows({
 					</>
 				}
 			>
-				<Titled
-					title={project.name}
-					detail={
-						project.file
-							? `file version ${project.file.version}, by ${project.file.by}`
-							: "no file yet"
-					}
-				/>
+				<Titled title={project.name} />
 			</Row>
-			{editing && (
-				<Row inset>
-					<ProjectFileEditor
-						project={project}
-						close={() => setEditing(false)}
-						reload={reload}
-					/>
-				</Row>
-			)}
 			{sessions.map((session) => (
 				<SessionRow
 					key={session.id}
@@ -437,9 +341,8 @@ export function Groups({
 						Groups
 					</h2>
 					<p className="max-w-xl text-sm text-pretty text-muted-foreground">
-						A group is people, and has projects, each with sessions and a shared
-						file. A session is open to its group only, or to anyone with its
-						address.
+						A group is people, and has projects, each with its sessions. A
+						session is open to its group only, or to anyone with its address.
 					</p>
 				</div>
 				<AddByName
