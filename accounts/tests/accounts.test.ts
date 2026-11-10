@@ -728,6 +728,62 @@ test("asking for OTPs is rate limited", async () => {
 	assert.ok(statuses.includes(429), statuses.join(" "));
 });
 
+test("an app asks for OTPs and polls them apart from its address's limit, and only with its secret", async () => {
+	const ask = (body: Record<string, string>, headers = {}) =>
+		app.request("/api/auth/device/code", {
+			method: "POST",
+			headers: {
+				"content-type": "application/json",
+				"x-forwarded-for": "198.51.100.10",
+				...headers,
+			},
+			body: JSON.stringify({
+				client_id: "messagent",
+				scope: "person",
+				...body,
+			}),
+		});
+	const codes = [];
+	for (let i = 0; i < 15; i++) {
+		const response = await ask({ client_secret: "a-secret-of-the-bot" });
+		assert.equal(response.status, 200, await response.clone().text());
+		codes.push(((await response.json()) as any).device_code);
+	}
+	for (let i = 0; i < 110; i++) {
+		const response = await app.request("/api/auth/device/token", {
+			method: "POST",
+			headers: {
+				"content-type": "application/json",
+				"x-forwarded-for": "198.51.100.10",
+			},
+			body: JSON.stringify({
+				grant_type: "urn:ietf:params:oauth:grant-type:device_code",
+				device_code: codes[i % codes.length],
+				client_id: "messagent",
+				client_secret: "a-secret-of-the-bot",
+			}),
+		});
+		assert.notEqual(response.status, 429, `poll ${i}`);
+	}
+	// A request can't claim to be a checked app: the mark is the service's own.
+	const statuses = [];
+	for (let i = 0; i < 12; i++)
+		statuses.push(
+			(
+				await app.request("/api/auth/device/code", {
+					method: "POST",
+					headers: {
+						"content-type": "application/json",
+						"x-forwarded-for": "198.51.100.11",
+						"x-vibetogether-app": "a-guess",
+					},
+					body: JSON.stringify({ client_id: "flood" }),
+				})
+			).status,
+		);
+	assert.ok(statuses.includes(429), statuses.join(" "));
+});
+
 test("an app acts as its person only with its secret, the person's approval, and until it is unlinked", async () => {
 	from = "192.0.2.44";
 	const ask = (body: Record<string, string>) =>

@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { cimd } from "@better-auth/cimd";
 import { fetchClientMetadataResource } from "@better-auth/cimd/node";
 import { mcp } from "@better-auth/mcp";
@@ -18,6 +18,20 @@ export const oauthAccessTokenPrefix = "vt_at_";
 
 const day = 24 * 60 * 60;
 
+/**
+ * The header by which the service tells Better Auth that it checked a request's app by its secret:
+ * it is removed from every request that arrives, and set only to this process's own mark.
+ */
+export const appHeader = "x-vibetogether-app";
+export const appMark = randomBytes(32).toString("base64url");
+
+/**
+ * An OTP's limit per address, where a checked app goes unlimited: an app, such as the shared bot,
+ * asks for everyone it serves from one address, and only those holding its secret are it.
+ */
+const unlessApp = (window: number, max: number) => (request: Request) =>
+	request.headers.get(appHeader) === appMark ? false : { window, max };
+
 const options = {
 	baseURL: config.url,
 	basePath: "/api/auth",
@@ -30,7 +44,8 @@ const options = {
 		window: 60,
 		max: 100,
 		customRules: {
-			"/device/code": { window: 60, max: 10 },
+			"/device/code": unlessApp(60, 10),
+			"/device/token": unlessApp(60, 100),
 			"/oauth2/register": { window: 3600, max: 20 },
 			"/sign-in/social": { window: 60, max: 10 },
 		},

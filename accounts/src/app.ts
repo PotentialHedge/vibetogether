@@ -2,7 +2,7 @@ import { createHash, timingSafeEqual } from "node:crypto";
 import { Hono } from "hono";
 import { access } from "./access.ts";
 import { api } from "./api.ts";
-import { auth, tokenHash } from "./auth.ts";
+import { appHeader, appMark, auth, tokenHash } from "./auth.ts";
 import { config } from "./config.ts";
 import { db } from "./db.ts";
 
@@ -38,8 +38,10 @@ app.on(["GET", "POST"], ["/api/auth/*", "/.well-known/*"], async (c) => {
 			"Only the person does this, signed in in the browser, never with a token.",
 			403,
 		);
-	if (c.req.path === "/api/auth/device/code") return withRequester(c.req.raw);
-	if (c.req.path === "/api/auth/device/token") return withApp(c.req.raw);
+	if (c.req.path === "/api/auth/device/code")
+		return withRequester(unmarked(c.req.raw));
+	if (c.req.path === "/api/auth/device/token")
+		return withApp(unmarked(c.req.raw));
 	if (c.req.path === "/api/auth/device" && c.req.method === "GET")
 		return withRequestOf(c.req.raw);
 	return auth.handler(c.req.raw);
@@ -84,6 +86,21 @@ function isApp(params: Record<string, unknown>): boolean {
 	return timingSafeEqual(given, Buffer.from(expected, "hex"));
 }
 
+/** The request without the mark of a checked app, which only the service itself sets. */
+function unmarked(request: Request): Request {
+	if (!request.headers.has(appHeader)) return request;
+	const headers = new Headers(request.headers);
+	headers.delete(appHeader);
+	return new Request(request, { headers });
+}
+
+/** The request marked as from an app checked by its secret, which Better Auth limits apart. */
+function marked(request: Request): Request {
+	const headers = new Headers(request.headers);
+	headers.set(appHeader, appMark);
+	return new Request(request, { headers });
+}
+
 const notAnApp = () =>
 	Response.json(
 		{
@@ -104,10 +121,11 @@ async function withRequester(request: Request): Promise<Response> {
 	const person =
 		typeof params.scope === "string" &&
 		params.scope.split(" ").includes("person");
-	if (person && !isApp(params)) return notAnApp();
+	const app = isApp(params);
+	if (person && !app) return notAnApp();
 	const claim =
 		person && typeof params.for === "string" ? params.for.slice(0, 200) : null;
-	const response = await auth.handler(request);
+	const response = await auth.handler(app ? marked(request) : request);
 	if (!response.ok) return response;
 	const body = (await response.clone().json()) as {
 		user_code?: string;
@@ -139,8 +157,9 @@ async function withApp(request: Request): Promise<Response> {
 		.get(tokenHash(String(params.device_code ?? ""))) as
 		| { person: number }
 		| undefined;
-	if (asked?.person && !isApp(params)) return notAnApp();
-	return auth.handler(request);
+	const app = isApp(params);
+	if (asked?.person && !app) return notAnApp();
+	return auth.handler(app ? marked(request) : request);
 }
 
 /** An OTP as Better Auth gives it, with when and from where it was asked for. */
