@@ -14,8 +14,7 @@ export type Group = {
 	name: string;
 	/** Whether it is the person's own, which holds them alone. */
 	own: boolean;
-	owner: string;
-	/** Everyone but the owner. */
+	/** Everyone in it: its members are equal. */
 	members: string[];
 };
 
@@ -251,14 +250,12 @@ function mock(): Api {
 			id: "g_0",
 			name: "luiswirth",
 			own: true,
-			owner: "luiswirth",
 			members: [],
 		},
 		{
 			id: "g_1",
 			name: "Potential Hedge",
 			own: false,
-			owner: "luiswirth",
 			members: ["benarmstrong", "tristangabl"],
 		},
 	];
@@ -370,7 +367,6 @@ function mock(): Api {
 				id: `g_${Date.now()}`,
 				name,
 				own: false,
-				owner: me.name,
 				members: [],
 			};
 			groups = [...groups, group];

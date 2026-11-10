@@ -270,7 +270,6 @@ function repoName(url: string): string {
 function ProjectItem({
 	project,
 	sessions,
-	isOwner,
 	current,
 	onSession,
 	act,
@@ -278,7 +277,6 @@ function ProjectItem({
 }: {
 	project: Project;
 	sessions: Session[];
-	isOwner: boolean;
 	current: string | undefined;
 	onSession: (session: string) => void;
 	act: Act;
@@ -326,14 +324,12 @@ function ProjectItem({
 							<DropdownMenuItem onClick={() => setLinking(true)}>
 								GitHub repos
 							</DropdownMenuItem>
-							{isOwner && (
-								<DropdownMenuItem
-									variant="destructive"
-									onClick={act(() => api.deleteProject(project.id))}
-								>
-									Delete project
-								</DropdownMenuItem>
-							)}
+							<DropdownMenuItem
+								variant="destructive"
+								onClick={act(() => api.deleteProject(project.id))}
+							>
+								Delete project
+							</DropdownMenuItem>
 						</DropdownMenuContent>
 					</DropdownMenu>
 				)}
@@ -411,7 +407,7 @@ function ProjectItem({
 	);
 }
 
-/** The group's people, its owner first, and adding a friend to it. */
+/** The group's people, all equal, and adding a friend to it. */
 function Members({
 	me,
 	group,
@@ -423,12 +419,11 @@ function Members({
 	friends: Friend[];
 	act: Act;
 }) {
-	const isOwner = group.owner === me.name;
 	const addable = friends.filter(
 		(friend) =>
 			friend.state === "friends" && !group.members.includes(friend.name),
 	);
-	const people = [group.owner, ...group.members];
+	const people = group.members;
 	const face = (name: string) =>
 		name === me.name
 			? me
@@ -444,10 +439,7 @@ function Members({
 					>
 						<Person {...face(name)} size="sm" />
 						<span className="min-w-0 flex-1 truncate font-mono">{name}</span>
-						{name === group.owner && !group.own && (
-							<span className="text-xs text-muted-foreground">owner</span>
-						)}
-						{isOwner && name !== group.owner && (
+						{!group.own && name !== me.name && (
 							<Button
 								variant="ghost"
 								size="icon-xs"
@@ -461,7 +453,7 @@ function Members({
 					</li>
 				))}
 			</ul>
-			{isOwner && !group.own && (
+			{!group.own && (
 				<DropdownMenu>
 					<DropdownMenuTrigger
 						render={
@@ -524,7 +516,8 @@ export function Sidebar({
 	act: Act;
 	reload: () => Promise<void>;
 }) {
-	const isOwner = group.owner === me.name;
+	// Groups are flat: any member deletes the group, and the last one leaves only by deleting it.
+	const last = group.members.length <= 1;
 	const [adding, setAdding] = useState(false);
 	return (
 		<div className="flex min-h-0 w-full flex-col bg-card/20 md:w-64 md:shrink-0 md:border-r">
@@ -546,15 +539,18 @@ export function Sidebar({
 							<Ellipsis />
 						</DropdownMenuTrigger>
 						<DropdownMenuContent align="end" className="w-44">
+							{!last && (
+								<DropdownMenuItem
+									onClick={act(() => api.removeMember(group.id, me.name))}
+								>
+									Leave group
+								</DropdownMenuItem>
+							)}
 							<DropdownMenuItem
 								variant="destructive"
-								onClick={act(() =>
-									isOwner
-										? api.deleteGroup(group.id)
-										: api.removeMember(group.id, me.name),
-								)}
+								onClick={act(() => api.deleteGroup(group.id))}
 							>
-								{isOwner ? "Delete group" : "Leave group"}
+								Delete group
 							</DropdownMenuItem>
 						</DropdownMenuContent>
 					</DropdownMenu>
@@ -584,7 +580,6 @@ export function Sidebar({
 							sessions={sessions.filter(
 								(session) => session.project.id === project.id,
 							)}
-							isOwner={isOwner}
 							current={current}
 							onSession={onSession}
 							act={act}

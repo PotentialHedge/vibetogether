@@ -13,7 +13,6 @@ import {
 	type Friend,
 	type Group,
 	type Me,
-	type Open,
 	type Project,
 	type Session,
 	Unauthorized,
@@ -28,13 +27,7 @@ import {
 import { SignIn } from "@/account/sign-in";
 import { Transcript } from "@/account/transcript";
 import { Button } from "@/components/ui/button";
-import {
-	DropdownMenuItem,
-	DropdownMenuLabel,
-	DropdownMenuRadioGroup,
-	DropdownMenuRadioItem,
-	DropdownMenuSeparator,
-} from "@/components/ui/dropdown-menu";
+import { DropdownMenuItem } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 import { page, render, Site } from "@/site";
 
@@ -140,7 +133,6 @@ function App({ state, reload }: { state: State; reload: () => Promise<void> }) {
 		setPlace(next);
 		setNavigating(!next.session && !next.dm);
 	};
-	const isOwner = session !== undefined && group?.owner === me.name;
 
 	return (
 		<div className="flex h-dvh overflow-hidden">
@@ -232,8 +224,6 @@ function App({ state, reload }: { state: State; reload: () => Promise<void> }) {
 							!session.app && (
 								<SessionMenu
 									session={session}
-									isOwner={isOwner}
-									mayDelete={isOwner || session.creator === me.name}
 									act={act}
 									onDeleted={() => open({ group: session.group.id })}
 								/>
@@ -250,52 +240,26 @@ function App({ state, reload }: { state: State; reload: () => Promise<void> }) {
 	);
 }
 
-/** Whom the session is open to, as its group's owner sets it, and deleting it. */
+/** Deleting the session, which any member of its group does. */
 function SessionMenu({
 	session,
-	isOwner,
-	mayDelete,
 	act,
 	onDeleted,
 }: {
 	session: Session;
-	isOwner: boolean;
-	mayDelete: boolean;
 	act: (action: () => Promise<unknown>) => () => Promise<void>;
 	onDeleted: () => void;
 }) {
-	if (!isOwner && !mayDelete) return null;
 	return (
-		<>
-			{isOwner && (
-				<DropdownMenuRadioGroup
-					value={session.open}
-					onValueChange={(open: Open) =>
-						act(() => api.changeSession(session.id, { open }))()
-					}
-				>
-					<DropdownMenuLabel>Who may join</DropdownMenuLabel>
-					<DropdownMenuRadioItem value="members">
-						members only
-					</DropdownMenuRadioItem>
-					<DropdownMenuRadioItem value="link">
-						open by link
-					</DropdownMenuRadioItem>
-				</DropdownMenuRadioGroup>
-			)}
-			{isOwner && mayDelete && <DropdownMenuSeparator />}
-			{mayDelete && (
-				<DropdownMenuItem
-					variant="destructive"
-					onClick={act(async () => {
-						await api.deleteSession(session.id);
-						onDeleted();
-					})}
-				>
-					Delete session
-				</DropdownMenuItem>
-			)}
-		</>
+		<DropdownMenuItem
+			variant="destructive"
+			onClick={act(async () => {
+				await api.deleteSession(session.id);
+				onDeleted();
+			})}
+		>
+			Delete session
+		</DropdownMenuItem>
 	);
 }
 
