@@ -1,7 +1,7 @@
 /** The app's navigation: the person's DMs and groups in the rail, and the
  * open group's projects, their sessions and its members in the sidebar. */
 
-import { AppWindow, Ellipsis, LogOut, Plus, Settings, X } from "lucide-react";
+import { Ellipsis, LogOut, Plus, Settings, X } from "lucide-react";
 import { type ReactNode, useState } from "react";
 import {
 	api,
@@ -287,52 +287,42 @@ function ProjectItem({
 	return (
 		<li className="flex flex-col">
 			<div className="group/project flex h-8 items-center gap-1.5 rounded-md pr-1 pl-2">
-				{project.app && (
-					<AppWindow
-						aria-label={`${project.app}'s`}
-						className="size-3.5 shrink-0 text-muted-foreground"
-					/>
-				)}
 				<span className="min-w-0 flex-1 truncate font-medium">
 					{project.name}
 				</span>
-				{!project.app && (
-					<Button
-						variant="ghost"
-						size="icon-xs"
-						title="New session"
-						aria-label={`New session in ${project.name}`}
-						onClick={() => setAdding(true)}
+				<Button
+					variant="ghost"
+					size="icon-xs"
+					title="New session"
+					aria-label={`New session in ${project.name}`}
+					onClick={() => setAdding(true)}
+				>
+					<Plus />
+				</Button>
+				<DropdownMenu>
+					<DropdownMenuTrigger
+						render={
+							<Button
+								variant="ghost"
+								size="icon-xs"
+								aria-label={`${project.name}, more`}
+							/>
+						}
 					>
-						<Plus />
-					</Button>
-				)}
-				{!project.app && (
-					<DropdownMenu>
-						<DropdownMenuTrigger
-							render={
-								<Button
-									variant="ghost"
-									size="icon-xs"
-									aria-label={`${project.name}, more`}
-								/>
-							}
+						<Ellipsis />
+					</DropdownMenuTrigger>
+					<DropdownMenuContent align="end" className="w-44">
+						<DropdownMenuItem onClick={() => setLinking(true)}>
+							GitHub repos
+						</DropdownMenuItem>
+						<DropdownMenuItem
+							variant="destructive"
+							onClick={act(() => api.deleteProject(project.id))}
 						>
-							<Ellipsis />
-						</DropdownMenuTrigger>
-						<DropdownMenuContent align="end" className="w-44">
-							<DropdownMenuItem onClick={() => setLinking(true)}>
-								GitHub repos
-							</DropdownMenuItem>
-							<DropdownMenuItem
-								variant="destructive"
-								onClick={act(() => api.deleteProject(project.id))}
-							>
-								Delete project
-							</DropdownMenuItem>
-						</DropdownMenuContent>
-					</DropdownMenu>
-				)}
+							Delete project
+						</DropdownMenuItem>
+					</DropdownMenuContent>
+				</DropdownMenu>
 			</div>
 			{linking ? (
 				<div className="pl-3">

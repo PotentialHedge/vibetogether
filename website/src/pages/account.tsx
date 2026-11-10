@@ -217,15 +217,13 @@ function App({ state, reload }: { state: State; reload: () => Promise<void> }) {
 								<ArrowLeft />
 							</Button>
 						}
-						actions={!session.app && <CopySessionPrompt session={session} />}
+						actions={<CopySessionPrompt session={session} />}
 						menu={
-							!session.app && (
-								<SessionMenu
-									session={session}
-									act={act}
-									onDeleted={() => open({ group: session.group.id })}
-								/>
-							)
+							<SessionMenu
+								session={session}
+								act={act}
+								onDeleted={() => open({ group: session.group.id })}
+							/>
 						}
 					/>
 				) : (

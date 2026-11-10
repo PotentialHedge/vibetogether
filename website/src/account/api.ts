@@ -26,8 +26,6 @@ export type Project = {
 	id: string;
 	name: string;
 	group: Named;
-	/** The app whose sessions it holds, in the person's own group. */
-	app: string | null;
 	/** The GitHub repositories where its context lives, as their URLs. */
 	repos: string[];
 };
@@ -41,9 +39,6 @@ export type Session = {
 	creator?: string | null;
 	/** Its URL on the relay, hard to guess: it identifies the session, and is its secret. */
 	address: string;
-	/** The app that owns it for the person, such as messagent for a Telegram
-	 * chat, which manages it; none for the person's own. */
-	app?: { id: string; name: string } | null;
 };
 
 /** Two friends' DM: one session for the two of them and their agents, in no
@@ -87,13 +82,31 @@ export type Token = {
 	created: string;
 };
 
-/** An app that acts as the person, such as messagent for a Telegram chat,
- * by a grant the person approved: no token, since tokens only connect agents. */
-export type App = {
+/** A bridge added to a session, such as messagent for a Telegram chat, by a
+ * member who approved its OTP. */
+export type Bridge = {
 	id: string;
+	/** Its name in the session, `<name>/<bridge>`. */
 	name: string;
-	/** What the app said it is for, in its own words. */
+	/** Which bridge, such as `messagent`. */
+	bridge: string;
+	/** Who added it. */
+	by: string;
+	/** What the bridge said it bridges, in its own words. */
 	for: string | null;
+	session: Named;
+	created: string;
+};
+
+/** The person's account on a bridge's messenger, such as their Telegram
+ * account, which the bridges carry as them. */
+export type Identity = {
+	id: string;
+	bridge: string;
+	/** Its id there, such as a Telegram id. */
+	external: string;
+	/** What it was called as it was linked. */
+	name: string;
 	created: string;
 };
 
@@ -111,10 +124,14 @@ export type Device = {
 	requested?: string;
 	/** Where it was asked from: an IP address or a country. */
 	from?: string;
-	/** Whether an app asks to act as the person, rather than a machine for its agents. */
-	person?: boolean;
-	/** What the app says it is for, in its own words. */
+	/** Whether a bridge asks to be added to a session, rather than a machine
+	 * for its agents. */
+	bridge?: boolean;
+	/** What the bridge says it bridges, in its own words. */
 	for?: string | null;
+	/** The sender's account on the bridge's messenger, where the chat is theirs
+	 * alone, which approving links to the person. */
+	identity?: string | null;
 };
 
 export class Unauthorized extends Error {}
@@ -126,7 +143,11 @@ export const demo = location.hash === "#demo";
 async function problemOf(response: Response): Promise<string> {
 	const text = await response.text();
 	try {
-		const message = (JSON.parse(text) as { message?: unknown }).message;
+		const json = JSON.parse(text) as {
+			message?: unknown;
+			error_description?: unknown;
+		};
+		const message = json.message ?? json.error_description;
 		if (typeof message === "string") return message;
 	} catch {}
 	return text || response.statusText;
@@ -204,9 +225,19 @@ const live = {
 	mint: (name: string) => call<Minted>("POST", "api/tokens", { name }),
 	revoke: (id: string) =>
 		call<void>("DELETE", `api/tokens/${encodeURIComponent(id)}`),
-	apps: () => call<App[]>("GET", "api/apps"),
-	revokeApp: (id: string) =>
-		call<void>("DELETE", `api/apps/${encodeURIComponent(id)}`),
+	bridges: (session: string) =>
+		call<Bridge[]>(
+			"GET",
+			`api/sessions/${encodeURIComponent(session)}/bridges`,
+		),
+	removeBridge: (session: string, id: string) =>
+		call<void>(
+			"DELETE",
+			`api/sessions/${encodeURIComponent(session)}/bridges/${encodeURIComponent(id)}`,
+		),
+	identities: () => call<Identity[]>("GET", "api/identities"),
+	unlinkIdentity: (id: string) =>
+		call<void>("DELETE", `api/identities/${encodeURIComponent(id)}`),
 	/** Returns the address to go to, GitHub's. `oauthQuery` is the signed
 	 * query an MCP client's authorization sent the person here with, so that
 	 * it goes on after GitHub. */
@@ -234,8 +265,12 @@ const live = {
 			"GET",
 			`api/auth/device?user_code=${encodeURIComponent(code)}`,
 		),
-	approve: (code: string) =>
-		call<void>("POST", "api/auth/device/approve", { userCode: code }),
+	/** Approves an OTP; a bridge's goes into `session`. */
+	approve: (code: string, session?: string) =>
+		call<void>("POST", "api/auth/device/approve", {
+			userCode: code,
+			...(session && { session }),
+		}),
 	deny: (code: string) =>
 		call<void>("POST", "api/auth/device/deny", { userCode: code }),
 	/** Answers an MCP client's request for access, by the signed query the
@@ -287,15 +322,13 @@ function mock(): Api {
 			id: "p_0",
 			name: "messagent",
 			group: named("g_0"),
-			app: "messagent",
 			repos: [],
 		},
-		{ id: "p_1", name: "notes", group: named("g_0"), app: null, repos: [] },
+		{ id: "p_1", name: "notes", group: named("g_0"), repos: [] },
 		{
 			id: "p_2",
 			name: "vibetogether",
 			group: named("g_1"),
-			app: null,
 			repos: ["https://github.com/PotentialHedge/vibetogether"],
 		},
 	];
@@ -312,7 +345,6 @@ function mock(): Api {
 			name: "Telegram",
 			...inProject("p_0"),
 			address: "",
-			app: { id: "a_1", name: "messagent" },
 		},
 		{
 			id: "s_1",
@@ -348,11 +380,23 @@ function mock(): Api {
 			state: "asking",
 		},
 	];
-	let apps: App[] = [
+	let bridges: Bridge[] = [
 		{
-			id: "a_1",
-			name: "messagent",
-			for: "Telegram id 123456789, @luiswirth, named Luis",
+			id: "b_1",
+			name: "luiswirth/messagent",
+			bridge: "messagent",
+			by: "luiswirth",
+			for: "Telegram private chat with 123456789, @luiswirth, named Luis",
+			session: { id: "s_0", name: "Telegram" },
+			created: "2026-11-09T21:40:00Z",
+		},
+	];
+	let identities: Identity[] = [
+		{
+			id: "i_1",
+			bridge: "messagent",
+			external: "123456789",
+			name: "@luiswirth, Luis",
 			created: "2026-11-09T21:40:00Z",
 		},
 	];
@@ -417,7 +461,6 @@ function mock(): Api {
 				id: `p_${Date.now()}`,
 				name,
 				group: named(group),
-				app: null,
 				repos: [],
 			};
 			projects = [...projects, project];
@@ -528,9 +571,14 @@ function mock(): Api {
 		revoke: async (id) => {
 			tokens = tokens.filter((token) => token.id !== id);
 		},
-		apps: async () => apps,
-		revokeApp: async (id) => {
-			apps = apps.filter((app) => app.id !== id);
+		bridges: async (session) =>
+			bridges.filter((bridge) => bridge.session.id === session),
+		removeBridge: async (_session, id) => {
+			bridges = bridges.filter((bridge) => bridge.id !== id);
+		},
+		identities: async () => identities,
+		unlinkIdentity: async (id) => {
+			identities = identities.filter((identity) => identity.id !== id);
 		},
 		signIn: async () => `${page("account/")}#demo`,
 		signOut: done,

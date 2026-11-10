@@ -1,17 +1,17 @@
-/** The account's settings: tokens, apps, friends, what agents changed, signing
- * out and deleting the account. */
+/** The account's settings: tokens, bridges and linked identities, friends,
+ * what agents changed, signing out and deleting the account. */
 
-import { AppWindow, ArrowLeft, Monitor, Plug } from "lucide-react";
+import { ArrowLeft, Cable, Monitor, Plug, UserCheck } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import {
 	type Activity,
-	type App,
 	api,
+	type Bridge,
 	demo,
 	type Friend,
+	type Identity,
 	type Me,
 	type Minted,
-	type Session,
 	type Token,
 	Unauthorized,
 } from "@/account/api";
@@ -30,23 +30,27 @@ import { page, render, Site } from "@/site";
 
 type State = {
 	me: Me;
-	sessions: Session[];
 	friends: Friend[];
 	tokens: Token[];
-	apps: App[];
+	bridges: Bridge[];
+	identities: Identity[];
 	activity: Activity[];
 };
 
 async function load(): Promise<State> {
-	const [me, sessions, friends, tokens, apps, activity] = await Promise.all([
-		api.me(),
-		api.sessions(),
-		api.friends(),
-		api.tokens(),
-		api.apps(),
-		api.activity(),
-	]);
-	return { me, sessions, friends, tokens, apps, activity };
+	const [me, sessions, friends, tokens, identities, activity] =
+		await Promise.all([
+			api.me(),
+			api.sessions(),
+			api.friends(),
+			api.tokens(),
+			api.identities(),
+			api.activity(),
+		]);
+	const bridges = (
+		await Promise.all(sessions.map((session) => api.bridges(session.id)))
+	).flat();
+	return { me, friends, tokens, bridges, identities, activity };
 }
 
 const date = new Intl.DateTimeFormat(undefined, { dateStyle: "medium" });
@@ -64,9 +68,6 @@ const argumentsOf = (args: Record<string, unknown>) =>
 		)
 		.join(" · ");
 
-/** How many sessions an app manages, in words. */
-const count = (n: number) => `${n} session${n === 1 ? "" : "s"}`;
-
 const app = page(`account/${demo ? "#demo" : ""}`);
 
 function Settings({
@@ -76,11 +77,9 @@ function Settings({
 	state: State;
 	reload: () => Promise<void>;
 }) {
-	const { me, sessions, friends, tokens, apps, activity } = state;
+	const { me, friends, tokens, bridges, identities, activity } = state;
 	const { problem, act } = useActions(reload);
 	const [minted, setMinted] = useState<Minted | null>(null);
-	const sessionsOf = (id: string) =>
-		count(sessions.filter((session) => session.app?.id === id).length);
 
 	return (
 		<div className="mx-auto flex w-full max-w-4xl flex-col gap-14 px-6 pt-8 md:pt-12">
@@ -164,47 +163,85 @@ function Settings({
 			</Panel>
 
 			<Panel
-				title="Apps"
-				description="An app acts as you, such as a bridge to a messenger, until you revoke it. It manages its own sessions, and revoking it ends them."
+				title="Bridges"
+				description="A bridge mirrors a chat outside Vibe Together and a session onto each other, such as a Telegram chat with messagent: everything said in either reaches the other. Any member of the session's group removes one."
 			>
-				{apps.length === 0 ? (
+				{bridges.length === 0 ? (
 					<Empty>
-						No app yet. Your agent sets one up for you from{" "}
+						No bridge in your sessions yet. Your agent sets one up for you from{" "}
 						<a
 							className="text-foreground underline underline-offset-4"
-							href={page("apps.md")}
+							href={page("ecosystem.md")}
 						>
-							apps.md
+							ecosystem.md
 						</a>
 						.
 					</Empty>
 				) : (
-					apps.map((app) => (
+					bridges.map((bridge) => (
 						<Row
-							key={app.id}
+							key={bridge.id}
 							actions={
 								<Button
 									variant="ghost"
 									size="sm"
-									onClick={act(() => api.revokeApp(app.id))}
+									onClick={act(() =>
+										api.removeBridge(bridge.session.id, bridge.id),
+									)}
 								>
-									Revoke
+									Remove
 								</Button>
 							}
 						>
-							<AppWindow
+							<Cable
 								aria-hidden
 								className="size-4 shrink-0 text-muted-foreground"
 							/>
 							<Titled
-								title={app.name}
+								title={`${bridge.bridge} in ${bridge.session.name}`}
 								detail={
 									<>
-										{app.for && <>{app.for} · </>}
-										{sessionsOf(app.id)} · since{" "}
-										{date.format(new Date(app.created))}
+										{bridge.for && <>{bridge.for} · </>}
+										added by {bridge.by} · since{" "}
+										{date.format(new Date(bridge.created))}
 									</>
 								}
+							/>
+						</Row>
+					))
+				)}
+			</Panel>
+
+			<Panel
+				title="Linked identities"
+				description="Your accounts on messengers, such as Telegram, which bridges carry as you: what you write in a bridged chat reaches its session as you. Once unlinked, it shows as anyone else's, unverified."
+			>
+				{identities.length === 0 ? (
+					<Empty>
+						None yet. Send /start to messagent in a private chat on Telegram to
+						link yours.
+					</Empty>
+				) : (
+					identities.map((identity) => (
+						<Row
+							key={identity.id}
+							actions={
+								<Button
+									variant="ghost"
+									size="sm"
+									onClick={act(() => api.unlinkIdentity(identity.id))}
+								>
+									Unlink
+								</Button>
+							}
+						>
+							<UserCheck
+								aria-hidden
+								className="size-4 shrink-0 text-muted-foreground"
+							/>
+							<Titled
+								title={identity.name}
+								detail={`${identity.bridge}, id ${identity.external} · since ${date.format(new Date(identity.created))}`}
 							/>
 						</Row>
 					))
