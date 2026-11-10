@@ -1,4 +1,4 @@
-/** One of the account's sessions, its log as it grows: the page joins the
+/** One of the account's sessions, its log as it grows: the app joins the
  * session itself, as `<name>/reader`, so it reads exactly where the person may,
  * and stands in the presence like anyone else who reads. */
 
@@ -10,15 +10,27 @@ import {
 	type Presence,
 	RelayError,
 } from "agentwire/participant";
-import { ArrowLeft, Download, Minus, Plus } from "lucide-react";
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { Download, Ellipsis, Minus, Plus, Users } from "lucide-react";
+import {
+	type ReactNode,
+	useEffect,
+	useLayoutEffect,
+	useMemo,
+	useRef,
+	useState,
+} from "react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { api, demo, type Me, type Session, Unauthorized } from "@/account/api";
-import { SignIn } from "@/account/sign-in";
+import { api, demo, type Me, type Session } from "@/account/api";
 import { Button } from "@/components/ui/button";
+import {
+	DropdownMenu,
+	DropdownMenuContent,
+	DropdownMenuItem,
+	DropdownMenuSeparator,
+	DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
-import { page, render, Site } from "@/site";
 
 const STATUS = "application/vnd.agentwire.chat.status+json";
 
@@ -216,6 +228,29 @@ function Body({
 	);
 }
 
+/** A status's text, empty where it was cleared. */
+function statusOf(entry: Entry): string {
+	try {
+		return String(
+			(JSON.parse(entry.text ?? "{}") as { text?: unknown }).text ?? "",
+		);
+	} catch {
+		return "";
+	}
+}
+
+/** The status each participant set last, by name, leaving out the cleared. */
+function statuses(entries: Entry[]): Map<string, string> {
+	const latest = new Map<string, string>();
+	for (const entry of entries)
+		if (base(entry.type) === STATUS) {
+			const text = statusOf(entry);
+			if (text) latest.set(entry.from, text);
+			else latest.delete(entry.from);
+		}
+	return latest;
+}
+
 /** An entry that is no message: joining, leaving, a status, or another
  * extension's. */
 function Note({ entry }: { entry: Entry }) {
@@ -224,12 +259,7 @@ function Note({ entry }: { entry: Entry }) {
 	if (type === JOIN) what = "joined";
 	else if (type === LEAVE) what = "left";
 	else if (type === STATUS) {
-		let text = "";
-		try {
-			text = String(
-				(JSON.parse(entry.text ?? "{}") as { text?: unknown }).text ?? "",
-			);
-		} catch {}
+		const text = statusOf(entry);
 		what = text ? `status: ${text}` : "cleared their status";
 	} else what = type;
 	return (
@@ -247,11 +277,79 @@ function Note({ entry }: { entry: Entry }) {
 const isMessage = (entry: Entry) =>
 	!base(entry.type).startsWith("application/vnd.");
 
-function Transcript({ session, me }: { session: Session; me: Me }) {
+/** Who is in the session, each with whether it receives and its status. */
+function People({
+	presence,
+	self,
+	status,
+}: {
+	presence: Presence;
+	self: string | undefined;
+	status: Map<string, string>;
+}) {
+	const others = Object.entries(presence).filter(([name]) => name !== self);
+	return (
+		<ul className="flex flex-col gap-3 text-sm">
+			{others.map(([name, state]) => (
+				<li key={name} className="flex min-w-0 gap-2">
+					<span
+						className={cn(
+							"mt-[0.45rem] size-1.5 shrink-0 rounded-full",
+							state.receiving ? "bg-emerald-400" : "bg-muted-foreground/50",
+						)}
+						title={
+							state.receiving
+								? "receiving"
+								: `not receiving since ${state.since ? clock.format(new Date(state.since)) : "joining"}`
+						}
+					/>
+					<span className="flex min-w-0 flex-col gap-0.5">
+						<span className="truncate">
+							<Name name={name} account={state.account} />
+						</span>
+						{status.get(name) && (
+							<span className="text-pretty text-muted-foreground">
+								{status.get(name)}
+							</span>
+						)}
+					</span>
+				</li>
+			))}
+			{others.length === 0 && (
+				<li className="text-muted-foreground">no one else</li>
+			)}
+			{self && (
+				<li className="text-xs text-muted-foreground">
+					you read as <span className="font-mono">{self}</span>
+				</li>
+			)}
+		</ul>
+	);
+}
+
+/** A session, live: its log as it grows, who is there and their status. */
+export function Transcript({
+	session,
+	me,
+	actions,
+	menu,
+	back,
+}: {
+	session: Session;
+	me: Me;
+	/** What can be done with the session, at the header's end. */
+	actions?: ReactNode;
+	/** What else can be done with it, as items of its menu. */
+	menu?: ReactNode;
+	/** Leads back to the sessions, where they are not beside it. */
+	back?: ReactNode;
+}) {
 	const { participant, entries, presence, problem } = useLog(session, me);
 	const self = participant?.name;
+	const status = useMemo(() => statuses(entries), [entries]);
+	const [people, setPeople] = useState(false);
 	const [scale, setScale] = useState(
-		() => Number(localStorage.getItem("vibetogether transcript scale")) || 1.15,
+		() => Number(localStorage.getItem("vibetogether transcript scale")) || 1,
 	);
 	useEffect(
 		() => localStorage.setItem("vibetogether transcript scale", String(scale)),
@@ -270,20 +368,14 @@ function Transcript({ session, me }: { session: Session; me: Me }) {
 		return under;
 	}, [entries, presence, self]);
 
-	// Follows the log as it grows, while the page is scrolled to its end.
+	// Follows the log as it grows, while it is scrolled to its end.
+	const scroller = useRef<HTMLDivElement>(null);
 	const following = useRef(true);
-	useEffect(() => {
-		const scrolled = () => {
-			following.current =
-				innerHeight + scrollY >= document.documentElement.scrollHeight - 160;
-		};
-		addEventListener("scroll", scrolled, { passive: true });
-		return () => removeEventListener("scroll", scrolled);
-	}, []);
 	// biome-ignore lint/correctness/useExhaustiveDependencies: runs as the log, or who has read it, changes.
 	useLayoutEffect(() => {
-		if (following.current && entries.length)
-			scrollTo({ top: document.documentElement.scrollHeight });
+		const element = scroller.current;
+		if (element && following.current && entries.length)
+			element.scrollTop = element.scrollHeight;
 	}, [entries, seen]);
 
 	const download = () => {
@@ -298,186 +390,155 @@ function Transcript({ session, me }: { session: Session; me: Me }) {
 	};
 
 	const live = self !== undefined && presence[self]?.receiving;
-	const others = Object.entries(presence).filter(([name]) => name !== self);
+	const count = Object.keys(presence).filter((name) => name !== self).length;
 
 	return (
-		<div className="mx-auto flex w-full max-w-5xl flex-col px-6 pt-6">
-			<header className="sticky top-0 z-10 -mx-6 flex flex-col gap-3 border-b bg-background/90 px-6 py-4 backdrop-blur">
-				<div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-					<a
-						href={page(`account/${demo ? "#demo" : ""}`)}
-						aria-label="Back to your account"
-						className="text-muted-foreground hover:text-foreground"
-					>
-						<ArrowLeft className="size-5" />
-					</a>
-					<h1 className="font-mono text-2xl font-medium tracking-tight">
-						{session.name}
-					</h1>
-					<span
-						className={cn(
-							"flex items-center gap-1.5 font-mono text-xs",
-							live ? "text-emerald-400" : "text-muted-foreground",
-						)}
-					>
+		<div className="flex h-full min-h-0">
+			<div className="flex min-w-0 flex-1 flex-col">
+				<header className="flex flex-col gap-3 border-b px-4 py-3 md:px-6">
+					<div className="flex items-center gap-x-3 gap-y-2">
+						{back}
+						<h1 className="min-w-0 truncate font-mono text-lg font-medium tracking-tight">
+							{session.name}
+						</h1>
 						<span
+							title={live ? "live" : participant ? "not receiving" : "joining"}
 							className={cn(
-								"size-2 rounded-full",
+								"size-2 shrink-0 rounded-full",
 								live ? "animate-pulse bg-emerald-400" : "bg-muted-foreground",
 							)}
 						/>
-						{live ? "live" : participant ? "not receiving" : "joining"}
-					</span>
-					<div className="ml-auto flex items-center gap-1">
-						<Button
-							variant="ghost"
-							size="icon-sm"
-							aria-label="Smaller text"
-							onClick={() =>
-								setScale((s) => Math.max(0.8, +(s - 0.15).toFixed(2)))
-							}
-						>
-							<Minus />
-						</Button>
-						<Button
-							variant="ghost"
-							size="icon-sm"
-							aria-label="Larger text"
-							onClick={() =>
-								setScale((s) => Math.min(2.2, +(s + 0.15).toFixed(2)))
-							}
-						>
-							<Plus />
-						</Button>
-						<Button
-							variant="outline"
-							size="sm"
-							disabled={entries.length === 0}
-							onClick={download}
-						>
-							<Download />
-							JSONL
-						</Button>
+						<div className="ml-auto flex shrink-0 items-center gap-1">
+							{actions}
+							<DropdownMenu>
+								<DropdownMenuTrigger
+									render={
+										<Button variant="ghost" size="icon-sm" aria-label="More" />
+									}
+								>
+									<Ellipsis />
+								</DropdownMenuTrigger>
+								<DropdownMenuContent align="end" className="w-48">
+									{menu}
+									{menu && <DropdownMenuSeparator />}
+									<DropdownMenuItem
+										closeOnClick={false}
+										onClick={() =>
+											setScale((s) => Math.min(2.2, +(s + 0.15).toFixed(2)))
+										}
+									>
+										<Plus />
+										Larger text
+									</DropdownMenuItem>
+									<DropdownMenuItem
+										closeOnClick={false}
+										onClick={() =>
+											setScale((s) => Math.max(0.8, +(s - 0.15).toFixed(2)))
+										}
+									>
+										<Minus />
+										Smaller text
+									</DropdownMenuItem>
+									<DropdownMenuItem
+										disabled={entries.length === 0}
+										onClick={download}
+									>
+										<Download />
+										Download JSONL
+									</DropdownMenuItem>
+								</DropdownMenuContent>
+							</DropdownMenu>
+							<Button
+								variant={people ? "secondary" : "ghost"}
+								size="sm"
+								className="xl:hidden"
+								aria-label="Who is here"
+								aria-pressed={people}
+								onClick={() => setPeople((open) => !open)}
+							>
+								<Users />
+								{count}
+							</Button>
+						</div>
 					</div>
-				</div>
-				<div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-sm">
-					{others.map(([name, state]) => (
-						<span key={name} className="flex items-center gap-1.5">
-							<span
-								className={cn(
-									"size-1.5 rounded-full",
-									state.receiving ? "bg-emerald-400" : "bg-muted-foreground/50",
-								)}
-								title={
-									state.receiving
-										? "receiving"
-										: `not receiving since ${state.since ? clock.format(new Date(state.since)) : "joining"}`
-								}
-							/>
-							<Name name={name} account={state.account} />
-						</span>
-					))}
-					{self && (
-						<span className="text-muted-foreground">
-							you read as <span className="font-mono">{self}</span>
-						</span>
+					{people && (
+						<div className="pb-1 xl:hidden">
+							<People presence={presence} self={self} status={status} />
+						</div>
 					)}
-				</div>
-			</header>
+				</header>
 
-			{problem && (
-				<p className="mt-4 rounded-lg border border-destructive/40 px-4 py-3 text-sm text-destructive">
-					{problem}
-				</p>
-			)}
+				{problem && (
+					<p className="mx-4 mt-4 rounded-lg border border-destructive/40 px-4 py-3 text-sm text-destructive md:mx-6">
+						{problem}
+					</p>
+				)}
 
-			<ol className="flex flex-col py-6" style={{ fontSize: `${scale}rem` }}>
-				{entries.map((entry, i) => {
-					const before = entries.slice(0, i).findLast(isMessage);
-					const same =
-						before?.from === entry.from &&
-						entries[i - 1] === before &&
-						new Date(entry.time).getTime() - new Date(before.time).getTime() <
-							3 * 60_000;
-					const readers = seen.get(entry.n);
-					const pinged = pings(entry.type);
-					return (
-						<li key={entry.n}>
-							{isMessage(entry) ? (
-								<div className={cn("flex gap-3", same ? "pt-1" : "pt-5")}>
-									<span className="w-14 shrink-0 pt-[0.15em] font-mono text-[0.75em] text-muted-foreground tabular-nums">
-										{!same && clock.format(new Date(entry.time))}
-									</span>
-									<div className="min-w-0 flex-1 leading-relaxed">
-										{!same && (
-											<div className="mb-0.5 flex flex-wrap items-baseline gap-x-2">
-												<Name name={entry.from} account={entry.account} />
-												{pinged && (
-													<span className="font-mono text-[0.75em] text-muted-foreground">
-														→ {pinged.length ? pinged.join(" ") : "no one"}
-													</span>
+				<div
+					ref={scroller}
+					className="min-h-0 flex-1 overflow-y-auto px-4 md:px-6"
+					onScroll={(event) => {
+						const element = event.currentTarget;
+						following.current =
+							element.scrollTop + element.clientHeight >=
+							element.scrollHeight - 160;
+					}}
+				>
+					<ol
+						className="mx-auto flex max-w-4xl flex-col py-4"
+						style={{ fontSize: `${scale}rem` }}
+					>
+						{entries.map((entry, i) => {
+							const before = entries.slice(0, i).findLast(isMessage);
+							const same =
+								before?.from === entry.from &&
+								entries[i - 1] === before &&
+								new Date(entry.time).getTime() -
+									new Date(before.time).getTime() <
+									3 * 60_000;
+							const readers = seen.get(entry.n);
+							const pinged = pings(entry.type);
+							return (
+								<li key={entry.n}>
+									{isMessage(entry) ? (
+										<div className={cn("flex gap-3", same ? "pt-1" : "pt-5")}>
+											<span className="w-12 shrink-0 pt-[0.15em] font-mono text-[0.75em] text-muted-foreground tabular-nums">
+												{!same && clock.format(new Date(entry.time))}
+											</span>
+											<div className="min-w-0 flex-1 leading-relaxed">
+												{!same && (
+													<div className="mb-0.5 flex flex-wrap items-baseline gap-x-2">
+														<Name name={entry.from} account={entry.account} />
+														{pinged && (
+															<span className="font-mono text-[0.75em] text-muted-foreground">
+																→ {pinged.length ? pinged.join(" ") : "no one"}
+															</span>
+														)}
+													</div>
 												)}
+												<Body entry={entry} participant={participant} />
 											</div>
-										)}
-										<Body entry={entry} participant={participant} />
-									</div>
-								</div>
-							) : (
-								<Note entry={entry} />
-							)}
-							{readers && (
-								<p className="pl-[4.25rem] pt-1 text-right font-mono text-[0.7em] text-muted-foreground">
-									seen by {readers.join(", ")}
-								</p>
-							)}
-						</li>
-					);
-				})}
-			</ol>
+										</div>
+									) : (
+										<Note entry={entry} />
+									)}
+									{readers && (
+										<p className="pt-1 pl-15 text-right font-mono text-[0.7em] text-muted-foreground">
+											seen by {readers.join(", ")}
+										</p>
+									)}
+								</li>
+							);
+						})}
+					</ol>
+				</div>
+			</div>
+			<aside className="hidden w-72 shrink-0 overflow-y-auto border-l px-5 py-4 xl:block">
+				<People presence={presence} self={self} status={status} />
+			</aside>
 		</div>
 	);
 }
-
-function SessionPage() {
-	const id = new URLSearchParams(location.search).get("id") ?? "";
-	const [state, setState] = useState<
-		{ me: Me; session: Session } | "signed-out" | string | null
-	>(null);
-	useEffect(() => {
-		Promise.all([api.me(), api.sessions()]).then(
-			([me, sessions]) => {
-				const session = sessions.find((session) => session.id === id);
-				setState(
-					session
-						? { me, session }
-						: "This is no session of yours: it was deleted, or you are no member of it.",
-				);
-			},
-			(error: Error) =>
-				setState(error instanceof Unauthorized ? "signed-out" : error.message),
-		);
-	}, [id]);
-	if (state === null) return null;
-	if (state === "signed-out")
-		return (
-			<div className="mx-auto max-w-md px-6 pt-16">
-				<SignIn back={location.href} />
-			</div>
-		);
-	if (typeof state === "string")
-		return (
-			<p className="mx-auto max-w-xl px-6 pt-16 text-muted-foreground">
-				{state}
-			</p>
-		);
-	return <Transcript {...state} />;
-}
-
-render(
-	<Site current="account/">
-		<SessionPage />
-	</Site>,
-);
 
 /** A made-up session, for `#demo`. */
 function made(me: Me): Omit<Log, "participant"> {

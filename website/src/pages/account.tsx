@@ -1,31 +1,34 @@
-import { AppWindow, Monitor, Plug } from "lucide-react";
+/** The app: the person's groups in the rail, the open group's projects and
+ * sessions in the sidebar, and the open session, live. On a phone, the
+ * navigation and the session take the screen in turn. */
+
+import { ArrowLeft } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { Frame } from "ui/onboard";
 import {
-	type App,
 	api,
 	demo,
 	type Friend,
 	type Group,
 	type Me,
-	type Minted,
+	type Open,
 	type Project,
 	type Session,
-	type Token,
 	Unauthorized,
 } from "@/account/api";
-import {
-	AddByName,
-	Empty,
-	Panel,
-	Person,
-	Row,
-	Titled,
-	useActions,
-} from "@/account/parts";
-import { CopySessionPrompt, Groups } from "@/account/sessions";
+import { useActions } from "@/account/parts";
+import { CopySessionPrompt, Rail, Sidebar } from "@/account/sessions";
 import { SignIn } from "@/account/sign-in";
+import { Transcript } from "@/account/transcript";
 import { Button } from "@/components/ui/button";
+import {
+	DropdownMenuItem,
+	DropdownMenuLabel,
+	DropdownMenuRadioGroup,
+	DropdownMenuRadioItem,
+	DropdownMenuSeparator,
+} from "@/components/ui/dropdown-menu";
+import { cn } from "@/lib/utils";
 import { page, render, Site } from "@/site";
 
 type State = {
@@ -34,270 +37,207 @@ type State = {
 	projects: Project[];
 	sessions: Session[];
 	friends: Friend[];
-	tokens: Token[];
-	apps: App[];
 };
 
 async function load(): Promise<State> {
-	const [me, groups, projects, sessions, friends, tokens, apps] =
-		await Promise.all([
-			api.me(),
-			api.groups(),
-			api.projects(),
-			api.sessions(),
-			api.friends(),
-			api.tokens(),
-			api.apps(),
-		]);
-	return { me, groups, projects, sessions, friends, tokens, apps };
+	const [me, groups, projects, sessions, friends] = await Promise.all([
+		api.me(),
+		api.groups(),
+		api.projects(),
+		api.sessions(),
+		api.friends(),
+	]);
+	return { me, groups, projects, sessions, friends };
 }
 
-const date = new Intl.DateTimeFormat(undefined, { dateStyle: "medium" });
+/** What is open, kept in the address so that a reload or a link opens it
+ * again: a session, or a group with none of its sessions open. */
+type Place = { group?: string | undefined; session?: string | undefined };
 
-function Dashboard({
-	state,
-	reload,
-}: {
-	state: State;
-	reload: () => Promise<void>;
-}) {
-	const { me, groups, projects, sessions, friends, tokens, apps } = state;
+function placeOfAddress(): Place {
+	const query = new URLSearchParams(location.search);
+	return {
+		group: query.get("group") ?? undefined,
+		session: query.get("session") ?? undefined,
+	};
+}
+
+function go(place: Place) {
+	const query = new URLSearchParams();
+	if (place.session) query.set("session", place.session);
+	else if (place.group) query.set("group", place.group);
+	const search = query.size ? `?${query}` : "";
+	history.pushState(null, "", `${location.pathname}${search}${location.hash}`);
+}
+
+const LAST = "vibetogether last session";
+
+function App({ state, reload }: { state: State; reload: () => Promise<void> }) {
+	const { me, groups, projects, sessions, friends } = state;
 	const { problem, act } = useActions(reload);
-	const [minted, setMinted] = useState<Minted | null>(null);
+	const [place, setPlace] = useState<Place>(() => {
+		const place = placeOfAddress();
+		if (place.session || place.group) return place;
+		const last = localStorage.getItem(LAST);
+		return last && sessions.some((session) => session.id === last)
+			? { session: last }
+			: {};
+	});
+	// On a phone: whether the navigation is shown, rather than the session.
+	const [navigating, setNavigating] = useState(!place.session);
+	useEffect(() => {
+		const back = () => {
+			const place = placeOfAddress();
+			setPlace(place);
+			setNavigating(!place.session);
+		};
+		addEventListener("popstate", back);
+		return () => removeEventListener("popstate", back);
+	}, []);
+
+	const session = sessions.find((session) => session.id === place.session);
+	const group =
+		groups.find((group) => group.id === (session?.group.id ?? place.group)) ??
+		groups.find((group) => group.own) ??
+		groups[0];
+	useEffect(() => {
+		if (session) localStorage.setItem(LAST, session.id);
+	}, [session]);
+
+	const open = (next: Place) => {
+		go(next);
+		setPlace(next);
+		setNavigating(!next.session);
+	};
+	const isOwner = session !== undefined && group?.owner === me.name;
 
 	return (
-		<div className="mx-auto flex w-full max-w-4xl flex-col gap-14 px-6 pt-12 md:pt-16">
-			<header className="flex flex-wrap items-center gap-4">
-				<Person {...me} size="lg" />
-				<div className="flex flex-col">
-					<h1 className="text-xl font-medium">{me.displayName}</h1>
-					<span className="font-mono text-sm text-muted-foreground">
-						{me.name}
-					</span>
-				</div>
-				<Button
-					variant="ghost"
-					className="ml-auto"
-					onClick={async () => {
-						await api.signOut();
-						location.reload();
-					}}
-				>
-					Sign out
-				</Button>
-			</header>
-			{problem && <p className="-mt-8 text-sm text-destructive">{problem}</p>}
-
-			<Groups
-				me={me}
-				groups={groups}
-				projects={projects}
-				sessions={sessions}
-				friends={friends}
-				act={act}
-				reload={reload}
-			/>
-
-			<Panel
-				title="Friends"
-				description="Two people are friends once each has added the other."
-				action={
-					<AddByName
-						placeholder="github name"
-						label="Add"
-						onAdd={async (name) => {
-							await api.addFriend(name);
-							await reload();
-						}}
-					/>
-				}
-			>
-				{friends.length === 0 ? (
-					<Empty>No friends yet. Add someone by their GitHub name.</Empty>
-				) : (
-					friends.map((friend) => (
-						<Row
-							key={friend.name}
-							actions={
-								<>
-									{friend.state === "asked" && (
-										<span className="text-sm text-muted-foreground">
-											waiting for them
-										</span>
-									)}
-									{friend.state === "asking" && (
-										<Button
-											size="sm"
-											onClick={act(() => api.addFriend(friend.name))}
-										>
-											Accept
-										</Button>
-									)}
-									<Button
-										variant="ghost"
-										size="sm"
-										onClick={act(() => api.removeFriend(friend.name))}
-									>
-										{friend.state === "asking" ? "Decline" : "Remove"}
-									</Button>
-								</>
-							}
-						>
-							<Person {...friend} size="sm" />
-							<span className="flex min-w-0 flex-col leading-tight">
-								<span className="truncate">{friend.displayName}</span>
-								<span className="font-mono text-xs text-muted-foreground">
-									{friend.name}
-								</span>
-							</span>
-						</Row>
-					))
+		<div className="flex h-dvh overflow-hidden">
+			<div
+				className={cn(
+					"flex min-h-0 w-full md:w-auto",
+					!navigating && "hidden md:flex",
 				)}
-			</Panel>
-
-			<Panel
-				title="Apps"
-				description="An app acts as you, such as a bridge to a messenger, until you revoke it. It manages its own sessions, and revoking it ends them."
 			>
-				{apps.length === 0 ? (
-					<Empty>
-						No app yet. Your agent sets one up for you from{" "}
-						<a
-							className="text-foreground underline underline-offset-4"
-							href={page("apps.md")}
-						>
-							apps.md
-						</a>
-						.
-					</Empty>
-				) : (
-					apps.map((app) => (
-						<div key={app.id} className="flex flex-col">
-							<Row
-								actions={
-									<Button
-										variant="ghost"
-										size="sm"
-										onClick={act(() => api.revokeApp(app.id))}
-									>
-										Revoke
-									</Button>
-								}
+				<Rail
+					me={me}
+					groups={groups}
+					open={group?.id}
+					onOpen={(id) => open({ group: id })}
+					reload={reload}
+				/>
+				{group && (
+					<Sidebar
+						me={me}
+						group={group}
+						projects={projects.filter(
+							(project) => project.group.id === group.id,
+						)}
+						sessions={sessions}
+						friends={friends}
+						current={session?.id}
+						onSession={(id) => open({ session: id })}
+						act={act}
+						reload={reload}
+					/>
+				)}
+			</div>
+			<main
+				className={cn(
+					"min-w-0 flex-1 flex-col",
+					navigating ? "hidden md:flex" : "flex",
+				)}
+			>
+				{problem && (
+					<p className="border-b px-6 py-2 text-sm text-destructive">
+						{problem}
+					</p>
+				)}
+				{session ? (
+					<Transcript
+						key={session.id}
+						session={session}
+						me={me}
+						back={
+							<Button
+								variant="ghost"
+								size="icon-sm"
+								className="-ml-1 md:hidden"
+								aria-label="Back to the sessions"
+								onClick={() => setNavigating(true)}
 							>
-								<AppWindow
-									aria-hidden
-									className="size-4 shrink-0 text-muted-foreground"
+								<ArrowLeft />
+							</Button>
+						}
+						actions={!session.app && <CopySessionPrompt session={session} />}
+						menu={
+							!session.app && (
+								<SessionMenu
+									session={session}
+									isOwner={isOwner}
+									mayDelete={isOwner || session.creator === me.name}
+									act={act}
+									onDeleted={() => open({ group: session.group.id })}
 								/>
-								<Titled
-									title={app.name}
-									detail={
-										<>
-											{app.for && <>{app.for} · </>}
-											since {date.format(new Date(app.created))}
-										</>
-									}
-								/>
-							</Row>
-							{sessions
-								.filter((session) => session.app?.id === app.id)
-								.map((session) => (
-									<Row
-										key={session.id}
-										inset
-										actions={<CopySessionPrompt session={session} />}
-									>
-										<span className="font-mono text-sm">{session.name}</span>
-									</Row>
-								))}
-						</div>
-					))
-				)}
-			</Panel>
-
-			<Panel
-				title="Tokens"
-				description="A token connects the agents of a machine, or an MCP client, to your account, until you revoke it."
-				action={
-					<AddByName
-						placeholder="machine name"
-						label="Mint new token"
-						onAdd={async (name) => {
-							setMinted(await api.mint(name));
-							await reload();
-						}}
+							)
+						}
 					/>
-				}
-			>
-				{minted && <MintedToken minted={minted} />}
-				{tokens.length === 0 ? (
-					<Empty>No token yet.</Empty>
 				) : (
-					tokens.map((token) => (
-						<Row
-							key={token.id}
-							actions={
-								<Button
-									variant="ghost"
-									size="sm"
-									onClick={act(() => api.revoke(token.id))}
-								>
-									Revoke
-								</Button>
-							}
-						>
-							{token.kind === "mcp" ? (
-								<Plug
-									aria-label="MCP client"
-									className="size-4 shrink-0 text-muted-foreground"
-								/>
-							) : (
-								<Monitor
-									aria-label="machine"
-									className="size-4 shrink-0 text-muted-foreground"
-								/>
-							)}
-							<Titled
-								title={token.name}
-								detail={`${token.kind === "mcp" ? "MCP client" : "machine"} · since ${date.format(new Date(token.created))}`}
-							/>
-						</Row>
-					))
+					<p className="m-auto px-6 text-center text-sm text-muted-foreground">
+						Open a session on the left, or start one in a project with +.
+					</p>
 				)}
-			</Panel>
+			</main>
 		</div>
 	);
 }
 
-/** A token just minted, shown this once, as the command that keeps it where
- * the machine's agents look for it, readable by its user only, as
- * `agents.md` has an agent keep it. */
-function MintedToken({ minted }: { minted: Minted }) {
-	const [copied, setCopied] = useState(false);
-	const command = `(umask 077; mkdir -p ~/.config/vibetogether && printf %s '${minted.token}' > ~/.config/vibetogether/token)`;
+/** Whom the session is open to, as its group's owner sets it, and deleting it. */
+function SessionMenu({
+	session,
+	isOwner,
+	mayDelete,
+	act,
+	onDeleted,
+}: {
+	session: Session;
+	isOwner: boolean;
+	mayDelete: boolean;
+	act: (action: () => Promise<unknown>) => () => Promise<void>;
+	onDeleted: () => void;
+}) {
+	if (!isOwner && !mayDelete) return null;
 	return (
-		<div className="flex flex-col gap-3 bg-background/40 px-5 py-4">
-			<p className="text-sm text-pretty">
-				The token for <span className="font-mono">{minted.name}</span>, shown
-				only now. Run this in a terminal on that machine: it saves the token in{" "}
-				<code className="font-mono">~/.config/vibetogether/token</code>,
-				readable only by you, where its agents look for it. Don't paste it into
-				a chat: it acts for your account.
-			</p>
-			<div className="flex flex-wrap items-center gap-2">
-				<code className="min-w-0 flex-1 rounded-lg border bg-background/80 px-3 py-2 font-mono text-sm break-all">
-					{command}
-				</code>
-				<Button
-					variant="outline"
-					onClick={async () => {
-						await navigator.clipboard.writeText(command);
-						setCopied(true);
-					}}
+		<>
+			{isOwner && (
+				<DropdownMenuRadioGroup
+					value={session.open}
+					onValueChange={(open: Open) =>
+						act(() => api.changeSession(session.id, { open }))()
+					}
 				>
-					{copied ? "Copied" : "Copy"}
-				</Button>
-			</div>
-		</div>
+					<DropdownMenuLabel>Who may join</DropdownMenuLabel>
+					<DropdownMenuRadioItem value="members">
+						members only
+					</DropdownMenuRadioItem>
+					<DropdownMenuRadioItem value="link">
+						open by link
+					</DropdownMenuRadioItem>
+				</DropdownMenuRadioGroup>
+			)}
+			{isOwner && mayDelete && <DropdownMenuSeparator />}
+			{mayDelete && (
+				<DropdownMenuItem
+					variant="destructive"
+					onClick={act(async () => {
+						await api.deleteSession(session.id);
+						onDeleted();
+					})}
+				>
+					Delete session
+				</DropdownMenuItem>
+			)}
+		</>
 	);
 }
 
@@ -325,30 +265,28 @@ function Account() {
 	if (state === null) return null;
 	if (state === "signed-out")
 		return (
-			<Frame
-				title="Your account"
-				description="Sign in to keep sessions that last, add friends, and see and revoke your tokens."
-			>
-				<SignIn back={demo ? "#demo" : page("account/")} />
-				<p className="text-sm text-pretty text-muted-foreground">
-					Your GitHub name becomes your name in sessions, and your agents take
-					part under it, as <code className="font-mono">yourname/claude</code>.
-					A session without an account needs none of this:{" "}
-					<a
-						className="text-foreground underline underline-offset-4"
-						href={page()}
-					>
-						start one
-					</a>
-					.
-				</p>
-			</Frame>
+			<Site current="account/">
+				<Frame
+					title="Your account"
+					description="Sign in to keep sessions that last, add friends, and see and revoke your tokens."
+				>
+					<SignIn back={demo ? "#demo" : location.href} />
+					<p className="text-sm text-pretty text-muted-foreground">
+						Your GitHub name becomes your name in sessions, and your agents take
+						part under it, as <code className="font-mono">yourname/claude</code>
+						. A session without an account needs none of this:{" "}
+						<a
+							className="text-foreground underline underline-offset-4"
+							href={page()}
+						>
+							start one
+						</a>
+						.
+					</p>
+				</Frame>
+			</Site>
 		);
-	return <Dashboard state={state} reload={reload} />;
+	return <App state={state} reload={reload} />;
 }
 
-render(
-	<Site current="account/">
-		<Account />
-	</Site>,
-);
+render(<Account />);

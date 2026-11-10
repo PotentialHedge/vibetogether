@@ -1,22 +1,33 @@
-/** The account's groups, with their projects and sessions, and making new
- * ones. */
+/** The app's navigation: the person's groups in the rail, and the open
+ * group's projects, their sessions and its members in the sidebar. */
 
-import { useState } from "react";
+import { AppWindow, Ellipsis, LogOut, Plus, Settings, X } from "lucide-react";
+import { type ReactNode, useState } from "react";
 import {
 	api,
 	demo,
 	type Friend,
 	type Group,
 	type Me,
-	type Open,
 	type Project,
 	type Session,
 } from "@/account/api";
-import { AddByName, Empty, Panel, Row, Titled } from "@/account/parts";
-import { Badge } from "@/components/ui/badge";
+import { Person } from "@/account/parts";
 import { Button } from "@/components/ui/button";
+import {
+	DropdownMenu,
+	DropdownMenuContent,
+	DropdownMenuGroup,
+	DropdownMenuItem,
+	DropdownMenuLabel,
+	DropdownMenuSeparator,
+	DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { page } from "@/site";
+
+type Act = (action: () => Promise<unknown>) => () => Promise<void>;
 
 /** Copies the prompt that brings an agent into one of the account's sessions,
  * by its id: the agent finds its link through the account itself, so no
@@ -42,165 +53,390 @@ export function CopySessionPrompt({ session }: { session: Session }) {
 	);
 }
 
-/** Whom a session is open to, as its group's owner sets it. */
-function OpenSwitch({
-	value,
-	onChange,
+/** A name typed in place, made on Enter, dropped on Escape or leaving it. */
+function NameInPlace({
+	placeholder,
+	onName,
+	onDone,
 }: {
-	value: Open;
-	onChange: (value: Open) => void;
+	placeholder: string;
+	onName: (name: string) => Promise<void>;
+	onDone: () => void;
 }) {
-	const options: [Open, string][] = [
-		["members", "members only"],
-		["link", "open by link"],
-	];
+	const [name, setName] = useState("");
+	const [problem, setProblem] = useState<string | null>(null);
 	return (
-		<fieldset
-			aria-label="Who may join"
-			className="flex rounded-lg border p-0.5 font-mono text-xs"
+		<form
+			className="flex flex-col gap-1 px-2 py-1"
+			onSubmit={async (event) => {
+				event.preventDefault();
+				const chosen = name.trim();
+				if (!chosen) return onDone();
+				try {
+					await onName(chosen);
+					onDone();
+				} catch (error) {
+					setProblem(error instanceof Error ? error.message : String(error));
+				}
+			}}
 		>
-			{options.map(([option, label]) => (
-				<label
-					key={option}
-					className={cn(
-						"cursor-pointer rounded-md px-2.5 py-1 transition-colors has-focus-visible:ring-2 has-focus-visible:ring-ring/50",
-						value === option
-							? "bg-secondary text-foreground"
-							: "text-muted-foreground hover:text-foreground",
-					)}
-				>
-					<input
-						type="radio"
-						className="sr-only"
-						checked={value === option}
-						onChange={() => onChange(option)}
-					/>
-					{label}
-				</label>
-			))}
-		</fieldset>
+			<Input
+				autoFocus
+				className="h-7 font-mono"
+				placeholder={placeholder}
+				value={name}
+				onChange={(event) => setName(event.target.value)}
+				onKeyDown={(event) => event.key === "Escape" && onDone()}
+				onBlur={() => !name.trim() && onDone()}
+			/>
+			{problem && <span className="text-xs text-destructive">{problem}</span>}
+		</form>
 	);
 }
 
-function SessionRow({
-	me,
-	session,
-	isOwner,
-	act,
-}: {
-	me: Me;
-	session: Session;
-	isOwner: boolean;
-	act: (action: () => Promise<unknown>) => () => Promise<void>;
-}) {
+/** A group's face in the rail: the start of its name. */
+function GroupFace({ group }: { group: Group }) {
 	return (
-		<Row
-			inset
-			actions={
-				<>
-					{isOwner ? (
-						<OpenSwitch
-							value={session.open}
-							onChange={(open) =>
-								act(() => api.changeSession(session.id, { open }))()
-							}
-						/>
-					) : (
-						session.open === "link" && (
-							<span className="font-mono text-xs text-muted-foreground">
-								open by link
-							</span>
-						)
-					)}
-					<CopySessionPrompt session={session} />
-					{(isOwner || session.creator === me.name) && (
-						<Button
-							variant="ghost"
-							size="sm"
-							onClick={act(() => api.deleteSession(session.id))}
-						>
-							Delete
-						</Button>
-					)}
-				</>
-			}
-		>
-			<a
-				href={page(
-					`account/session/?id=${encodeURIComponent(session.id)}${demo ? "#demo" : ""}`,
-				)}
-				title="Read the session"
-				className="truncate font-mono underline-offset-4 hover:underline"
-			>
-				{session.name}
-			</a>
-		</Row>
+		<span className="flex size-10 items-center justify-center rounded-xl bg-secondary font-mono text-sm font-medium">
+			{group.name
+				.split(/\s+/)
+				.map((word) => word.slice(0, 1))
+				.join("")
+				.slice(0, 2)
+				.toUpperCase()}
+		</span>
 	);
 }
 
-/** A project, and its sessions. */
-function ProjectRows({
+/** The person's groups, their own first, and the person's own menu. */
+export function Rail({
 	me,
-	project,
-	sessions,
-	isOwner,
-	act,
+	groups,
+	open,
+	onOpen,
 	reload,
 }: {
 	me: Me;
-	project: Project;
-	sessions: Session[];
-	isOwner: boolean;
-	act: (action: () => Promise<unknown>) => () => Promise<void>;
+	groups: Group[];
+	open: string | undefined;
+	onOpen: (group: string) => void;
 	reload: () => Promise<void>;
 }) {
+	const [adding, setAdding] = useState(false);
+	const sorted = [...groups].sort((a, b) => Number(b.own) - Number(a.own));
 	return (
-		<div className="flex flex-col divide-y">
-			<Row
-				actions={
-					<>
-						<AddByName
-							placeholder="session name"
-							label="New session"
-							onAdd={async (name) => {
-								await api.createSession(project.id, name);
-								await reload();
-							}}
+		<nav
+			aria-label="Groups"
+			className="flex w-16 shrink-0 flex-col items-center gap-2 overflow-y-auto border-r bg-card/40 py-3"
+		>
+			{sorted.map((group) => [
+				<button
+					key={group.id}
+					type="button"
+					title={group.own ? `${group.name}, your own group` : group.name}
+					aria-current={group.id === open}
+					onClick={() => onOpen(group.id)}
+					className={cn(
+						"relative rounded-xl ring-offset-2 ring-offset-background transition-shadow hover:ring-2 hover:ring-ring/40",
+						group.id === open && "ring-2 ring-ring",
+					)}
+				>
+					<GroupFace group={group} />
+				</button>,
+				// The person's own group stands apart from the groups they share.
+				group.own && (
+					<span key="apart" className="h-px w-8 shrink-0 bg-border" />
+				),
+			])}
+			{adding ? (
+				<div className="w-56 self-start">
+					<NameInPlace
+						placeholder="group name"
+						onName={async (name) => {
+							const group = await api.createGroup(name);
+							await reload();
+							onOpen(group.id);
+						}}
+						onDone={() => setAdding(false)}
+					/>
+				</div>
+			) : (
+				<Button
+					variant="ghost"
+					size="icon-lg"
+					title="New group"
+					aria-label="New group"
+					className="rounded-xl border border-dashed"
+					onClick={() => setAdding(true)}
+				>
+					<Plus />
+				</Button>
+			)}
+			<DropdownMenu>
+				<DropdownMenuTrigger
+					render={
+						<button
+							type="button"
+							aria-label="You"
+							className="mt-auto rounded-full ring-offset-2 ring-offset-background hover:ring-2 hover:ring-ring/40"
 						/>
-						{isOwner && (
-							<Button
-								variant="ghost"
-								size="sm"
-								onClick={act(() => api.deleteProject(project.id))}
-							>
-								Delete
-							</Button>
-						)}
-					</>
-				}
-			>
-				<Titled title={project.name} />
-			</Row>
-			{sessions.map((session) => (
-				<SessionRow
-					key={session.id}
-					me={me}
-					session={session}
-					isOwner={isOwner}
-					act={act}
-				/>
-			))}
+					}
+				>
+					<Person {...me} />
+				</DropdownMenuTrigger>
+				<DropdownMenuContent side="right" align="end" className="w-52">
+					<DropdownMenuGroup>
+						<DropdownMenuLabel className="flex flex-col">
+							<span className="text-foreground">{me.displayName}</span>
+							<span className="font-mono">{me.name}</span>
+						</DropdownMenuLabel>
+					</DropdownMenuGroup>
+					<DropdownMenuSeparator />
+					<DropdownMenuItem
+						render={
+							<a href={page(`account/settings/${demo ? "#demo" : ""}`)} />
+						}
+					>
+						<Settings />
+						Settings
+					</DropdownMenuItem>
+					<DropdownMenuItem
+						onClick={async () => {
+							await api.signOut();
+							location.href = page();
+						}}
+					>
+						<LogOut />
+						Sign out
+					</DropdownMenuItem>
+				</DropdownMenuContent>
+			</DropdownMenu>
+		</nav>
+	);
+}
+
+/** A small heading in the sidebar, with what can be done on its right. */
+function Heading({
+	children,
+	action,
+}: {
+	children: ReactNode;
+	action?: ReactNode;
+}) {
+	return (
+		<div className="flex h-7 items-center justify-between px-2 font-mono text-xs tracking-wide text-muted-foreground uppercase">
+			{children}
+			{action}
 		</div>
 	);
 }
 
-/** One group: its members, and its projects with their sessions. */
-function GroupPanel({
+/** A project and its sessions. */
+function ProjectItem({
+	project,
+	sessions,
+	isOwner,
+	current,
+	onSession,
+	act,
+	reload,
+}: {
+	project: Project;
+	sessions: Session[];
+	isOwner: boolean;
+	current: string | undefined;
+	onSession: (session: string) => void;
+	act: Act;
+	reload: () => Promise<void>;
+}) {
+	const [adding, setAdding] = useState(false);
+	return (
+		<li className="flex flex-col">
+			<div className="group/project flex h-8 items-center gap-1.5 rounded-md pr-1 pl-2">
+				{project.app && (
+					<AppWindow
+						aria-label={`${project.app}'s`}
+						className="size-3.5 shrink-0 text-muted-foreground"
+					/>
+				)}
+				<span className="min-w-0 flex-1 truncate font-medium">
+					{project.name}
+				</span>
+				{!project.app && (
+					<Button
+						variant="ghost"
+						size="icon-xs"
+						title="New session"
+						aria-label={`New session in ${project.name}`}
+						onClick={() => setAdding(true)}
+					>
+						<Plus />
+					</Button>
+				)}
+				{isOwner && !project.app && (
+					<DropdownMenu>
+						<DropdownMenuTrigger
+							render={
+								<Button
+									variant="ghost"
+									size="icon-xs"
+									aria-label={`${project.name}, more`}
+								/>
+							}
+						>
+							<Ellipsis />
+						</DropdownMenuTrigger>
+						<DropdownMenuContent align="end" className="w-44">
+							<DropdownMenuItem
+								variant="destructive"
+								onClick={act(() => api.deleteProject(project.id))}
+							>
+								Delete project
+							</DropdownMenuItem>
+						</DropdownMenuContent>
+					</DropdownMenu>
+				)}
+			</div>
+			<ul className="flex flex-col">
+				{sessions.map((session) => (
+					<li key={session.id}>
+						<button
+							type="button"
+							aria-current={session.id === current}
+							onClick={() => onSession(session.id)}
+							className={cn(
+								"flex h-8 w-full items-center gap-2 rounded-md pr-2 pl-5 text-left font-mono text-sm text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground",
+								session.id === current && "bg-muted text-foreground",
+							)}
+						>
+							<span className="text-muted-foreground/60">#</span>
+							<span className="min-w-0 flex-1 truncate">{session.name}</span>
+							{session.open === "link" && (
+								<span className="text-[0.65rem] text-muted-foreground/70">
+									link
+								</span>
+							)}
+						</button>
+					</li>
+				))}
+				{adding && (
+					<li className="pl-3">
+						<NameInPlace
+							placeholder="session name"
+							onName={async (name) => {
+								const session = await api.createSession(project.id, name);
+								await reload();
+								onSession(session.id);
+							}}
+							onDone={() => setAdding(false)}
+						/>
+					</li>
+				)}
+			</ul>
+		</li>
+	);
+}
+
+/** The group's people, its owner first, and adding a friend to it. */
+function Members({
+	me,
+	group,
+	friends,
+	act,
+}: {
+	me: Me;
+	group: Group;
+	friends: Friend[];
+	act: Act;
+}) {
+	const isOwner = group.owner === me.name;
+	const addable = friends.filter(
+		(friend) =>
+			friend.state === "friends" && !group.members.includes(friend.name),
+	);
+	const people = [group.owner, ...group.members];
+	const face = (name: string) =>
+		name === me.name
+			? me
+			: (friends.find((friend) => friend.name === name) ?? { name });
+	return (
+		<div className="flex flex-col gap-1 border-t p-2">
+			<Heading>Members</Heading>
+			<ul className="flex flex-col">
+				{people.map((name) => (
+					<li
+						key={name}
+						className="group/member flex h-8 items-center gap-2 rounded-md px-2 text-sm"
+					>
+						<Person {...face(name)} size="sm" />
+						<span className="min-w-0 flex-1 truncate font-mono">{name}</span>
+						{name === group.owner && !group.own && (
+							<span className="text-xs text-muted-foreground">owner</span>
+						)}
+						{isOwner && name !== group.owner && (
+							<Button
+								variant="ghost"
+								size="icon-xs"
+								aria-label={`Remove ${name}`}
+								className="opacity-0 group-hover/member:opacity-100 focus-visible:opacity-100"
+								onClick={act(() => api.removeMember(group.id, name))}
+							>
+								<X />
+							</Button>
+						)}
+					</li>
+				))}
+			</ul>
+			{isOwner && !group.own && (
+				<DropdownMenu>
+					<DropdownMenuTrigger
+						render={
+							<Button
+								variant="ghost"
+								size="sm"
+								className="justify-start text-muted-foreground"
+							/>
+						}
+					>
+						<Plus />
+						add a friend
+					</DropdownMenuTrigger>
+					<DropdownMenuContent side="top" align="start" className="w-56">
+						{addable.length === 0 ? (
+							<DropdownMenuItem
+								render={
+									<a href={page(`account/settings/${demo ? "#demo" : ""}`)} />
+								}
+							>
+								No friend to add yet. Add one in settings.
+							</DropdownMenuItem>
+						) : (
+							addable.map((friend) => (
+								<DropdownMenuItem
+									key={friend.name}
+									onClick={act(() => api.addMember(group.id, friend.name))}
+								>
+									<Person {...friend} size="sm" />
+									<span className="font-mono">{friend.name}</span>
+								</DropdownMenuItem>
+							))
+						)}
+					</DropdownMenuContent>
+				</DropdownMenu>
+			)}
+		</div>
+	);
+}
+
+/** The open group: its projects with their sessions, and its members. */
+export function Sidebar({
 	me,
 	group,
 	projects,
 	sessions,
 	friends,
+	current,
+	onSession,
 	act,
 	reload,
 }: {
@@ -209,165 +445,96 @@ function GroupPanel({
 	projects: Project[];
 	sessions: Session[];
 	friends: Friend[];
-	act: (action: () => Promise<unknown>) => () => Promise<void>;
+	current: string | undefined;
+	onSession: (session: string) => void;
+	act: Act;
 	reload: () => Promise<void>;
 }) {
 	const isOwner = group.owner === me.name;
-	const addable = friends.filter(
-		(friend) =>
-			friend.state === "friends" && !group.members.includes(friend.name),
-	);
+	const [adding, setAdding] = useState(false);
 	return (
-		<Panel
-			title={group.own ? `${group.name}, your own group` : group.name}
-			description={
-				group.own
-					? "Only you are in it."
-					: `${group.owner}'s group, with everyone in it alike.`
-			}
-			action={
-				<AddByName
-					placeholder="project name"
-					label="New project"
-					onAdd={async (name) => {
-						await api.createProject(group.id, name);
-						await reload();
-					}}
-				/>
-			}
-		>
-			{!group.own && (
-				<Row
-					actions={
-						<>
-							{isOwner && addable.length > 0 && (
-								<select
-									aria-label="Add a friend"
-									className="h-7 rounded-md border bg-background px-2 font-mono text-xs text-muted-foreground"
-									value=""
-									onChange={(event) => {
-										const name = event.target.value;
-										if (name) act(() => api.addMember(group.id, name))();
-									}}
-								>
-									<option value="">add a friend</option>
-									{addable.map((friend) => (
-										<option key={friend.name} value={friend.name}>
-											{friend.name}
-										</option>
-									))}
-								</select>
-							)}
-							<Button
-								variant="ghost"
-								size="sm"
+		<div className="flex min-h-0 w-full flex-col bg-card/20 md:w-64 md:shrink-0 md:border-r">
+			<header className="flex h-14 shrink-0 items-center gap-2 border-b px-4">
+				<h2 className="min-w-0 flex-1 truncate font-mono font-medium">
+					{group.name}
+				</h2>
+				{!group.own && (
+					<DropdownMenu>
+						<DropdownMenuTrigger
+							render={
+								<Button
+									variant="ghost"
+									size="icon-sm"
+									aria-label={`${group.name}, more`}
+								/>
+							}
+						>
+							<Ellipsis />
+						</DropdownMenuTrigger>
+						<DropdownMenuContent align="end" className="w-44">
+							<DropdownMenuItem
+								variant="destructive"
 								onClick={act(() =>
 									isOwner
 										? api.deleteGroup(group.id)
 										: api.removeMember(group.id, me.name),
 								)}
 							>
-								{isOwner ? "Delete group" : "Leave"}
-							</Button>
-						</>
+								{isOwner ? "Delete group" : "Leave group"}
+							</DropdownMenuItem>
+						</DropdownMenuContent>
+					</DropdownMenu>
+				)}
+			</header>
+			<div className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto p-2">
+				<Heading
+					action={
+						<Button
+							variant="ghost"
+							size="icon-xs"
+							title="New project"
+							aria-label="New project"
+							onClick={() => setAdding(true)}
+						>
+							<Plus />
+						</Button>
 					}
 				>
-					<Badge variant="secondary" className="font-mono">
-						{group.owner}
-					</Badge>
-					{group.members.map((member) => (
-						<Badge key={member} variant="secondary" className="font-mono">
-							{member}
-							{isOwner && (
-								<button
-									type="button"
-									aria-label={`Remove ${member}`}
-									className="ml-1 text-muted-foreground hover:text-foreground"
-									onClick={act(() => api.removeMember(group.id, member))}
-								>
-									×
-								</button>
+					Projects
+				</Heading>
+				<ul className="flex flex-col gap-2">
+					{projects.map((project) => (
+						<ProjectItem
+							key={project.id}
+							project={project}
+							sessions={sessions.filter(
+								(session) => session.project.id === project.id,
 							)}
-						</Badge>
+							isOwner={isOwner}
+							current={current}
+							onSession={onSession}
+							act={act}
+							reload={reload}
+						/>
 					))}
-					{group.members.length === 0 && (
-						<span className="text-sm text-muted-foreground">
-							no one else yet
-						</span>
-					)}
-				</Row>
-			)}
-			{projects.length === 0 && <Empty>No project yet.</Empty>}
-			{projects.map((project) => (
-				<ProjectRows
-					key={project.id}
-					me={me}
-					project={project}
-					sessions={sessions.filter(
-						(session) => session.project.id === project.id,
-					)}
-					isOwner={isOwner}
-					act={act}
-					reload={reload}
-				/>
-			))}
-		</Panel>
-	);
-}
-
-/** The person's groups, each with its projects and their sessions; an app's project shows under the app. */
-export function Groups({
-	me,
-	groups,
-	projects,
-	sessions,
-	friends,
-	act,
-	reload,
-}: {
-	me: Me;
-	groups: Group[];
-	projects: Project[];
-	sessions: Session[];
-	friends: Friend[];
-	act: (action: () => Promise<unknown>) => () => Promise<void>;
-	reload: () => Promise<void>;
-}) {
-	return (
-		<section className="flex flex-col gap-10">
-			<div className="flex flex-wrap items-end justify-between gap-x-6 gap-y-3">
-				<div className="flex flex-col gap-1">
-					<h2 className="font-mono text-lg font-medium tracking-tight">
-						Groups
-					</h2>
-					<p className="max-w-xl text-sm text-pretty text-muted-foreground">
-						A group is people, and has projects, each with its sessions. A
-						session is open to its group only, or to anyone with its address.
+				</ul>
+				{adding && (
+					<NameInPlace
+						placeholder="project name"
+						onName={async (name) => {
+							await api.createProject(group.id, name);
+							await reload();
+						}}
+						onDone={() => setAdding(false)}
+					/>
+				)}
+				{projects.length === 0 && !adding && (
+					<p className="px-2 py-1 text-sm text-muted-foreground">
+						No project yet.
 					</p>
-				</div>
-				<AddByName
-					placeholder="group name"
-					label="New group"
-					onAdd={async (name) => {
-						await api.createGroup(name);
-						await reload();
-					}}
-				/>
+				)}
 			</div>
-			{groups.map((group) => (
-				<GroupPanel
-					key={group.id}
-					me={me}
-					group={group}
-					projects={projects.filter(
-						(project) => project.group.id === group.id && !project.app,
-					)}
-					sessions={sessions}
-					friends={friends}
-					act={act}
-					reload={reload}
-				/>
-			))}
-		</section>
+			<Members me={me} group={group} friends={friends} act={act} />
+		</div>
 	);
 }
