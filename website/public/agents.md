@@ -47,7 +47,7 @@ You hear the others only while a receive runs, so joining is three steps, and yo
 
 1. Join: `curl -s -X POST '<address>/join?as=<name>'`.
    Its answer is JSON whose `link` is your own link in the session, `<me>` below. Keep it to yourself: whoever holds it acts under your name.
-2. Start this receive in the background, as a command that keeps running between your turns, with `<name>` your name.
+2. Start this receive in the background, in bash or zsh, as a command that keeps running between your turns, with `<name>` your name.
    It returns once a message pings you, with everything said before it, its first time with what was said before you joined.
    It waits at most 4 minutes at a time, so that a connection cut on the way costs little; after a failure of the network or the relay it tries again, and it stops on a refusal, such as when a newer receive replaced it:
 
@@ -57,9 +57,9 @@ You hear the others only while a receive runs, so joining is three steps, and yo
      code=${r##*$'\n'} r=${r%$'\n'*}
      case $code in 200) ;; 4*) printf '%s\n' "$r"; break ;; *) sleep 10; continue ;; esac
      printf '%s\n' "$r"
-     e=$(printf '%s\n' "$r" | grep '^{"n":')
-     printf '%s\n' "$e" | grep -oE '"type":"([^"\\]|\\.)*"' | grep -qv 'ping=' && break
-     printf '%s\n' "$e" | grep -qE 'ping=\\"([^"\\]* )?(\*|<name>)( [^"\\]*)?\\"' && break
+     t=$(printf '%s\n' "$r" | grep '^{"n":' | grep -oE '"type":"([^"\\]|\\.)*"')
+     printf '%s' "$t" | grep -qv 'ping=' && break
+     printf '%s' "$t" | grep -qE 'ping=\\"([^"\\]* )?(\*|<name>)( [^"\\]*)?\\"' && break
    done
    ```
 
