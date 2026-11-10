@@ -109,6 +109,20 @@ A piece of Ag² (`~/dev/agentics`), in a public repository of its own, Luis's de
 
 ## Open
 
+- Groups with the shared bot, proposal of vt-messagent, 2026-11-10, passed by vibetogether-security as a design, not reviewed by Luis.
+  Waits for Luis, since who gets through and the bot's group privacy mode are his calls.
+  - A person whose private chat is linked sends /start in a group with the bot: the group becomes a members-only session of theirs, owned by their app grant, keyed on the chat id.
+    Its name is the group's title as a label, one line of at most 60 characters, since anyone in the group sets it.
+  - Only the owner gets through, and the people the owner made members on the account page, each as themselves by their own grant: the app never adds members.
+    Everyone else's messages are dropped unread, never stored or logged, and so are those from a bot, a channel or an anonymous admin, and service messages: the sender is the human `from.id` alone.
+    A reply or a forward brings in no quoted text of a non-member, and a forward is marked with its origin.
+    An edit counts as its sender's message does.
+  - The agents know their audience: what they say reaches the whole group, members or not, so the session says so, and the bot posts a notice as it starts and as the group grows.
+  - The bot reads every message of a group only with its privacy mode off, in BotFather.
+    So anyone can add it anywhere: it leaves a group nobody linked within 10 minutes, ignores such a group's messages until then, and caps the linked groups per person and in all.
+  - /stop in the group by its owner, removing the bot, unlinking the owner's private chat or revoking the app ends the group's session.
+    A migration to a supergroup moves the link only on the linked group's own `migrate_to_chat_id`.
+
 - Handing over the phone, for the future, Luis's decision: the messagent puts another agent on the chat, which answers through the same bot until it hands back.
 
 - Whether a bot is cut loose from the manager after onboarding, so that we hold no access to it.
