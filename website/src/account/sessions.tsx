@@ -1,16 +1,19 @@
-/** The account's sessions: the ones the person owns or is a member of, and
- * making new ones. */
+/** The account's groups, with their projects and sessions, and making new
+ * ones. */
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
 	api,
 	demo,
 	type Friend,
+	type Group,
 	type Me,
 	type Open,
+	type Project,
+	type ProjectFile,
 	type Session,
 } from "@/account/api";
-import { AddByName, Empty, Panel, Row } from "@/account/parts";
+import { AddByName, Empty, Panel, Row, Titled } from "@/account/parts";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -40,7 +43,7 @@ export function CopySessionPrompt({ session }: { session: Session }) {
 	);
 }
 
-/** Whom a session is open to, as its owner sets it. */
+/** Whom a session is open to, as its group's owner sets it. */
 function OpenSwitch({
 	value,
 	onChange,
@@ -80,138 +83,380 @@ function OpenSwitch({
 	);
 }
 
-export function Sessions({
+/** A project's file: its group's shared context, which any member writes over the version they read. */
+function ProjectFileEditor({
+	project,
+	close,
+	reload,
+}: {
+	project: Project;
+	close: () => void;
+	reload: () => Promise<void>;
+}) {
+	const [file, setFile] = useState<ProjectFile | null>(null);
+	const [text, setText] = useState("");
+	const [problem, setProblem] = useState<string | null>(null);
+	useEffect(() => {
+		api.projectFile(project.id).then(
+			(read) => {
+				setFile(read);
+				setText(read.text);
+			},
+			(error) => setProblem(String(error)),
+		);
+	}, [project.id]);
+	if (!file)
+		return (
+			<span className="text-sm text-muted-foreground">
+				{problem ?? "Reading the file…"}
+			</span>
+		);
+	return (
+		<div className="flex basis-full flex-col gap-2">
+			<textarea
+				aria-label={`The file of ${project.name}`}
+				className="min-h-40 w-full rounded-lg border bg-background/80 px-3 py-2 font-mono text-sm"
+				value={text}
+				onChange={(event) => setText(event.target.value)}
+			/>
+			<div className="flex flex-wrap items-center gap-2">
+				<span className="mr-auto text-sm text-muted-foreground">
+					{file.by
+						? `Version ${file.version}, by ${file.by}${file.via ? ` through ${file.via}` : ""}.`
+						: "Not written yet."}{" "}
+					Every member and their agents read it.
+				</span>
+				{problem && (
+					<span className="basis-full text-sm text-destructive">{problem}</span>
+				)}
+				<Button variant="ghost" size="sm" onClick={close}>
+					Close
+				</Button>
+				<Button
+					size="sm"
+					onClick={async () => {
+						setProblem(null);
+						try {
+							await api.writeProjectFile(project.id, text, file.version);
+							close();
+							await reload();
+						} catch (error) {
+							setProblem(
+								`${error instanceof Error ? error.message : String(error)} Copy your text, then open the file again.`,
+							);
+						}
+					}}
+				>
+					Save
+				</Button>
+			</div>
+		</div>
+	);
+}
+
+function SessionRow({
+	session,
+	isOwner,
+	act,
+}: {
+	session: Session;
+	isOwner: boolean;
+	act: (action: () => Promise<unknown>) => () => Promise<void>;
+}) {
+	return (
+		<Row
+			inset
+			actions={
+				<>
+					{isOwner ? (
+						<OpenSwitch
+							value={session.open}
+							onChange={(open) =>
+								act(() => api.changeSession(session.id, { open }))()
+							}
+						/>
+					) : (
+						session.open === "link" && (
+							<span className="font-mono text-xs text-muted-foreground">
+								open by link
+							</span>
+						)
+					)}
+					<CopySessionPrompt session={session} />
+					<Button
+						variant="ghost"
+						size="sm"
+						onClick={act(() => api.deleteSession(session.id))}
+					>
+						Delete
+					</Button>
+				</>
+			}
+		>
+			<a
+				href={page(
+					`account/session/?id=${encodeURIComponent(session.id)}${demo ? "#demo" : ""}`,
+				)}
+				title="Read the session"
+				className="truncate font-mono underline-offset-4 hover:underline"
+			>
+				{session.name}
+			</a>
+		</Row>
+	);
+}
+
+/** A project, its file when open, and its sessions. */
+function ProjectRows({
+	project,
+	sessions,
+	isOwner,
+	act,
+	reload,
+}: {
+	project: Project;
+	sessions: Session[];
+	isOwner: boolean;
+	act: (action: () => Promise<unknown>) => () => Promise<void>;
+	reload: () => Promise<void>;
+}) {
+	const [editing, setEditing] = useState(false);
+	return (
+		<div className="flex flex-col divide-y">
+			<Row
+				actions={
+					<>
+						<AddByName
+							placeholder="session name"
+							label="New session"
+							onAdd={async (name) => {
+								await api.createSession(project.id, name);
+								await reload();
+							}}
+						/>
+						<Button
+							variant="outline"
+							size="sm"
+							onClick={() => setEditing(!editing)}
+						>
+							File
+						</Button>
+						{isOwner && (
+							<Button
+								variant="ghost"
+								size="sm"
+								onClick={act(() => api.deleteProject(project.id))}
+							>
+								Delete
+							</Button>
+						)}
+					</>
+				}
+			>
+				<Titled
+					title={project.name}
+					detail={
+						project.file
+							? `file version ${project.file.version}, by ${project.file.by}`
+							: "no file yet"
+					}
+				/>
+			</Row>
+			{editing && (
+				<Row inset>
+					<ProjectFileEditor
+						project={project}
+						close={() => setEditing(false)}
+						reload={reload}
+					/>
+				</Row>
+			)}
+			{sessions.map((session) => (
+				<SessionRow
+					key={session.id}
+					session={session}
+					isOwner={isOwner}
+					act={act}
+				/>
+			))}
+		</div>
+	);
+}
+
+/** One group: its members, and its projects with their sessions. */
+function GroupPanel({
 	me,
+	group,
+	projects,
 	sessions,
 	friends,
 	act,
 	reload,
 }: {
 	me: Me;
+	group: Group;
+	projects: Project[];
 	sessions: Session[];
 	friends: Friend[];
 	act: (action: () => Promise<unknown>) => () => Promise<void>;
 	reload: () => Promise<void>;
 }) {
-	const mates = friends.filter((friend) => friend.state === "friends");
+	const isOwner = group.owner === me.name;
+	const addable = friends.filter(
+		(friend) =>
+			friend.state === "friends" && !group.members.includes(friend.name),
+	);
 	return (
 		<Panel
-			title="Sessions"
-			description="A session lasts until you delete it. It is open to its members only, or to anyone with its address."
+			title={group.own ? `${group.name}, your own group` : group.name}
+			description={
+				group.own
+					? "Only you are in it."
+					: `${group.owner}'s group, with everyone in it alike.`
+			}
 			action={
 				<AddByName
-					placeholder="session name"
-					label="New session"
+					placeholder="project name"
+					label="New project"
 					onAdd={async (name) => {
-						await api.createSession(name);
+						await api.createProject(group.id, name);
 						await reload();
 					}}
 				/>
 			}
 		>
-			{sessions.length === 0 && <Empty>No session yet.</Empty>}
-			{sessions.map((session) => {
-				const own = session.owner === me.name;
-				const addable = mates.filter(
-					(friend) => !session.members.includes(friend.name),
-				);
-				return (
-					<Row
-						key={session.id}
-						actions={
-							<>
-								{own ? (
-									<OpenSwitch
-										value={session.open}
-										onChange={(open) =>
-											act(() => api.changeSession(session.id, { open }))()
-										}
-									/>
-								) : (
-									session.open === "link" && (
-										<span className="font-mono text-xs text-muted-foreground">
-											open by link
-										</span>
-									)
-								)}
-								<CopySessionPrompt session={session} />
-								{own && addable.length > 0 && (
-									<select
-										aria-label="Add a friend"
-										className="h-7 rounded-md border bg-background px-2 font-mono text-xs text-muted-foreground"
-										value=""
-										onChange={(event) => {
-											const name = event.target.value;
-											if (name) act(() => api.addMember(session.id, name))();
-										}}
-									>
-										<option value="">add a friend</option>
-										{addable.map((friend) => (
-											<option key={friend.name} value={friend.name}>
-												{friend.name}
-											</option>
-										))}
-									</select>
-								)}
-								<Button
-									variant="ghost"
-									size="sm"
-									onClick={act(() =>
-										own
-											? api.deleteSession(session.id)
-											: api.removeMember(session.id, me.name),
-									)}
+			{!group.own && (
+				<Row
+					actions={
+						<>
+							{isOwner && addable.length > 0 && (
+								<select
+									aria-label="Add a friend"
+									className="h-7 rounded-md border bg-background px-2 font-mono text-xs text-muted-foreground"
+									value=""
+									onChange={(event) => {
+										const name = event.target.value;
+										if (name) act(() => api.addMember(group.id, name))();
+									}}
 								>
-									{own ? "Delete" : "Leave"}
-								</Button>
-							</>
-						}
-					>
-						<span className="flex min-w-0 flex-col gap-2">
-							<span className="flex items-baseline gap-2">
-								<a
-									href={page(
-										`account/session/?id=${encodeURIComponent(session.id)}${demo ? "#demo" : ""}`,
-									)}
-									title="Read the session"
-									className="truncate font-mono underline-offset-4 hover:underline"
+									<option value="">add a friend</option>
+									{addable.map((friend) => (
+										<option key={friend.name} value={friend.name}>
+											{friend.name}
+										</option>
+									))}
+								</select>
+							)}
+							<Button
+								variant="ghost"
+								size="sm"
+								onClick={act(() =>
+									isOwner
+										? api.deleteGroup(group.id)
+										: api.removeMember(group.id, me.name),
+								)}
+							>
+								{isOwner ? "Delete group" : "Leave"}
+							</Button>
+						</>
+					}
+				>
+					<Badge variant="secondary" className="font-mono">
+						{group.owner}
+					</Badge>
+					{group.members.map((member) => (
+						<Badge key={member} variant="secondary" className="font-mono">
+							{member}
+							{isOwner && (
+								<button
+									type="button"
+									aria-label={`Remove ${member}`}
+									className="ml-1 text-muted-foreground hover:text-foreground"
+									onClick={act(() => api.removeMember(group.id, member))}
 								>
-									{session.name}
-								</a>
-								{!own && (
-									<span className="text-sm text-muted-foreground">
-										by {session.owner}
-									</span>
-								)}
-							</span>
-							<span className="flex flex-wrap items-center gap-1.5">
-								{session.members.map((member) => (
-									<Badge key={member} variant="secondary" className="font-mono">
-										{member}
-										{own && (
-											<button
-												type="button"
-												aria-label={`Remove ${member}`}
-												className="ml-1 text-muted-foreground hover:text-foreground"
-												onClick={act(() =>
-													api.removeMember(session.id, member),
-												)}
-											>
-												×
-											</button>
-										)}
-									</Badge>
-								))}
-								{own && session.members.length === 0 && (
-									<span className="text-sm text-muted-foreground">
-										no one else yet
-									</span>
-								)}
-							</span>
+									×
+								</button>
+							)}
+						</Badge>
+					))}
+					{group.members.length === 0 && (
+						<span className="text-sm text-muted-foreground">
+							no one else yet
 						</span>
-					</Row>
-				);
-			})}
+					)}
+				</Row>
+			)}
+			{projects.length === 0 && <Empty>No project yet.</Empty>}
+			{projects.map((project) => (
+				<ProjectRows
+					key={project.id}
+					project={project}
+					sessions={sessions.filter(
+						(session) => session.project.id === project.id,
+					)}
+					isOwner={isOwner}
+					act={act}
+					reload={reload}
+				/>
+			))}
 		</Panel>
+	);
+}
+
+/** The person's groups, each with its projects and their sessions; an app's project shows under the app. */
+export function Groups({
+	me,
+	groups,
+	projects,
+	sessions,
+	friends,
+	act,
+	reload,
+}: {
+	me: Me;
+	groups: Group[];
+	projects: Project[];
+	sessions: Session[];
+	friends: Friend[];
+	act: (action: () => Promise<unknown>) => () => Promise<void>;
+	reload: () => Promise<void>;
+}) {
+	return (
+		<section className="flex flex-col gap-10">
+			<div className="flex flex-wrap items-end justify-between gap-x-6 gap-y-3">
+				<div className="flex flex-col gap-1">
+					<h2 className="font-mono text-lg font-medium tracking-tight">
+						Groups
+					</h2>
+					<p className="max-w-xl text-sm text-pretty text-muted-foreground">
+						A group is people, and has projects, each with sessions and a shared
+						file. A session is open to its group only, or to anyone with its
+						address.
+					</p>
+				</div>
+				<AddByName
+					placeholder="group name"
+					label="New group"
+					onAdd={async (name) => {
+						await api.createGroup(name);
+						await reload();
+					}}
+				/>
+			</div>
+			{groups.map((group) => (
+				<GroupPanel
+					key={group.id}
+					me={me}
+					group={group}
+					projects={projects.filter(
+						(project) => project.group.id === group.id && !project.app,
+					)}
+					sessions={sessions}
+					friends={friends}
+					act={act}
+					reload={reload}
+				/>
+			))}
+		</section>
 	);
 }

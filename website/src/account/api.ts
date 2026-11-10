@@ -8,12 +8,46 @@ import { page } from "@/site";
 
 export type Me = { name: string; displayName: string; image: string };
 
+/** People, such as Potential Hedge; everyone also has a group of their own. */
+export type Group = {
+	id: string;
+	name: string;
+	/** Whether it is the person's own, which holds them alone. */
+	own: boolean;
+	owner: string;
+	/** Everyone but the owner. */
+	members: string[];
+};
+
+/** A reference to a group or a project, as a session or a project names it. */
+export type Named = { id: string; name: string };
+
+/** A group's, with its sessions and its file. */
+export type Project = {
+	id: string;
+	name: string;
+	group: Named;
+	/** The app whose sessions it holds, in the person's own group. */
+	app: string | null;
+	/** The latest version of its file, none before the first write. */
+	file: { version: number; by: string; written: string } | null;
+};
+
+/** A version of a project's file, with who wrote it, and through which token. */
+export type ProjectFile = {
+	version: number;
+	text: string;
+	by: string | null;
+	via: string | null;
+	written: string | null;
+};
+
 export type Session = {
 	id: string;
 	name: string;
-	owner: string;
-	members: string[];
-	/** Who may join: its members only, or anyone with its address. */
+	project: Named;
+	group: Named;
+	/** Who may join: its group's members only, or anyone with its address. */
 	open: Open;
 	/** Its URL on the relay, hard to guess: it identifies the session, and is its secret. */
 	address: string;
@@ -107,23 +141,39 @@ async function call<T>(
 
 const live = {
 	me: () => call<Me>("GET", "api/me"),
+	groups: () => call<Group[]>("GET", "api/groups"),
+	createGroup: (name: string) => call<Group>("POST", "api/groups", { name }),
+	deleteGroup: (id: string) =>
+		call<void>("DELETE", `api/groups/${encodeURIComponent(id)}`),
+	addMember: (group: string, name: string) =>
+		call<void>(
+			"PUT",
+			`api/groups/${encodeURIComponent(group)}/members/${encodeURIComponent(name)}`,
+		),
+	removeMember: (group: string, name: string) =>
+		call<void>(
+			"DELETE",
+			`api/groups/${encodeURIComponent(group)}/members/${encodeURIComponent(name)}`,
+		),
+	projects: () => call<Project[]>("GET", "api/projects"),
+	createProject: (group: string, name: string) =>
+		call<Project>("POST", "api/projects", { name, group }),
+	deleteProject: (id: string) =>
+		call<void>("DELETE", `api/projects/${encodeURIComponent(id)}`),
+	projectFile: (id: string) =>
+		call<ProjectFile>("GET", `api/projects/${encodeURIComponent(id)}/file`),
+	writeProjectFile: (id: string, text: string, replaces: number) =>
+		call<ProjectFile>("PUT", `api/projects/${encodeURIComponent(id)}/file`, {
+			text,
+			replaces,
+		}),
 	sessions: () => call<Session[]>("GET", "api/sessions"),
-	createSession: (name: string) =>
-		call<Session>("POST", "api/sessions", { name }),
+	createSession: (project: string, name: string) =>
+		call<Session>("POST", "api/sessions", { name, project }),
 	changeSession: (id: string, change: { name?: string; open?: Open }) =>
 		call<Session>("PATCH", `api/sessions/${encodeURIComponent(id)}`, change),
 	deleteSession: (id: string) =>
 		call<void>("DELETE", `api/sessions/${encodeURIComponent(id)}`),
-	addMember: (id: string, name: string) =>
-		call<void>(
-			"PUT",
-			`api/sessions/${encodeURIComponent(id)}/members/${encodeURIComponent(name)}`,
-		),
-	removeMember: (id: string, name: string) =>
-		call<void>(
-			"DELETE",
-			`api/sessions/${encodeURIComponent(id)}/members/${encodeURIComponent(name)}`,
-		),
 	friends: () => call<Friend[]>("GET", "api/friends"),
 	addFriend: (name: string) =>
 		call<void>("PUT", `api/friends/${encodeURIComponent(name)}`),
@@ -197,12 +247,65 @@ function mock(): Api {
 		displayName: "Luis Wirth",
 		image: "https://avatars.githubusercontent.com/luiswirth",
 	};
+	let groups: Group[] = [
+		{
+			id: "g_0",
+			name: "luiswirth",
+			own: true,
+			owner: "luiswirth",
+			members: [],
+		},
+		{
+			id: "g_1",
+			name: "Potential Hedge",
+			own: false,
+			owner: "luiswirth",
+			members: ["benarmstrong", "tristangabl"],
+		},
+	];
+	const named = (id: string) =>
+		groups.find((group) => group.id === id) as Named;
+	let projects: Project[] = [
+		{
+			id: "p_0",
+			name: "messagent",
+			group: named("g_0"),
+			app: "messagent",
+			file: null,
+		},
+		{ id: "p_1", name: "notes", group: named("g_0"), app: null, file: null },
+		{
+			id: "p_2",
+			name: "vibetogether",
+			group: named("g_1"),
+			app: null,
+			file: { version: 3, by: "benarmstrong", written: "2026-11-10T14:00:00Z" },
+		},
+	];
+	const files = new Map<string, ProjectFile>([
+		[
+			"p_2",
+			{
+				version: 3,
+				text: "# Vibe Together\n\nThe demo is on Thursday.\n",
+				by: "benarmstrong",
+				via: "ben-laptop",
+				written: "2026-11-10T14:00:00Z",
+			},
+		],
+	]);
+	const inProject = (id: string) => {
+		const project = projects.find((p) => p.id === id) as Project;
+		return {
+			project: { id: project.id, name: project.name },
+			group: project.group,
+		};
+	};
 	let sessions: Session[] = [
 		{
 			id: "s_0",
 			name: "Telegram",
-			owner: "luiswirth",
-			members: [],
+			...inProject("p_0"),
 			open: "members",
 			address: "",
 			app: { id: "a_1", name: "messagent" },
@@ -210,27 +313,18 @@ function mock(): Api {
 		{
 			id: "s_1",
 			name: "notes",
-			owner: "luiswirth",
-			members: [],
+			...inProject("p_1"),
 			open: "members",
 			address: "",
 		},
 		{
 			id: "s_2",
-			name: "booking-app",
-			owner: "luiswirth",
-			members: ["benarmstrong"],
-			open: "link",
-			address: "",
-		},
-		{
-			id: "s_3",
-			name: "presio",
-			owner: "benarmstrong",
-			members: ["luiswirth", "tristangabl"],
+			name: "agents",
+			...inProject("p_2"),
 			open: "members",
 			address: "",
 		},
+		{ id: "s_3", name: "demo", ...inProject("p_2"), open: "link", address: "" },
 	];
 	let friends: Friend[] = [
 		{
@@ -283,13 +377,88 @@ function mock(): Api {
 	const done = async () => {};
 	return {
 		me: async () => me,
-		sessions: async () => sessions,
-		createSession: async (name) => {
-			const session = {
-				id: `r_${Date.now()}`,
+		groups: async () => groups,
+		createGroup: async (name) => {
+			const group = {
+				id: `g_${Date.now()}`,
 				name,
+				own: false,
 				owner: me.name,
 				members: [],
+			};
+			groups = [...groups, group];
+			return group;
+		},
+		deleteGroup: async (id) => {
+			groups = groups.filter((group) => group.id !== id);
+			projects = projects.filter((project) => project.group.id !== id);
+			sessions = sessions.filter((session) => session.group.id !== id);
+		},
+		addMember: async (id, name) => {
+			groups = groups.map((group) =>
+				group.id === id
+					? { ...group, members: [...group.members, name] }
+					: group,
+			);
+		},
+		removeMember: async (id, name) => {
+			groups = groups
+				.map((group) =>
+					group.id === id
+						? { ...group, members: group.members.filter((m) => m !== name) }
+						: group,
+				)
+				.filter((group) => group.id !== id || name !== me.name);
+		},
+		projects: async () => projects,
+		createProject: async (group, name) => {
+			const project = {
+				id: `p_${Date.now()}`,
+				name,
+				group: named(group),
+				app: null,
+				file: null,
+			};
+			projects = [...projects, project];
+			return project;
+		},
+		deleteProject: async (id) => {
+			projects = projects.filter((project) => project.id !== id);
+			sessions = sessions.filter((session) => session.project.id !== id);
+		},
+		projectFile: async (id) =>
+			files.get(id) ?? {
+				version: 0,
+				text: "",
+				by: null,
+				via: null,
+				written: null,
+			},
+		writeProjectFile: async (id, text, replaces) => {
+			const current = files.get(id)?.version ?? 0;
+			if (replaces !== current)
+				throw new Error(
+					`The file is at version ${current} now, not ${replaces}.`,
+				);
+			const file = {
+				version: current + 1,
+				text,
+				by: me.name,
+				via: null,
+				written: new Date().toISOString(),
+			};
+			files.set(id, file);
+			projects = projects.map((project) =>
+				project.id === id ? { ...project, file } : project,
+			);
+			return file;
+		},
+		sessions: async () => sessions,
+		createSession: async (project, name) => {
+			const session = {
+				id: `s_${Date.now()}`,
+				name,
+				...inProject(project),
 				open: "members" as Open,
 				address: "",
 			};
@@ -304,20 +473,6 @@ function mock(): Api {
 		},
 		deleteSession: async (id) => {
 			sessions = sessions.filter((session) => session.id !== id);
-		},
-		addMember: async (id, name) => {
-			sessions = sessions.map((session) =>
-				session.id === id
-					? { ...session, members: [...session.members, name] }
-					: session,
-			);
-		},
-		removeMember: async (id, name) => {
-			sessions = sessions.map((session) =>
-				session.id === id
-					? { ...session, members: session.members.filter((m) => m !== name) }
-					: session,
-			);
 		},
 		friends: async () => friends,
 		addFriend: async (name) => {

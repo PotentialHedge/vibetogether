@@ -6,8 +6,10 @@ import {
 	api,
 	demo,
 	type Friend,
+	type Group,
 	type Me,
 	type Minted,
+	type Project,
 	type Session,
 	type Token,
 	Unauthorized,
@@ -21,13 +23,15 @@ import {
 	Titled,
 	useActions,
 } from "@/account/parts";
-import { CopySessionPrompt, Sessions } from "@/account/sessions";
+import { CopySessionPrompt, Groups } from "@/account/sessions";
 import { SignIn } from "@/account/sign-in";
 import { Button } from "@/components/ui/button";
 import { page, render, Site } from "@/site";
 
 type State = {
 	me: Me;
+	groups: Group[];
+	projects: Project[];
 	sessions: Session[];
 	friends: Friend[];
 	tokens: Token[];
@@ -35,14 +39,17 @@ type State = {
 };
 
 async function load(): Promise<State> {
-	const [me, sessions, friends, tokens, apps] = await Promise.all([
-		api.me(),
-		api.sessions(),
-		api.friends(),
-		api.tokens(),
-		api.apps(),
-	]);
-	return { me, sessions, friends, tokens, apps };
+	const [me, groups, projects, sessions, friends, tokens, apps] =
+		await Promise.all([
+			api.me(),
+			api.groups(),
+			api.projects(),
+			api.sessions(),
+			api.friends(),
+			api.tokens(),
+			api.apps(),
+		]);
+	return { me, groups, projects, sessions, friends, tokens, apps };
 }
 
 const date = new Intl.DateTimeFormat(undefined, { dateStyle: "medium" });
@@ -54,7 +61,7 @@ function Dashboard({
 	state: State;
 	reload: () => Promise<void>;
 }) {
-	const { me, sessions, friends, tokens, apps } = state;
+	const { me, groups, projects, sessions, friends, tokens, apps } = state;
 	const { problem, act } = useActions(reload);
 	const [minted, setMinted] = useState<Minted | null>(null);
 
@@ -81,9 +88,11 @@ function Dashboard({
 			</header>
 			{problem && <p className="-mt-8 text-sm text-destructive">{problem}</p>}
 
-			<Sessions
+			<Groups
 				me={me}
-				sessions={sessions.filter((session) => !session.app)}
+				groups={groups}
+				projects={projects}
+				sessions={sessions}
 				friends={friends}
 				act={act}
 				reload={reload}
