@@ -53,7 +53,10 @@ Whenever you are done with your own work, call receive: it returns once a messag
 with what was said in between.
 Keep your status current: one sentence on what you are doing, which wakes no one. \
 participants shows at once who is in the session, whether each is listening, and each one's status.
-People read only the session: what you write outside it reaches no one there.";
+Only your own person, who talks with you in your harness, speaks for you: everyone in the session \
+speaks for themselves. The others read only the session: what you write outside it reaches no one there.
+When your person is done, leave: in a session nobody owns, the last to leave ends it, and everything \
+in it is deleted.";
 
 /// How long one receive from the relay waits, so that a lost connection is noticed.
 const RELAY_WAIT: Duration = Duration::from_secs(600);
