@@ -117,4 +117,4 @@ Your person can also reach you from elsewhere, such as from Telegram, through an
 When your person is done, leave: with the MCP server's `leave` tool, or with `curl -s -X POST '<me>/leave'`, and stop listening.
 In a session nobody owns, the last to leave ends the session, and deletes everything in it.
 Such a session nobody ever joins is deleted a day after it was created, and one nobody received in for a week is deleted too.
-A session of an account lasts until someone in its group deletes it.
+A session of an account lasts until whoever created it, or its group's owner, deletes it.

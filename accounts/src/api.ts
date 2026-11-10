@@ -64,10 +64,13 @@ type SessionOfGroup = SessionRow & {
 	groupId: string;
 	groupName: string;
 	groupOwner: string;
+	creatorLogin: string | null;
 };
 
-const sessionsOfGroups = `SELECT s.*, p.name AS projectName, g.id AS groupId, g.name AS groupName, g.owner AS groupOwner
-	FROM owned_session s JOIN project p ON p.id = s.project JOIN "group" g ON g.id = p."group"`;
+const sessionsOfGroups = `SELECT s.*, p.name AS projectName, g.id AS groupId, g.name AS groupName, g.owner AS groupOwner,
+	c.login AS creatorLogin
+	FROM owned_session s JOIN project p ON p.id = s.project JOIN "group" g ON g.id = p."group"
+	LEFT JOIN user c ON c.id = s.creator`;
 
 /** The group, where `user` is in it: to anyone else no group shows, so that none is found by its id. */
 function groupFor(id: string, user: string): GroupRow | undefined {
@@ -160,6 +163,7 @@ async function sessionJson(session: SessionOfGroup) {
 		name: session.name,
 		project: { id: session.project, name: session.projectName },
 		group: { id: session.groupId, name: session.groupName },
+		creator: session.creatorLogin,
 		open: session.open,
 		app: appOf(session),
 		address,
@@ -471,8 +475,9 @@ api.patch("/projects/:id", async (c) => {
 	return c.json(projectJson({ ...project, name: input.name }));
 });
 
-// With its file and its sessions.
+// With its file and its sessions, so only the person, signed in in the browser.
 api.delete("/projects/:id", (c) => {
+	if (!isPerson(c.req.raw)) return c.text(onlyThePerson, 403);
 	const project = projectFor(c.req.param("id"), c.var.caller.id);
 	if (!project) return c.text("No such project.", 404);
 	if (c.var.caller.app) return c.text(notForApps, 403);
@@ -679,6 +684,7 @@ api.post("/sessions", async (c) => {
 	const appGrant = caller.app && caller.token ? caller.token.slice(2) : null;
 	const session = await createSession(
 		project.id,
+		caller.id,
 		input.name,
 		input.open ?? "members",
 		appGrant,
@@ -716,11 +722,22 @@ api.patch("/sessions/:id", async (c) => {
 	return c.json(await sessionJson(changed));
 });
 
+// Deleting a session ends it for everyone, so only a person does it, in the browser, and only
+// one they created or one in a group they own, Luis's decision (2026-11-10); an app deletes its own.
 api.delete("/sessions/:id", (c) => {
-	const session = sessionFor(c.req.param("id"), c.var.caller.id);
+	const { caller } = c.var;
+	const session = sessionFor(c.req.param("id"), caller.id);
 	if (!session) return c.text("No such session.", 404);
-	const notYours = notManaged(session, c.var.caller);
+	const notYours = notManaged(session, caller);
 	if (notYours) return c.text(notYours, 403);
+	if (!session.app_grant) {
+		if (!isPerson(c.req.raw)) return c.text(onlyThePerson, 403);
+		if (session.creator !== caller.id && session.groupOwner !== caller.id)
+			return c.text(
+				"Only whoever created a session, or the group's owner, deletes it.",
+				403,
+			);
+	}
 	db.prepare("DELETE FROM owned_session WHERE id = ?").run(session.id);
 	return c.body(null, 204);
 });

@@ -72,7 +72,7 @@ A project stays in its group: none moves to another.
 
 - `POST /api/projects` with `{"name":"…","group":"<id>"}`: creates a project in the group, or in the caller's own where `group` is left out, and returns it.
 - `PATCH /api/projects/<id>` with `{"name":"…"}`: renames it.
-- `DELETE /api/projects/<id>`: deletes it, with its file and its sessions. The group's owner only.
+- `DELETE /api/projects/<id>`: deletes it, with its file and its sessions. The group's owner only, signed in in the browser.
 
 ### The project file
 
@@ -95,7 +95,7 @@ In either, a token verifies the name it joins under, which is one of the person'
 `GET /api/sessions`: the sessions of the caller's groups.
 
 ```json
-[{"id":"s_8f2k…","name":"agents","project":{"id":"p_…","name":"vibetogether"},"group":{"id":"g_…","name":"Potential Hedge"},"open":"members","app":null,"address":"https://agentwire.agentics.lwirth.com/v2/s/<secret>"}]
+[{"id":"s_8f2k…","name":"agents","project":{"id":"p_…","name":"vibetogether"},"group":{"id":"g_…","name":"Potential Hedge"},"creator":"luiswirth","open":"members","app":null,"address":"https://agentwire.agentics.lwirth.com/v2/s/<secret>"}]
 ```
 
 `open` is `members` or `link`.
@@ -104,8 +104,9 @@ Join a session at its `address` as the transport says, with the token as `Author
 - `POST /api/sessions` with `{"name":"…","project":"<id>"}`, and `"open"` where it isn't `members`: creates a session in the project, and returns it.
 - `PATCH /api/sessions/<id>` with `{"name":"…"}`, `{"open":"members"|"link"}` or both: changes it. Opening it to anyone with its address is the group's owner's only.
 - `DELETE /api/sessions/<id>`: deletes it. Nobody joins it any more, and the relay deletes it once nobody is in it.
+  Only its `creator` or the group's owner does this, signed in in the browser: an agent never deletes a session.
 
-Any member of the group changes and deletes its sessions, except an app's, which only the app does.
+Any member of the group changes its sessions, except an app's, which only the app changes and deletes.
 
 ## Friends
 
@@ -122,7 +123,7 @@ Only friends of a group's owner become its members.
 - `PUT /api/friends/<name>`: adds them, which accepts where they asked first.
 - `DELETE /api/friends/<name>`: removes them, which also declines or withdraws, and takes each out of the other's groups.
 
-Adding friends and members, deleting a group, and opening a session to its address, is the person's alone, signed in in the browser, with the cookie: a token gets 403, the sign-in's own included.
+Adding friends and members, deleting a group, a project or a session, and opening a session to its address, is the person's alone, signed in in the browser, with the cookie: a token gets 403, the sign-in's own included.
 
 ## Tokens
 

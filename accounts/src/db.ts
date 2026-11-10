@@ -127,10 +127,12 @@ export function migrate(): void {
 		);
 		-- "secret" is the secret part of the session's address on the relay.
 		-- "open" is who may join: its group's members only, or anyone with its address.
+		-- "creator" is who created it, who with the group's owner may delete it.
 		CREATE TABLE IF NOT EXISTS owned_session (
 			id TEXT PRIMARY KEY,
 			name TEXT NOT NULL,
 			project TEXT NOT NULL REFERENCES project(id) ON DELETE CASCADE,
+			creator TEXT REFERENCES user(id) ON DELETE SET NULL,
 			secret TEXT UNIQUE,
 			created TEXT NOT NULL,
 			open TEXT NOT NULL DEFAULT 'members' CHECK (open IN ('members', 'link')),
@@ -164,6 +166,11 @@ export function migrate(): void {
 		ownGroupOf(id);
 	// Databases from before groups and projects, whose sessions each had an owner and members.
 	if (hasColumn("owned_session", "owner")) intoGroups();
+	// Databases from before a session kept who created it.
+	if (!hasColumn("owned_session", "creator"))
+		db.exec(
+			"ALTER TABLE owned_session ADD COLUMN creator TEXT REFERENCES user(id) ON DELETE SET NULL",
+		);
 }
 
 /** The id of the person's own group, made where it doesn't exist yet. */
@@ -205,6 +212,7 @@ export function appProjectOf(user: string, app: string): string {
  * alone into the owner's own group, one with members into a group of exactly its owner and its
  * members, owned by its owner and shared by every session with the same people, and an app's into
  * its app's project. Each session but an app's gets a project of its own, named after it.
+ * Its owner becomes its creator.
  * A session of an app whose grant is gone was already ended, and goes.
  */
 function intoGroups(): void {
@@ -279,6 +287,7 @@ function intoGroups(): void {
 				id TEXT PRIMARY KEY,
 				name TEXT NOT NULL,
 				project TEXT NOT NULL REFERENCES project(id) ON DELETE CASCADE,
+				creator TEXT REFERENCES user(id) ON DELETE SET NULL,
 				secret TEXT UNIQUE,
 				created TEXT NOT NULL,
 				open TEXT NOT NULL DEFAULT 'members' CHECK (open IN ('members', 'link')),
@@ -287,8 +296,17 @@ function intoGroups(): void {
 		`);
 		for (const s of moved)
 			db.prepare(
-				"INSERT INTO owned_session_grouped (id, name, project, secret, created, open, app_grant) VALUES (?, ?, ?, ?, ?, ?, ?)",
-			).run(s.id, s.name, s.project, s.secret, s.created, s.open, s.app_grant);
+				"INSERT INTO owned_session_grouped (id, name, project, creator, secret, created, open, app_grant) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+			).run(
+				s.id,
+				s.name,
+				s.project,
+				s.owner,
+				s.secret,
+				s.created,
+				s.open,
+				s.app_grant,
+			);
 		db.exec(`
 			DROP TABLE session_member;
 			DROP TABLE owned_session;

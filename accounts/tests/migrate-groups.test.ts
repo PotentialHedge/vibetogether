@@ -140,6 +140,11 @@ test("every session goes into a project of a group of exactly the people who cou
 	assert.equal(get("s_ph").groupName, "potentialhedge");
 	assert.equal(get("s_ph").projectName, "potentialhedge");
 	assert.equal(get("s_ph2").group, get("s_ph").group);
+	// Its owner becomes its creator.
+	assert.deepEqual(
+		rows("SELECT DISTINCT creator FROM owned_session WHERE id != 's_agents'"),
+		[{ creator: "u-luiswirth" }],
+	);
 	assert.notEqual(get("s_ph2").project, get("s_ph").project);
 	assert.notEqual(get("s_ben").group, get("s_ph").group);
 	// Everyone has a group of their own, holding them alone.

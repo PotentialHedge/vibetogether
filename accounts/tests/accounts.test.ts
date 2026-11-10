@@ -522,6 +522,30 @@ test("friends are mutual, only friends become members of a group, and leaving it
 		403,
 	);
 
+	// Only a person in the browser deletes a session: one they created, or one in a group they own.
+	assert.equal(owned.creator, "ben");
+	const luiss = await session(luis, "luis-made", shared);
+	assert.equal(
+		(await call(ben, "DELETE", `/api/sessions/${luiss.id}`)).status,
+		403,
+	);
+	assert.equal(
+		(await call(benToken, "DELETE", `/api/sessions/${owned.id}`)).status,
+		403,
+	);
+	assert.equal(
+		(await call(luisToken, "DELETE", `/api/sessions/${luiss.id}`)).status,
+		403,
+	);
+	assert.equal(
+		(await call(luisToken, "DELETE", `/api/projects/${shared}`)).status,
+		403,
+	);
+	assert.equal(
+		(await call(luis, "DELETE", `/api/sessions/${luiss.id}`)).status,
+		204,
+	);
+
 	// Leaving the group ends access at once, to the session and its project.
 	assert.equal(
 		(await call(ben, "DELETE", `/api/groups/${group}/members/ben`)).status,
@@ -560,7 +584,7 @@ test("friends are mutual, only friends become members of a group, and leaving it
 	);
 });
 
-test("sessions are created, renamed and deleted by their group's members", async () => {
+test("sessions are created and renamed by their group's members, and deleted by their creator", async () => {
 	const created = await call(luis, "POST", "/api/sessions", {
 		name: "formoniq",
 		project: luisProject,

@@ -47,6 +47,8 @@ export type Session = {
 	name: string;
 	project: Named;
 	group: Named;
+	/** Who created it, who may delete it, as may the group's owner. */
+	creator?: string | null;
 	/** Who may join: its group's members only, or anyone with its address. */
 	open: Open;
 	/** Its URL on the relay, hard to guess: it identifies the session, and is its secret. */
@@ -459,6 +461,7 @@ function mock(): Api {
 				id: `s_${Date.now()}`,
 				name,
 				...inProject(project),
+				creator: me.name,
 				open: "members" as Open,
 				address: "",
 			};

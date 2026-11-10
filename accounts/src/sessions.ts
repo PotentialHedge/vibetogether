@@ -6,6 +6,8 @@ export type SessionRow = {
 	id: string;
 	name: string;
 	project: string;
+	/** Who created it, which may delete it, as may the group's owner. */
+	creator: string | null;
 	secret: string | null;
 	created: string;
 	open: "members" | "link";
@@ -53,6 +55,7 @@ export async function secretOf(session: SessionRow): Promise<string> {
 
 export async function createSession(
 	project: string,
+	creator: string,
 	name: string,
 	open: SessionRow["open"],
 	appGrant: string | null = null,
@@ -61,17 +64,19 @@ export async function createSession(
 		id: newId("s"),
 		name,
 		project,
+		creator,
 		secret: null,
 		created: new Date().toISOString(),
 		open,
 		app_grant: appGrant,
 	};
 	db.prepare(
-		"INSERT INTO owned_session (id, name, project, secret, created, open, app_grant) VALUES (?, ?, ?, ?, ?, ?, ?)",
+		"INSERT INTO owned_session (id, name, project, creator, secret, created, open, app_grant) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
 	).run(
 		session.id,
 		session.name,
 		session.project,
+		session.creator,
 		session.secret,
 		session.created,
 		session.open,

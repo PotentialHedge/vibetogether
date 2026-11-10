@@ -155,10 +155,12 @@ function ProjectFileEditor({
 }
 
 function SessionRow({
+	me,
 	session,
 	isOwner,
 	act,
 }: {
+	me: Me;
 	session: Session;
 	isOwner: boolean;
 	act: (action: () => Promise<unknown>) => () => Promise<void>;
@@ -183,13 +185,15 @@ function SessionRow({
 						)
 					)}
 					<CopySessionPrompt session={session} />
-					<Button
-						variant="ghost"
-						size="sm"
-						onClick={act(() => api.deleteSession(session.id))}
-					>
-						Delete
-					</Button>
+					{(isOwner || session.creator === me.name) && (
+						<Button
+							variant="ghost"
+							size="sm"
+							onClick={act(() => api.deleteSession(session.id))}
+						>
+							Delete
+						</Button>
+					)}
 				</>
 			}
 		>
@@ -208,12 +212,14 @@ function SessionRow({
 
 /** A project, its file when open, and its sessions. */
 function ProjectRows({
+	me,
 	project,
 	sessions,
 	isOwner,
 	act,
 	reload,
 }: {
+	me: Me;
 	project: Project;
 	sessions: Session[];
 	isOwner: boolean;
@@ -274,6 +280,7 @@ function ProjectRows({
 			{sessions.map((session) => (
 				<SessionRow
 					key={session.id}
+					me={me}
 					session={session}
 					isOwner={isOwner}
 					act={act}
@@ -390,6 +397,7 @@ function GroupPanel({
 			{projects.map((project) => (
 				<ProjectRows
 					key={project.id}
+					me={me}
 					project={project}
 					sessions={sessions.filter(
 						(session) => session.project.id === project.id,
