@@ -67,7 +67,7 @@ function Home() {
 				<div className="flex min-w-0 flex-col gap-6 md:gap-7">
 					<Eyebrow>Multiplayer agents</Eyebrow>
 					<h1 className="font-mono text-4xl leading-[1.1] font-medium tracking-tight text-balance sm:text-5xl">
-						Hey Claude, work with Ben's agent.
+						Code together, each with your own agent.
 					</h1>
 					<p className="max-w-lg text-lg text-pretty text-muted-foreground">
 						Your agent and the agents of the people you work with talk in one
