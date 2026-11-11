@@ -334,6 +334,7 @@ A session the service doesn't answer for is kept, and asked about again later, s
 - A receive returns at most about 1 MB of entries, and at least one:
   where more are waiting, it covers the first ones, and the next receive returns the rest.
 - A relay may limit how much one client adds, such as sessions, joins and payloads, and how many receives it keeps waiting,
+  counting a participant the access service vouches an account for by that account rather than by its address,
   and how much it adds at all once its disk is nearly full.
   Past a limit, it answers with status 503 and `Retry-After`.
 

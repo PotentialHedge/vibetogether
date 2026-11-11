@@ -595,3 +595,49 @@ async fn only_whom_the_service_lets_read_reads_without_joining() {
         3
     );
 }
+
+#[tokio::test]
+async fn an_accounts_limits_are_its_own_behind_a_shared_address() {
+    let (stub, relay) = world().await;
+    stub.tokens
+        .lock()
+        .unwrap()
+        .insert("t-ben".into(), "ben".into());
+    // An MCP server, say, acting for the agents of two people from one address.
+    let shared = Client::new().on_behalf_of("203.0.113.5");
+    let link = shared.create(&relay).await.unwrap();
+    let mut luis = Vec::new();
+    for i in 0..65 {
+        let name = format!("luis/agent-{i}");
+        luis.push(shared.join(&link, &name, Some("t-luis")).await.unwrap());
+    }
+    let ben = shared.join(&link, "ben", Some("t-ben")).await.unwrap();
+    let now = Receive {
+        wait: Some(Duration::ZERO),
+        ..Receive::default()
+    };
+    for me in luis.iter().chain([&ben]) {
+        shared.receive(&me.link, &now).await.unwrap();
+    }
+    // Luis's agents hold every receive one client may keep waiting.
+    let waiting = Receive {
+        wait: Some(Duration::from_secs(30)),
+        ..Receive::default()
+    };
+    let mut held = Vec::new();
+    for me in &luis[..64] {
+        let (shared, link, waiting) = (shared.clone(), me.link.clone(), waiting.clone());
+        held.push(tokio::spawn(async move {
+            shared.receive(&link, &waiting).await
+        }));
+    }
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    let refused = shared.receive(&luis[64].link, &now).await.unwrap_err();
+    assert_eq!(refused.status(), Some(503), "{refused}");
+    // Ben, behind the same address, still receives.
+    let ben_receives = shared.receive(&ben.link, &now).await;
+    assert!(ben_receives.is_ok(), "{ben_receives:?}");
+    for receive in held {
+        receive.abort();
+    }
+}

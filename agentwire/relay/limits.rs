@@ -1,7 +1,10 @@
 //! What one client may take of the relay, so that no one fills its disk or
 //! holds all its connections.
 //!
-//! A client is the address that reached the relay, or, from the relay's own
+//! A client is the account the access service vouches for the participant
+//! acting, where it vouches for one, so that the agents of many people behind
+//! one address, such as an MCP server's or a vendor's, each count as their own.
+//! Otherwise it is the address that reached the relay, or, from the relay's own
 //! machine, the one a proxy there names last in `X-Forwarded-For`. A request
 //! from the machine that names none, or names the machine's loopback, is the
 //! machine's own, such as a service beside the relay, and isn't limited. An IPv6 client is its /64, which one
@@ -28,8 +31,26 @@ const RECEIVES: usize = 64;
 /// forgotten.
 const KEPT: usize = 4096;
 
-/// The client that sent a request, or none where it is the relay's own machine.
-pub fn client(peer: Option<SocketAddr>, headers: &HeaderMap) -> Option<IpAddr> {
+/// Whom a client's limits count against.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum Client {
+    Address(IpAddr),
+    Account(String),
+}
+
+impl Client {
+    /// The client as it acts for `account`, where the access service vouches for one.
+    pub fn acting_for(self, account: Option<&str>) -> Self {
+        account.map_or(self, |account| Self::Account(account.to_owned()))
+    }
+}
+
+/// The client that sent a request, by its address, or none where it is the relay's own machine.
+pub fn client(peer: Option<SocketAddr>, headers: &HeaderMap) -> Option<Client> {
+    address(peer, headers).map(Client::Address)
+}
+
+fn address(peer: Option<SocketAddr>, headers: &HeaderMap) -> Option<IpAddr> {
     let address = match peer {
         Some(peer) if !peer.ip().is_loopback() => peer.ip(),
         _ => headers
@@ -76,7 +97,7 @@ pub fn free(path: &Path) -> Option<u64> {
 
 #[derive(Default)]
 pub struct Limits {
-    clients: HashMap<IpAddr, Usage>,
+    clients: HashMap<Client, Usage>,
 }
 
 struct Usage {
@@ -93,12 +114,12 @@ impl Usage {
 }
 
 impl Limits {
-    fn usage(&mut self, client: IpAddr, now: Instant) -> &mut Usage {
+    fn usage(&mut self, client: &Client, now: Instant) -> &mut Usage {
         if self.clients.len() >= KEPT {
             self.clients
                 .retain(|_, usage| usage.receives > 0 || usage.room(now) < BURST);
         }
-        self.clients.entry(client).or_insert(Usage {
+        self.clients.entry(client.clone()).or_insert(Usage {
             room: BURST,
             at: now,
             receives: 0,
@@ -106,7 +127,7 @@ impl Limits {
     }
 
     /// Takes `bytes` of what `client` may add, or says in how many seconds it may.
-    pub fn take(&mut self, client: IpAddr, bytes: u64) -> Result<(), u64> {
+    pub fn take(&mut self, client: &Client, bytes: u64) -> Result<(), u64> {
         let now = Instant::now();
         let usage = self.usage(client, now);
         let (room, bytes) = (usage.room(now), bytes as f64);
@@ -119,16 +140,16 @@ impl Limits {
     }
 
     /// Gives `client` back `bytes` it was counted for but didn't add.
-    pub fn give_back(&mut self, client: IpAddr, bytes: usize) {
+    pub fn give_back(&mut self, client: &Client, bytes: usize) {
         let now = Instant::now();
-        if let Some(usage) = self.clients.get_mut(&client) {
+        if let Some(usage) = self.clients.get_mut(client) {
             usage.room = (usage.room(now) + bytes as f64).min(BURST);
             usage.at = now;
         }
     }
 
     /// Counts a receive of `client` as waiting, unless it has too many.
-    pub fn wait(&mut self, client: IpAddr) -> bool {
+    pub fn wait(&mut self, client: &Client) -> bool {
         let usage = self.usage(client, Instant::now());
         let room = usage.receives < RECEIVES;
         usage.receives += usize::from(room);
@@ -136,8 +157,8 @@ impl Limits {
     }
 
     /// Counts a receive of `client` as no longer waiting.
-    pub fn waited(&mut self, client: IpAddr) {
-        if let Some(usage) = self.clients.get_mut(&client) {
+    pub fn waited(&mut self, client: &Client) {
+        if let Some(usage) = self.clients.get_mut(client) {
             usage.receives = usage.receives.saturating_sub(1);
         }
     }
@@ -151,6 +172,10 @@ mod tests {
         let mut headers = HeaderMap::new();
         headers.insert("x-forwarded-for", value.parse().unwrap());
         headers
+    }
+
+    fn client(peer: Option<SocketAddr>, headers: &HeaderMap) -> Option<IpAddr> {
+        address(peer, headers)
     }
 
     #[test]
@@ -181,21 +206,27 @@ mod tests {
     #[test]
     fn a_client_adds_its_burst_and_then_waits() {
         let mut limits = Limits::default();
-        let one: IpAddr = "203.0.113.1".parse().unwrap();
-        assert_eq!(limits.take(one, BURST as u64), Ok(()));
-        assert!(limits.take(one, 10 * RATE as u64).unwrap_err() >= 9);
-        assert_eq!(limits.take("203.0.113.2".parse().unwrap(), COST), Ok(()));
+        let one = Client::Address("203.0.113.1".parse().unwrap());
+        assert_eq!(limits.take(&one, BURST as u64), Ok(()));
+        assert!(limits.take(&one, 10 * RATE as u64).unwrap_err() >= 9);
+        let other = Client::Address("203.0.113.2".parse().unwrap());
+        assert_eq!(limits.take(&other, COST), Ok(()));
+        // An account behind the same address counts on its own.
+        let account = one.clone().acting_for(Some("luis"));
+        assert_eq!(account, Client::Account("luis".to_owned()));
+        assert_eq!(limits.take(&account, COST), Ok(()));
+        assert_eq!(one.clone().acting_for(None), one);
     }
 
     #[test]
     fn a_client_keeps_only_so_many_receives_waiting() {
         let mut limits = Limits::default();
-        let one: IpAddr = "203.0.113.1".parse().unwrap();
+        let one = Client::Address("203.0.113.1".parse().unwrap());
         for _ in 0..RECEIVES {
-            assert!(limits.wait(one));
+            assert!(limits.wait(&one));
         }
-        assert!(!limits.wait(one));
-        limits.waited(one);
-        assert!(limits.wait(one));
+        assert!(!limits.wait(&one));
+        limits.waited(&one);
+        assert!(limits.wait(&one));
     }
 }

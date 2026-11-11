@@ -6,7 +6,7 @@ mod limits;
 mod sessions;
 
 use std::borrow::Cow;
-use std::net::{IpAddr, SocketAddr};
+use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
@@ -26,7 +26,7 @@ use serde::Serialize;
 use tokio::time::{sleep, timeout};
 
 use access::{About, Access, Admitted, Credential, Verdict};
-use limits::{COST, Limits};
+use limits::{COST, Client, Limits};
 use sessions::Kept;
 use sessions::{Answer, MAX_NAME, Reading, Receive, Sessions, Ticket, is_name, is_secret};
 
@@ -143,7 +143,7 @@ impl Relay {
 
     /// Lets `client` add a session, a participant or an entry of `bytes`, if
     /// the disk has room for it and the client hasn't added too much lately.
-    fn adds(&self, client: Option<IpAddr>, bytes: usize) -> Result<(), Fail> {
+    fn adds(&self, client: Option<&Client>, bytes: usize) -> Result<(), Fail> {
         let bytes = bytes as u64;
         if let (Some(min_free), Some(database)) = (self.min_free, &self.database)
             && limits::free(database).is_some_and(|free| free < min_free + bytes)
@@ -280,19 +280,20 @@ impl Relay {
     /// Lets the caller act, if the access service lets it be in the session,
     /// with the token it presents now or else what is kept of the one it joined
     /// with; what it is let in with is kept, and so is the account vouched for.
-    /// Answers what the service says about the session, if anything.
+    /// Answers what the service says about the session, if anything, and the account
+    /// vouched for the caller now, if any.
     async fn admit(
         &self,
         session: &str,
         secret: &str,
         token: Option<&str>,
-    ) -> Result<Option<About>, Fail> {
+    ) -> Result<(Option<About>, Option<String>), Fail> {
         let Some(access) = &self.access else {
-            return Ok(None);
+            return Ok((None, None));
         };
         // A link that is no participant's fails as the operation would.
         let Ok((name, kept, vouched)) = self.sessions().credentials(session, secret) else {
-            return Ok(None);
+            return Ok((None, None));
         };
         let credential = token.map_or_else(|| kept.credential(), Credential::Token);
         let verdict = self.verdict(access, session, &name, credential).await;
@@ -305,14 +306,14 @@ impl Relay {
         }
         // Without an answer, it goes on as it was.
         let Some(Verdict::Admitted(said)) = verdict? else {
-            return Ok(None);
+            return Ok((None, vouched));
         };
         let now = keeps(&kept, token, &said);
         if now != kept || said.account != vouched {
             self.sessions()
                 .vouch(session, secret, &now, said.account.as_deref())?;
         }
-        Ok(said.about)
+        Ok((said.about, said.account))
     }
 
     fn sessions(&self) -> MutexGuard<'_, Sessions> {
@@ -323,14 +324,14 @@ impl Relay {
 /// A waiting read, which its caller abandons by going away.
 struct Read<'a> {
     relay: &'a Relay,
-    client: Option<IpAddr>,
+    client: Option<Client>,
     reading: Reading,
 }
 
 impl Drop for Read<'_> {
     fn drop(&mut self) {
         self.relay.sessions().abandon_read(&self.reading);
-        if let Some(client) = self.client {
+        if let Some(client) = &self.client {
             self.relay.limits().waited(client);
         }
     }
@@ -339,14 +340,14 @@ impl Drop for Read<'_> {
 /// A waiting receive, which its caller abandons by going away.
 struct Waiting<'a> {
     relay: &'a Relay,
-    client: Option<IpAddr>,
+    client: Option<Client>,
     ticket: Ticket,
 }
 
 impl Drop for Waiting<'_> {
     fn drop(&mut self) {
         _ = self.relay.sessions().abandon(&self.ticket);
-        if let Some(client) = self.client {
+        if let Some(client) = &self.client {
             self.relay.limits().waited(client);
         }
     }
@@ -509,7 +510,7 @@ fn gone(origin: &str) -> Fail {
     )
 }
 
-async fn route(relay: &Relay, client: Option<IpAddr>, request: Request) -> Result<Response, Fail> {
+async fn route(relay: &Relay, client: Option<Client>, request: Request) -> Result<Response, Fail> {
     let (parts, body) = request.into_parts();
     let origin = origin(&parts.headers);
     let query = parts.uri.query().unwrap_or("");
@@ -524,7 +525,7 @@ async fn route(relay: &Relay, client: Option<IpAddr>, request: Request) -> Resul
         [VERSION, "s"] if parts.method == Method::POST => {
             takes(query, "creating a session", &["owned"])?;
             let owned = param(query, "owned").is_some();
-            relay.adds(client, 0)?;
+            relay.adds(client.as_ref(), 0)?;
             let id = relay.sessions().create(owned)?;
             Ok(text(format!("{origin}/{VERSION}/s/{id}\n"), PLAIN))
         }
@@ -551,7 +552,7 @@ async fn route(relay: &Relay, client: Option<IpAddr>, request: Request) -> Resul
 #[allow(clippy::too_many_arguments)]
 async fn session(
     relay: &Relay,
-    client: Option<IpAddr>,
+    client: Option<Client>,
     id: &str,
     rest: &[&str],
     method: &Method,
@@ -572,11 +573,13 @@ async fn session(
     let get = method == Method::GET;
     let token = bearer(headers);
     // Leaving is always let through, so that nobody is kept in.
-    let about = if !["join", "log"].contains(secret) && operation != ["leave"] {
+    let (about, account) = if !["join", "log"].contains(secret) && operation != ["leave"] {
         relay.admit(id, secret, token.as_deref()).await?
     } else {
-        None
+        (None, None)
     };
+    // A participant's limits count against its account, where one is vouched for.
+    let client = client.map(|client| client.acting_for(account.as_deref()));
     match (*secret, operation) {
         ("log", []) if get => {
             takes(
@@ -588,7 +591,10 @@ async fn session(
         }
         ("join", []) if post => {
             takes(query, "a join", &["as"])?;
-            relay.adds(client, 0)?;
+            // A join with a token counts once the service has said whose it is.
+            if token.is_none() {
+                relay.adds(client.as_ref(), 0)?;
+            }
             let name = param(query, "as");
             let mut account = None;
             let mut about = None;
@@ -611,6 +617,10 @@ async fn session(
                 kept = keeps(&Kept::default(), token.as_deref(), &said);
                 account = said.account;
                 about = said.about;
+            }
+            if token.is_some() {
+                let client = client.map(|client| client.acting_for(account.as_deref()));
+                relay.adds(client.as_ref(), 0)?;
             }
             let take_back = match (&relay.access, name.as_deref(), account.as_deref()) {
                 (Some(access), Some(name), Some(account)) => {
@@ -642,7 +652,7 @@ async fn session(
         }
         (_, ["join"]) if post => {
             takes(query, "joining again", &[])?;
-            relay.adds(client, 0)?;
+            relay.adds(client.as_ref(), 0)?;
             let joined = relay.sessions().rejoin(id, secret, &me)?;
             Ok(json(&agentwire::Joined { about, ..joined }))
         }
@@ -665,7 +675,7 @@ async fn session(
 
 async fn send(
     relay: &Relay,
-    client: Option<IpAddr>,
+    client: Option<Client>,
     id: &str,
     secret: &str,
     headers: &HeaderMap,
@@ -689,14 +699,14 @@ async fn send(
         .map_or(MAX_PAYLOAD, |length| length.min(MAX_PAYLOAD));
     // A refused payload is still read to its end, and kept nowhere, since a
     // client may not see an answer before it has sent everything.
-    if let Err(refused) = relay.adds(client, counted) {
+    if let Err(refused) = relay.adds(client.as_ref(), counted) {
         _ = read_at_most(body, 0).await;
         return Err(refused);
     }
     let payload = read_at_most(body, MAX_PAYLOAD)
         .await?
         .ok_or_else(|| fail(413, format!("a payload is at most {MAX_PAYLOAD} bytes")))?;
-    if let Some(client) = client {
+    if let Some(client) = &client {
         relay
             .limits()
             .give_back(client, counted.saturating_sub(payload.len()));
@@ -734,21 +744,21 @@ async fn read_at_most(mut body: Body, limit: usize) -> Result<Option<Vec<u8>>, F
 /// A read of the session's entries without joining it, as the spec's "Read" says.
 async fn read(
     relay: &Relay,
-    client: Option<IpAddr>,
+    client: Option<Client>,
     id: &str,
     token: Option<&str>,
     query: &str,
 ) -> Result<Response, Fail> {
     relay.may_read(id, token).await?;
     let (receive, wait) = receive_of(query)?;
-    if let Some(client) = client
+    if let Some(client) = &client
         && !relay.limits().wait(client)
     {
         return Err(busy("this client has too many receives waiting", 60));
     }
     let started = relay.sessions().read(id, receive);
     let (reading, mut answered) = started.inspect_err(|_| {
-        if let Some(client) = client {
+        if let Some(client) = &client {
             relay.limits().waited(client);
         }
     })?;
@@ -824,20 +834,20 @@ fn receive_of(query: &str) -> Result<(Receive, Option<Duration>), Fail> {
 
 async fn receive(
     relay: &Relay,
-    client: Option<IpAddr>,
+    client: Option<Client>,
     id: &str,
     secret: &str,
     query: &str,
 ) -> Result<Response, Fail> {
     let (receive, wait) = receive_of(query)?;
-    if let Some(client) = client
+    if let Some(client) = &client
         && !relay.limits().wait(client)
     {
         return Err(busy("this client has too many receives waiting", 60));
     }
     let started = relay.sessions().receive(id, secret, receive);
     let (ticket, mut answered) = started.inspect_err(|_| {
-        if let Some(client) = client {
+        if let Some(client) = &client {
             relay.limits().waited(client);
         }
     })?;
