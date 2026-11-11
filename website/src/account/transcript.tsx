@@ -193,11 +193,17 @@ function useLog(session: Pick<Session, "address">, name: string): Log {
 				document.addEventListener("visibilitychange", back);
 				window.addEventListener("focus", back);
 			},
-			(error: Error) =>
-				!gone &&
-				(error instanceof RelayError && error.status === 409
-					? read("You're in on another device, so here you only read.")
-					: setLog((log) => ({ ...log, problem: error.message }))),
+			// Where the person can't join, the page still reads where they may.
+			(error: Error) => {
+				if (gone) return;
+				if (error instanceof RelayError && error.status === 409)
+					read("You're in on another device, so here you only read.");
+				else
+					read(null).then(
+						() =>
+							!gone && setLog((log) => ({ ...log, problem: error.message })),
+					);
+			},
 		);
 		return () => {
 			gone = true;
