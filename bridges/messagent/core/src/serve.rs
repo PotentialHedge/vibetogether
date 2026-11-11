@@ -197,7 +197,10 @@ impl Accounts {
         let mut response = result.map_err(|error| anyhow!("{path}: {error}"))?;
         let status = response.status().as_u16();
         let text = response.body_mut().read_to_string().unwrap_or_default();
-        Ok((status, serde_json::from_str(&text).unwrap_or(Value::String(text))))
+        Ok((
+            status,
+            serde_json::from_str(&text).unwrap_or(Value::String(text)),
+        ))
     }
 
     /// Fails on any status but `ok` and the ones that mean gone, which are `None`.
@@ -285,7 +288,12 @@ impl Accounts {
 
     /// Whether the room still is.
     pub fn room(&self, grant: &str, room: &str) -> Result<bool> {
-        let answer = self.call("GET", &format!("/api/bridges/self/rooms/{room}"), Some(grant), None)?;
+        let answer = self.call(
+            "GET",
+            &format!("/api/bridges/self/rooms/{room}"),
+            Some(grant),
+            None,
+        )?;
         Ok(self.expect("asking about the room", answer, 200)?.is_some())
     }
 
@@ -297,12 +305,18 @@ impl Accounts {
             Some(grant),
             Some(json!({ "about": about })),
         )?;
-        self.expect("saying what the room is", answer, 204).map(drop)
+        self.expect("saying what the room is", answer, 204)
+            .map(drop)
     }
 
     /// Stops mirroring the room.
     pub fn remove(&self, grant: &str, room: &str) -> Result<()> {
-        let answer = self.call("DELETE", &format!("/api/bridges/self/rooms/{room}"), Some(grant), None)?;
+        let answer = self.call(
+            "DELETE",
+            &format!("/api/bridges/self/rooms/{room}"),
+            Some(grant),
+            None,
+        )?;
         self.expect("removing the room", answer, 204).map(drop)
     }
 
@@ -586,7 +600,10 @@ impl Service {
             .collect();
         for chat in theirs {
             self.end(chat, false);
-            self.tell(chat, "This chat is no longer bridged: its link was revoked.");
+            self.tell(
+                chat,
+                "This chat is no longer bridged: its link was revoked.",
+            );
         }
     }
 
@@ -668,7 +685,10 @@ impl Service {
     fn still(&self, bridged: &Bridged) -> bool {
         let Some(grant) = self.grant(bridged) else {
             self.end(bridged.chat, false);
-            self.tell(bridged.chat, "This chat is no longer bridged: its link was revoked.");
+            self.tell(
+                bridged.chat,
+                "This chat is no longer bridged: its link was revoked.",
+            );
             return false;
         };
         match self.accounts.room(&grant, &bridged.link.room) {
@@ -830,7 +850,9 @@ impl Service {
         if told.is_some() && told == members {
             return Ok(());
         }
-        let grant = self.grant(bridged).context("whoever bridged the chat unlinked")?;
+        let grant = self
+            .grant(bridged)
+            .context("whoever bridged the chat unlinked")?;
         self.accounts.describe(&grant, &link.room, &about)?;
         bridged.update(|place| place.members = members)
     }
@@ -924,7 +946,10 @@ impl Service {
                     return Ok(());
                 }
                 Err(error) => {
-                    eprintln!("messagent serve: asking about {}'s OTP failed: {error:#}", from.id);
+                    eprintln!(
+                        "messagent serve: asking about {}'s OTP failed: {error:#}",
+                        from.id
+                    );
                     interval = (interval * 2).min(Duration::from_secs(60));
                 }
             }
@@ -934,17 +959,22 @@ impl Service {
             .account(&grant)?
             .context("the new grant doesn't count")?;
         // A Telegram account links one account: one it linked before is let go there.
-        let before = self
-            .linked
-            .lock()
-            .expect("no holder panics")
-            .insert(from.id, Linked { login: login.clone(), grant });
+        let before = self.linked.lock().expect("no holder panics").insert(
+            from.id,
+            Linked {
+                login: login.clone(),
+                grant,
+            },
+        );
         self.save_linked()?;
         if let Some(before) = before
             && before.login != login
             && let Err(error) = self.accounts.revoke(&before.grant)
         {
-            eprintln!("messagent serve: can't revoke {}'s grant: {error:#}", before.login);
+            eprintln!(
+                "messagent serve: can't revoke {}'s grant: {error:#}",
+                before.login
+            );
         }
         self.tell(chat, &format!("Linked as {login}."));
         if self.bridged(chat).is_none() {
@@ -966,13 +996,19 @@ impl Service {
                 return;
             }
             Err(error) => {
-                eprintln!("messagent serve: can't list {}'s sessions: {error:#}", linked.login);
+                eprintln!(
+                    "messagent serve: can't list {}'s sessions: {error:#}",
+                    linked.login
+                );
                 self.tell(chat, "That failed on our side. /start tries again.");
                 return;
             }
         };
         if sessions.is_empty() {
-            self.tell(chat, &format!("You have no session yet: make one at {SITE}, then /start."));
+            self.tell(
+                chat,
+                &format!("You have no session yet: make one at {SITE}, then /start."),
+            );
             return;
         }
         let buttons: Vec<(String, String)> = sessions
@@ -980,7 +1016,10 @@ impl Service {
             .take(MAX_CHOICES)
             .map(|session| {
                 (
-                    label(&format!("{} · {}", session.name, session.project.name), LABEL),
+                    label(
+                        &format!("{} · {}", session.name, session.project.name),
+                        LABEL,
+                    ),
                     format!("b:{}", session.id),
                 )
             })
@@ -1006,7 +1045,10 @@ impl Service {
         };
         let (Some(message), Some(session)) = (
             &query.message,
-            query.data.as_deref().and_then(|data| data.strip_prefix("b:")),
+            query
+                .data
+                .as_deref()
+                .and_then(|data| data.strip_prefix("b:")),
         ) else {
             return answer(None);
         };
@@ -1015,7 +1057,9 @@ impl Service {
             return answer(None);
         }
         let Some(linked) = self.linked(from.id) else {
-            return answer(Some("Link your account first: /start in a private chat with me."));
+            return answer(Some(
+                "Link your account first: /start in a private chat with me.",
+            ));
         };
         let chat = message.chat.id;
         let private = message.chat.kind == "private";
@@ -1096,7 +1140,10 @@ impl Service {
             return;
         };
         if let Err(error) = self.accounts.revoke(&linked.grant) {
-            eprintln!("messagent serve: can't revoke {}'s grant: {error:#}", linked.login);
+            eprintln!(
+                "messagent serve: can't revoke {}'s grant: {error:#}",
+                linked.login
+            );
             self.tell(chat, "That failed on our side. Try again.");
             return;
         }
@@ -1152,7 +1199,9 @@ impl Service {
                         self.end(chat, true);
                         self.tell(chat, "Bridge ended. /start bridges it again.");
                     }
-                    Some(_) => self.tell(chat, "Only whoever bridged it, or a group admin, ends it."),
+                    Some(_) => {
+                        self.tell(chat, "Only whoever bridged it, or a group admin, ends it.")
+                    }
                     None => self.tell(chat, "This chat isn't bridged."),
                 }
                 return;
@@ -1550,7 +1599,12 @@ pub fn serve(settings: Settings) -> Result<()> {
         write_private(&offset_file, &serde_json::to_vec(&offset)?)?;
         let updates: Vec<Update> = match service.bot.get_updates_of(
             offset.offset,
-            &["message", "edited_message", "my_chat_member", "callback_query"],
+            &[
+                "message",
+                "edited_message",
+                "my_chat_member",
+                "callback_query",
+            ],
         ) {
             Ok(updates) => {
                 delay = Duration::from_secs(1);

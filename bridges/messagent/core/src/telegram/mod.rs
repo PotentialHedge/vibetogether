@@ -4,7 +4,10 @@ mod bot;
 
 use std::{fs, io::ErrorKind, path::PathBuf, thread, time::Duration};
 
-pub use bot::{API, Bot, CallbackQuery, Chat, ChatMember, MESSAGE_LIMIT, Message, Refusal, Update, Upload, User};
+pub use bot::{
+    API, Bot, CallbackQuery, Chat, ChatMember, MESSAGE_LIMIT, Message, Refusal, Update, Upload,
+    User,
+};
 
 use anyhow::{Context, Result};
 use jiff::{SignedDuration, Timestamp};

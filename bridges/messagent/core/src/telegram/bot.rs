@@ -372,7 +372,12 @@ impl Bot {
     }
 
     /// Sends a text with a column of buttons under it, each a label and what it carries.
-    pub fn send_buttons(&self, chat: i64, text: &str, buttons: &[(String, String)]) -> Result<Message> {
+    pub fn send_buttons(
+        &self,
+        chat: i64,
+        text: &str,
+        buttons: &[(String, String)],
+    ) -> Result<Message> {
         let keyboard: Vec<Value> = buttons
             .iter()
             .map(|(label, data)| json!([{ "text": label, "callback_data": data }]))
@@ -381,7 +386,10 @@ impl Bot {
             chat,
             Map::from_iter([
                 ("text".into(), text.into()),
-                ("reply_markup".into(), json!({ "inline_keyboard": keyboard })),
+                (
+                    "reply_markup".into(),
+                    json!({ "inline_keyboard": keyboard }),
+                ),
             ]),
         )
     }

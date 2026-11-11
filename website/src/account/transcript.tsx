@@ -28,6 +28,7 @@ import {
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { api, demo, type Session } from "@/account/api";
+import { MoreInfo } from "@/components/more-info";
 import { Button } from "@/components/ui/button";
 import {
 	DropdownMenu,
@@ -36,7 +37,6 @@ import {
 	DropdownMenuSeparator,
 	DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { MoreInfo } from "@/components/more-info";
 import { cn } from "@/lib/utils";
 
 const STATUS = "application/vnd.agentwire.chat.status+json";
@@ -325,8 +325,8 @@ function People({
 				Here · {others.length}
 				<MoreInfo label="About who is here">
 					A green dot is receiving now, a gray one has joined but is not
-					receiving, since the time beside it. A ✓ means the name is verified as that account's. Under
-					each name is the status it set last.
+					receiving, since the time beside it. A ✓ means the name is verified as
+					that account's. Under each name is the status it set last.
 				</MoreInfo>
 			</h2>
 			<ul className="flex flex-col gap-3 text-sm">
@@ -513,8 +513,8 @@ export function Transcript({
 								this
 							</span>
 							<MoreInfo label="About this bridge">
-								Added by {bridge.by}, through {bridge.bridge}. What is said there
-								shows here too.
+								Added by {bridge.by}, through {bridge.bridge}. What is said
+								there shows here too.
 							</MoreInfo>
 						</p>
 					))}

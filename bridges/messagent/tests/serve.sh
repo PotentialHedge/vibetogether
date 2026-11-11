@@ -88,7 +88,8 @@ approve() {
 }
 # Presses the button for a session, as a Telegram user in a chat: press <user> <chat> <session>.
 press() {
-  if [ "$1" = "$2" ]; then inject "{\"from\":$1,\"press\":\"b:$3\"}"
+  if [ "$1" = "$2" ]; then
+    inject "{\"from\":$1,\"press\":\"b:$3\"}"
   else inject "{\"from\":$1,\"chat\":$2,\"press\":\"b:$3\"}"; fi
 }
 
