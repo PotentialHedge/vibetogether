@@ -2,7 +2,7 @@
  * open group's projects, their sessions and its members in the sidebar. */
 
 import { Ellipsis, LogOut, Plus, Settings, X } from "lucide-react";
-import { type ReactNode, useState } from "react";
+import { type ReactNode, useEffect, useState } from "react";
 import {
 	api,
 	type Dm,
@@ -15,6 +15,15 @@ import {
 } from "@/account/api";
 import { Person } from "@/account/parts";
 import { Button } from "@/components/ui/button";
+import {
+	Dialog,
+	DialogClose,
+	DialogContent,
+	DialogDescription,
+	DialogFooter,
+	DialogHeader,
+	DialogTitle,
+} from "@/components/ui/dialog";
 import {
 	DropdownMenu,
 	DropdownMenuContent,
@@ -54,47 +63,87 @@ export function CopySessionPrompt({ session }: { session: { id: string } }) {
 	);
 }
 
-/** A name typed in place, made on Enter, dropped on Escape or leaving it. */
-function NameInPlace({
+/** Naming something new, or changing what it holds, in a small dialog: made
+ * with Enter or the button, dropped with Escape or Cancel. */
+function NameDialog({
+	open,
+	onOpenChange,
+	title,
+	description,
+	label,
 	placeholder,
 	initial = "",
 	onName,
-	onDone,
 }: {
+	open: boolean;
+	onOpenChange: (open: boolean) => void;
+	title: string;
+	description?: ReactNode;
+	/** What the button says, such as "Create". */
+	label: string;
 	placeholder: string;
 	/** What it starts with, which also lets it be emptied. */
 	initial?: string;
 	onName: (name: string) => Promise<void>;
-	onDone: () => void;
 }) {
 	const [name, setName] = useState(initial);
 	const [problem, setProblem] = useState<string | null>(null);
+	const [busy, setBusy] = useState(false);
+	useEffect(() => {
+		if (open) {
+			setName(initial);
+			setProblem(null);
+		}
+	}, [open, initial]);
+	const chosen = name.trim();
 	return (
-		<form
-			className="flex flex-col gap-1 px-2 py-1"
-			onSubmit={async (event) => {
-				event.preventDefault();
-				const chosen = name.trim();
-				if (!chosen && !initial) return onDone();
-				try {
-					await onName(chosen);
-					onDone();
-				} catch (error) {
-					setProblem(error instanceof Error ? error.message : String(error));
-				}
-			}}
-		>
-			<Input
-				autoFocus
-				className="h-7 font-mono"
-				placeholder={placeholder}
-				value={name}
-				onChange={(event) => setName(event.target.value)}
-				onKeyDown={(event) => event.key === "Escape" && onDone()}
-				onBlur={() => (!name.trim() || name === initial) && onDone()}
-			/>
-			{problem && <span className="text-xs text-destructive">{problem}</span>}
-		</form>
+		<Dialog open={open} onOpenChange={onOpenChange}>
+			<DialogContent>
+				<form
+					className="flex flex-col gap-4"
+					onSubmit={async (event) => {
+						event.preventDefault();
+						if (!chosen && !initial) return;
+						setBusy(true);
+						setProblem(null);
+						try {
+							await onName(chosen);
+							onOpenChange(false);
+						} catch (error) {
+							setProblem(
+								error instanceof Error ? error.message : String(error),
+							);
+						} finally {
+							setBusy(false);
+						}
+					}}
+				>
+					<DialogHeader>
+						<DialogTitle>{title}</DialogTitle>
+						{description && (
+							<DialogDescription>{description}</DialogDescription>
+						)}
+					</DialogHeader>
+					<Input
+						autoFocus
+						className="font-mono"
+						placeholder={placeholder}
+						value={name}
+						maxLength={100}
+						onChange={(event) => setName(event.target.value)}
+					/>
+					{problem && <p className="text-sm text-destructive">{problem}</p>}
+					<DialogFooter>
+						<DialogClose render={<Button variant="ghost" type="button" />}>
+							Cancel
+						</DialogClose>
+						<Button type="submit" disabled={busy || (!chosen && !initial)}>
+							{label}
+						</Button>
+					</DialogFooter>
+				</form>
+			</DialogContent>
+		</Dialog>
 	);
 }
 
@@ -178,30 +227,29 @@ export function Rail({
 					<span key="apart" className="h-px w-8 shrink-0 bg-border" />
 				),
 			])}
-			{adding ? (
-				<div className="w-56 self-start">
-					<NameInPlace
-						placeholder="group name"
-						onName={async (name) => {
-							const group = await api.createGroup(name);
-							await reload();
-							onOpen(group.id);
-						}}
-						onDone={() => setAdding(false)}
-					/>
-				</div>
-			) : (
-				<Button
-					variant="ghost"
-					size="icon-lg"
-					title="New group"
-					aria-label="New group"
-					className="rounded-xl border border-dashed"
-					onClick={() => setAdding(true)}
-				>
-					<Plus />
-				</Button>
-			)}
+			<Button
+				variant="ghost"
+				size="icon-lg"
+				title="New group"
+				aria-label="New group"
+				className="size-10 shrink-0 rounded-xl border border-dashed"
+				onClick={() => setAdding(true)}
+			>
+				<Plus />
+			</Button>
+			<NameDialog
+				open={adding}
+				onOpenChange={setAdding}
+				title="New group"
+				description="A group is people working together, with its projects. You can add friends to it once it exists."
+				label="Create group"
+				placeholder="Potential Hedge"
+				onName={async (name) => {
+					const group = await api.createGroup(name);
+					await reload();
+					onOpen(group.id);
+				}}
+			/>
 			<DropdownMenu>
 				<DropdownMenuTrigger
 					render={
@@ -324,38 +372,37 @@ function ProjectItem({
 					</DropdownMenuContent>
 				</DropdownMenu>
 			</div>
-			{linking ? (
-				<div className="pl-3">
-					<NameInPlace
-						placeholder="owner/repo, owner/repo"
-						initial={project.repos.map(repoName).join(", ")}
-						onName={async (repos) => {
-							await api.changeProject(project.id, {
-								repos: repos.split(/[\s,]+/).filter(Boolean),
-							});
-							await reload();
-						}}
-						onDone={() => setLinking(false)}
-					/>
-				</div>
-			) : (
-				project.repos.length > 0 && (
-					<ul className="flex flex-col pb-1 pl-5">
-						{project.repos.map((repo) => (
-							<li key={repo}>
-								<a
-									href={repo}
-									target="_blank"
-									rel="noreferrer"
-									title="Where this project's context lives"
-									className="block truncate font-mono text-xs text-muted-foreground/80 hover:text-foreground"
-								>
-									{repoName(repo)}
-								</a>
-							</li>
-						))}
-					</ul>
-				)
+			<NameDialog
+				open={linking}
+				onOpenChange={setLinking}
+				title={`GitHub repos of ${project.name}`}
+				description="Where the project's context lives. Agents that join its sessions are told of them. Separate several with commas."
+				label="Save"
+				placeholder="owner/repo, owner/repo"
+				initial={project.repos.map(repoName).join(", ")}
+				onName={async (repos) => {
+					await api.changeProject(project.id, {
+						repos: repos.split(/[\s,]+/).filter(Boolean),
+					});
+					await reload();
+				}}
+			/>
+			{project.repos.length > 0 && (
+				<ul className="flex flex-col pb-1 pl-5">
+					{project.repos.map((repo) => (
+						<li key={repo}>
+							<a
+								href={repo}
+								target="_blank"
+								rel="noreferrer"
+								title="Where this project's context lives"
+								className="block truncate font-mono text-xs text-muted-foreground/80 hover:text-foreground"
+							>
+								{repoName(repo)}
+							</a>
+						</li>
+					))}
+				</ul>
 			)}
 			<ul className="flex flex-col">
 				{sessions.map((session) => (
@@ -374,20 +421,31 @@ function ProjectItem({
 						</button>
 					</li>
 				))}
-				{adding && (
-					<li className="pl-3">
-						<NameInPlace
-							placeholder="session name"
-							onName={async (name) => {
-								const session = await api.createSession(project.id, name);
-								await reload();
-								onSession(session.id);
-							}}
-							onDone={() => setAdding(false)}
-						/>
+				{sessions.length === 0 && (
+					<li>
+						<button
+							type="button"
+							onClick={() => setAdding(true)}
+							className="flex h-8 w-full items-center rounded-md pr-2 pl-5 text-left text-sm text-muted-foreground/70 hover:text-foreground"
+						>
+							+ new session
+						</button>
 					</li>
 				)}
 			</ul>
+			<NameDialog
+				open={adding}
+				onOpenChange={setAdding}
+				title={`New session in ${project.name}`}
+				description="A session is where you and your agents talk. Its group's members and their agents can join it."
+				label="Create session"
+				placeholder="session name"
+				onName={async (name) => {
+					const session = await api.createSession(project.id, name);
+					await reload();
+					onSession(session.id);
+				}}
+			/>
 		</li>
 	);
 }
@@ -572,20 +630,26 @@ export function Sidebar({
 						/>
 					))}
 				</ul>
-				{adding && (
-					<NameInPlace
-						placeholder="project name"
-						onName={async (name) => {
-							await api.createProject(group.id, name);
-							await reload();
-						}}
-						onDone={() => setAdding(false)}
-					/>
-				)}
-				{projects.length === 0 && !adding && (
-					<p className="px-2 py-1 text-sm text-muted-foreground">
-						No project yet.
-					</p>
+				<NameDialog
+					open={adding}
+					onOpenChange={setAdding}
+					title={`New project in ${group.name}`}
+					description="A project holds sessions, and can point at the GitHub repos where its context lives."
+					label="Create project"
+					placeholder="project name"
+					onName={async (name) => {
+						await api.createProject(group.id, name);
+						await reload();
+					}}
+				/>
+				{projects.length === 0 && (
+					<div className="flex flex-col items-start gap-2 px-2 py-2 text-sm text-muted-foreground">
+						<p>No project yet. A project holds sessions.</p>
+						<Button variant="outline" size="sm" onClick={() => setAdding(true)}>
+							<Plus />
+							New project
+						</Button>
+					</div>
 				)}
 			</div>
 			<Members me={me} group={group} friends={friends} act={act} />
