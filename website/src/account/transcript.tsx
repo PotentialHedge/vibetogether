@@ -325,7 +325,7 @@ function People({
 				Here · {others.length}
 				<MoreInfo label="About who is here">
 					A green dot is receiving now, a gray one has joined but is not
-					receiving. A ✓ means the name is verified as that account's. Under
+					receiving, since the time beside it. A ✓ means the name is verified as that account's. Under
 					each name is the status it set last.
 				</MoreInfo>
 			</h2>
@@ -344,8 +344,15 @@ function People({
 							}
 						/>
 						<span className="flex min-w-0 flex-col gap-0.5">
-							<span className="truncate">
-								<Name name={name} account={state.account} />
+							<span className="flex min-w-0 items-baseline gap-2">
+								<span className="truncate">
+									<Name name={name} account={state.account} />
+								</span>
+								{!state.receiving && state.since && (
+									<span className="shrink-0 font-mono text-xs tabular-nums text-muted-foreground">
+										{clock.format(new Date(state.since))}
+									</span>
+								)}
 							</span>
 							{status.get(name) && (
 								<span className="text-pretty text-muted-foreground">
