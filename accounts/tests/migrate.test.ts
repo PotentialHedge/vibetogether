@@ -60,18 +60,18 @@ test("an existing room becomes a session with the same address, open to its memb
 			.map((r) => ({ ...r })),
 		[{ id: "s_1", secret: "secret" }],
 	);
-	// Its members and its owner make a group, which the owner owns.
+	// Its members and its owner make a group.
 	assert.deepEqual(
 		db
 			.prepare(
-				`SELECT g.owner, g.name, m.user FROM owned_session s JOIN project p ON p.id = s.project
+				`SELECT g.person, g.name, m.user FROM owned_session s JOIN project p ON p.id = s.project
 				 JOIN "group" g ON g.id = p."group" JOIN group_member m ON m."group" = g.id ORDER BY m.user`,
 			)
 			.all()
 			.map((r) => ({ ...r })),
 		[
-			{ owner: "a", name: "ben", user: "a" },
-			{ owner: "a", name: "ben", user: "b" },
+			{ person: null, name: "ben", user: "a" },
+			{ person: null, name: "ben", user: "b" },
 		],
 	);
 	assert.equal(

@@ -102,12 +102,11 @@ test("every session goes into a project of a group of exactly the people who cou
 		app: string | null;
 		group: string;
 		groupName: string;
-		owner: string;
-		own: number;
+		person: string | null;
 	};
 	const placed = rows(
 		`SELECT s.id, s.secret, p.id AS project, p.name AS projectName, p.app, g.id AS "group",
-		 g.name AS groupName, g.owner, g.own FROM owned_session s JOIN project p ON p.id = s.project
+		 g.name AS groupName, g.person FROM owned_session s JOIN project p ON p.id = s.project
 		 JOIN "group" g ON g.id = p."group" ORDER BY s.created`,
 	) as Placed[];
 	const by = new Map(placed.map((s) => [s.id, s]));
@@ -130,15 +129,13 @@ test("every session goes into a project of a group of exactly the people who cou
 		assert.deepEqual(people, before.get(s.id), s.id);
 	}
 	const get = (id: string) => by.get(id) as Placed;
-	assert.equal(get("s_agents").own, 1);
-	assert.equal(get("s_agents").owner, "u-tristangabl");
-	assert.equal(get("s_vt").own, 1);
+	assert.equal(get("s_agents").person, "u-tristangabl");
+	assert.equal(get("s_vt").person, "u-luiswirth");
 	assert.equal(get("s_vt").projectName, "lwirth-vt");
 	assert.equal(get("s_tg").group, get("s_vt").group);
 	assert.equal(get("s_tg").app, "messagent");
 	assert.equal(get("s_tg").projectName, "messagent");
-	assert.equal(get("s_ph").own, 0);
-	assert.equal(get("s_ph").owner, "u-luiswirth");
+	assert.equal(get("s_ph").person, null);
 	assert.equal(get("s_ph").groupName, "potentialhedge");
 	assert.equal(get("s_ph").projectName, "potentialhedge");
 	assert.equal(get("s_ph2").group, get("s_ph").group);
@@ -153,7 +150,7 @@ test("every session goes into a project of a group of exactly the people who cou
 	assert.deepEqual(
 		rows(
 			`SELECT g.name, group_concat(m.user) AS people FROM "group" g JOIN group_member m ON m."group" = g.id
-			 WHERE g.own = 1 GROUP BY g.id ORDER BY g.name`,
+			 WHERE g.person IS NOT NULL GROUP BY g.id ORDER BY g.name`,
 		),
 		[
 			{ name: "benedict-armstrong", people: "u-benedict-armstrong" },

@@ -78,12 +78,12 @@ test("each room becomes a session with the same address, its members' only, and 
 	// s_1's owner and member make a group; s_2, the owner's alone, goes into the owner's own.
 	assert.deepEqual(
 		rows(
-			`SELECT s.id, g.own, group_concat(m.user) AS people FROM owned_session s JOIN project p ON p.id = s.project
+			`SELECT s.id, g.person, group_concat(m.user) AS people FROM owned_session s JOIN project p ON p.id = s.project
 			 JOIN "group" g ON g.id = p."group" JOIN group_member m ON m."group" = g.id GROUP BY s.id ORDER BY s.id`,
 		),
 		[
-			{ id: "s_1", own: 0, people: "a,b" },
-			{ id: "s_2", own: 1, people: "a" },
+			{ id: "s_1", person: null, people: "a,b" },
+			{ id: "s_2", person: "a", people: "a" },
 		],
 	);
 	assert.deepEqual(rows('SELECT "from", "to" FROM friend'), [

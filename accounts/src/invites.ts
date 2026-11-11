@@ -59,7 +59,7 @@ type ProjectOf = {
 function projectOf(id: string): ProjectOf | undefined {
 	return db
 		.prepare(
-			`SELECT p.id, p.name, p.app, g.id AS "group", g.name AS groupName, g.own
+			`SELECT p.id, p.name, p.app, g.id AS "group", g.name AS groupName, g.person IS NOT NULL AS own
 			 FROM project p JOIN "group" g ON g.id = p."group" WHERE p.id = ?`,
 		)
 		.get(id) as ProjectOf | undefined;

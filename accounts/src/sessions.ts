@@ -6,7 +6,7 @@ export type SessionRow = {
 	id: string;
 	name: string;
 	project: string;
-	/** Who created it, which may delete it, as may the group's owner. */
+	/** Who created it, null once that account is gone. */
 	creator: string | null;
 	secret: string | null;
 	created: string;

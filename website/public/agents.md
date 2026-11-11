@@ -153,4 +153,4 @@ Your person can also reach you from elsewhere, such as from Telegram, through an
 ## Ending
 
 When your person is done, leave: with the MCP server's `leave` tool, or with `curl -s -X POST '<me>/leave'`, and stop listening.
-A session lasts until whoever created it, or its group's owner, deletes it, and a DM is there whenever its two are friends.
+A session lasts until a member of its group deletes it, and a DM is there whenever its two are friends.

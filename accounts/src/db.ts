@@ -89,16 +89,15 @@ export function migrate(): void {
 		}
 	}
 	db.exec(`
-		-- People. "own" marks the owner's own group, which holds them alone and always exists.
+		-- People, as equals: a group has no owner, Luis's decision (2026-11-10, "let's go flat").
+		-- "person" is set only on a person's own group, which holds them alone and lives as long as they do.
 		CREATE TABLE IF NOT EXISTS "group" (
 			id TEXT PRIMARY KEY,
 			name TEXT NOT NULL,
-			owner TEXT NOT NULL REFERENCES user(id) ON DELETE CASCADE,
-			own INTEGER NOT NULL DEFAULT 0,
+			person TEXT UNIQUE REFERENCES user(id) ON DELETE CASCADE,
 			created TEXT NOT NULL
 		);
-		CREATE UNIQUE INDEX IF NOT EXISTS group_own ON "group" (owner) WHERE own = 1;
-		-- Everyone in a group, its owner included.
+		-- Everyone in a group.
 		CREATE TABLE IF NOT EXISTS group_member (
 			"group" TEXT NOT NULL REFERENCES "group"(id) ON DELETE CASCADE,
 			user TEXT NOT NULL REFERENCES user(id) ON DELETE CASCADE,
@@ -125,7 +124,7 @@ export function migrate(): void {
 		);
 		-- "secret" is the secret part of the session's address on the relay.
 		-- Only its group's members and their agents join it.
-		-- "creator" is who created it, who with the group's owner may delete it.
+		-- "creator" is who created it.
 		CREATE TABLE IF NOT EXISTS owned_session (
 			id TEXT PRIMARY KEY,
 			name TEXT NOT NULL,
@@ -210,6 +209,8 @@ export function migrate(): void {
 			expires TEXT NOT NULL
 		);
 	`);
+	// Databases from before groups were flat, whose groups each had an owner.
+	if (hasColumn("group", "owner")) flattenGroups();
 	for (const { id } of db.prepare("SELECT id FROM user").all() as {
 		id: string;
 	}[])
@@ -261,18 +262,52 @@ export function dmOf(x: string, y: string): string {
 	).id;
 }
 
+/**
+ * Rebuilds `group` without its owner, which SQLite can't drop as it is a foreign key: an own group
+ * keeps its person, and every other group, its members alone.
+ */
+function flattenGroups(): void {
+	db.exec("PRAGMA foreign_keys = OFF");
+	db.exec("BEGIN");
+	try {
+		db.exec(`
+			CREATE TABLE group_flat (
+				id TEXT PRIMARY KEY,
+				name TEXT NOT NULL,
+				person TEXT UNIQUE REFERENCES user(id) ON DELETE CASCADE,
+				created TEXT NOT NULL
+			);
+			INSERT INTO group_flat (id, name, person, created)
+				SELECT id, name, CASE WHEN own = 1 THEN owner END, created FROM "group";
+			DROP TABLE "group";
+			ALTER TABLE group_flat RENAME TO "group";
+		`);
+		const broken = db.prepare("PRAGMA foreign_key_check").all();
+		if (broken.length)
+			throw new Error(
+				`flattening groups broke references: ${JSON.stringify(broken)}`,
+			);
+		db.exec("COMMIT");
+	} catch (error) {
+		db.exec("ROLLBACK");
+		throw error;
+	} finally {
+		db.exec("PRAGMA foreign_keys = ON");
+	}
+}
+
 /** The id of the person's own group, made where it doesn't exist yet. */
 export function ownGroupOf(user: string): string {
-	const own = db
-		.prepare(`SELECT id FROM "group" WHERE owner = ? AND own = 1`)
-		.get(user) as { id: string } | undefined;
+	const own = db.prepare(`SELECT id FROM "group" WHERE person = ?`).get(user) as
+		| { id: string }
+		| undefined;
 	if (own) return own.id;
 	const id = newId("g");
 	const login = db.prepare("SELECT login FROM user WHERE id = ?").get(user) as
 		| { login: string }
 		| undefined;
 	db.prepare(
-		`INSERT INTO "group" (id, name, owner, own, created) VALUES (?, ?, ?, 1, ?)`,
+		`INSERT INTO "group" (id, name, person, created) VALUES (?, ?, ?, ?)`,
 	).run(id, login?.login ?? user, user, new Date().toISOString());
 	db.prepare(`INSERT INTO group_member ("group", user) VALUES (?, ?)`).run(
 		id,
@@ -298,7 +333,7 @@ export function appProjectOf(user: string, app: string): string {
 /**
  * Moves every session into a project, keeping exactly who may join it: one of the owner's
  * alone into the owner's own group, one with members into a group of exactly its owner and its
- * members, owned by its owner and shared by every session with the same people, and an app's into
+ * members, shared by every session with the same people, and an app's into
  * its app's project. Each session but an app's gets a project of its own, named after it.
  * Its owner becomes its creator.
  * A session of an app whose grant is gone was already ended, and goes.
@@ -359,8 +394,8 @@ function intoGroups(): void {
 				else {
 					group = newId("g");
 					db.prepare(
-						`INSERT INTO "group" (id, name, owner, created) VALUES (?, ?, ?, ?)`,
-					).run(group, session.name, session.owner, now);
+						`INSERT INTO "group" (id, name, created) VALUES (?, ?, ?)`,
+					).run(group, session.name, now);
 					for (const user of [session.owner, ...members])
 						db.prepare(
 							`INSERT INTO group_member ("group", user) VALUES (?, ?)`,
@@ -414,7 +449,7 @@ function intoGroups(): void {
 	}
 }
 
-/** Whether `user` is in `group`, its owner included. */
+/** Whether `user` is in `group`. */
 export function isMember(group: string, user: string): boolean {
 	return (
 		db

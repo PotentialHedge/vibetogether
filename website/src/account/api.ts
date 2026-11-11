@@ -37,7 +37,7 @@ export type Session = {
 	name: string;
 	project: Named;
 	group: Named;
-	/** Who created it, who may delete it, as may the group's owner. */
+	/** Who created it. */
 	creator?: string | null;
 	/** Its URL on the relay, hard to guess: it identifies the session, and is its secret. */
 	address: string;

@@ -203,8 +203,8 @@ function personByLogin(login: string): Person | undefined {
 type GroupRow = {
 	id: string;
 	name: string;
-	owner: string;
-	own: number;
+	/** Set only on a person's own group: that person. */
+	person: string | null;
 	created: string;
 };
 
@@ -221,11 +221,10 @@ type SessionOfGroup = SessionRow & {
 	projectName: string;
 	groupId: string;
 	groupName: string;
-	groupOwner: string;
 	creatorLogin: string | null;
 };
 
-const sessionsOfGroups = `SELECT s.*, p.name AS projectName, g.id AS groupId, g.name AS groupName, g.owner AS groupOwner,
+const sessionsOfGroups = `SELECT s.*, p.name AS projectName, g.id AS groupId, g.name AS groupName,
 	c.login AS creatorLogin
 	FROM owned_session s JOIN project p ON p.id = s.project JOIN "group" g ON g.id = p."group"
 	LEFT JOIN user c ON c.id = s.creator`;
@@ -264,7 +263,7 @@ function accountJson(id: string): z.infer<typeof Account> {
 function groupsOf(user: string): GroupRow[] {
 	return db
 		.prepare(
-			`SELECT g.* FROM "group" g JOIN group_member m ON m."group" = g.id WHERE m.user = ? ORDER BY g.own DESC, g.created`,
+			`SELECT g.* FROM "group" g JOIN group_member m ON m."group" = g.id WHERE m.user = ? ORDER BY g.person IS NULL, g.created`,
 		)
 		.all(user) as GroupRow[];
 }
@@ -278,7 +277,7 @@ function groupJson(group: GroupRow): z.infer<typeof Group> {
 	return {
 		id: group.id,
 		name: group.name,
-		own: group.own === 1,
+		own: group.person !== null,
 		members: members.map((m) => m.login),
 	};
 }
@@ -527,13 +526,19 @@ api.openapi(
 	}),
 	(c) => {
 		const me = c.var.caller.id;
-		// A group's `owner` is only who created it now, which the group outlives: deleting the
-		// account would delete the group with it, so another member takes it over.
-		db.prepare(
-			`UPDATE "group" SET owner = (SELECT m.user FROM group_member m WHERE m."group" = "group".id AND m.user != ? LIMIT 1)
-			 WHERE owner = ? AND own = 0 AND EXISTS (SELECT 1 FROM group_member m WHERE m."group" = "group".id AND m.user != ?)`,
-		).run(me, me, me);
-		db.prepare("DELETE FROM user WHERE id = ?").run(me);
+		// A group is never left empty, so the groups the account alone is in go with it.
+		db.exec("BEGIN");
+		try {
+			db.prepare(
+				`DELETE FROM "group" WHERE id IN (SELECT "group" FROM group_member WHERE user = ?)
+				 AND NOT EXISTS (SELECT 1 FROM group_member m WHERE m."group" = "group".id AND m.user != ?)`,
+			).run(me, me);
+			db.prepare("DELETE FROM user WHERE id = ?").run(me);
+			db.exec("COMMIT");
+		} catch (error) {
+			db.exec("ROLLBACK");
+			throw error;
+		}
 		return c.body(null, 204);
 	},
 );
@@ -572,24 +577,25 @@ api.openapi(
 		const { name } = c.req.valid("json");
 		if (
 			count(
-				`SELECT count(*) AS n FROM "group" WHERE owner = ? AND own = 0`,
+				`SELECT count(*) AS n FROM group_member m JOIN "group" g ON g.id = m."group" WHERE m.user = ? AND g.person IS NULL`,
 				me,
 			) >= maxGroups
 		)
 			return c.text(
-				`A person owns at most ${maxGroups} groups besides their own: delete one first.`,
+				`A person creates a group only while in fewer than ${maxGroups} besides their own: leave one first.`,
 				403,
 			);
 		const group: GroupRow = {
 			id: newId("g"),
 			name,
-			owner: me,
-			own: 0,
+			person: null,
 			created: new Date().toISOString(),
 		};
-		db.prepare(
-			`INSERT INTO "group" (id, name, owner, own, created) VALUES (?, ?, ?, 0, ?)`,
-		).run(group.id, group.name, me, group.created);
+		db.prepare(`INSERT INTO "group" (id, name, created) VALUES (?, ?, ?)`).run(
+			group.id,
+			group.name,
+			group.created,
+		);
 		db.prepare(`INSERT INTO group_member ("group", user) VALUES (?, ?)`).run(
 			group.id,
 			me,
@@ -618,7 +624,7 @@ api.openapi(
 		const group = groupFor(c.req.valid("param").id, c.var.caller.id);
 		if (!group) return c.text("No such group.", 404);
 		if (c.var.caller.app) return c.text(notForApps, 403);
-		if (group.own) return c.text("Your own group is named after you.", 403);
+		if (group.person) return c.text("Your own group is named after you.", 403);
 		const { name } = c.req.valid("json");
 		db.prepare(`UPDATE "group" SET name = ? WHERE id = ?`).run(name, group.id);
 		return c.json(groupJson({ ...group, name }), 200);
@@ -642,7 +648,7 @@ api.openapi(
 		const group = groupFor(c.req.valid("param").id, c.var.caller.id);
 		if (!group) return c.text("No such group.", 404);
 		if (c.var.caller.app) return c.text(notForApps, 403);
-		if (group.own)
+		if (group.person)
 			return c.text("Your own group stays as long as you do.", 403);
 		db.prepare(`DELETE FROM "group" WHERE id = ?`).run(group.id);
 		return c.body(null, 204);
@@ -667,7 +673,7 @@ api.openapi(
 		if (c.var.caller.app) return c.text(notForApps, 403);
 		const group = groupFor(id, c.var.caller.id);
 		if (!group) return c.text("No such group.", 404);
-		if (group.own) return c.text("Your own group holds you alone.", 403);
+		if (group.person) return c.text("Your own group holds you alone.", 403);
 		const person = personByLogin(name);
 		if (!person) return c.text("No such person.", 404);
 		if (isMember(group.id, person.id)) return c.json(groupJson(group), 200);
@@ -712,7 +718,7 @@ api.openapi(
 		if (!group) return c.text("No such group.", 404);
 		const person = personByLogin(name);
 		if (!person) return c.text("No such person.", 404);
-		if (group.own) return c.text("Your own group holds you alone.", 403);
+		if (group.person) return c.text("Your own group holds you alone.", 403);
 		if (!isMember(group.id, person.id)) return c.text("No such member.", 404);
 		// Deleting a group deletes its sessions, so it is said explicitly, never a side effect of leaving.
 		if (
