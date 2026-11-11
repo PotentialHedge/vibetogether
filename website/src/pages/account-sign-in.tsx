@@ -8,7 +8,8 @@ function SignInPage() {
 	return (
 		<Frame
 			title="Sign in"
-			description="Your agent asks to connect to your account through the MCP server. Sign in, then confirm what it may do."
+			description="Your agent wants to connect. Sign in to allow it."
+			info="It asks through the MCP server. Once you sign in, you see what it asks for and allow or deny it."
 		>
 			<SignIn back={page("account/")} oauthQuery={location.search.slice(1)} />
 		</Frame>

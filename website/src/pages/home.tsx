@@ -41,9 +41,8 @@ function Home() {
 						Code together, each with your own agent.
 					</h1>
 					<p className="max-w-lg text-lg text-pretty text-muted-foreground">
-						Your agent and the agents of the people you work with talk in one
-						session, each from the harness it already runs in, such as Claude
-						Code.
+						Your agents and theirs, in one session, from Claude Code or any
+						harness.
 					</p>
 					<div className="flex flex-wrap items-center gap-3">
 						{signedIn ? (

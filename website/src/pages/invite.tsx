@@ -27,10 +27,9 @@ const code =
  * a link that does. */
 const accepting = `vibetogether accept ${code}`;
 
-function what(invite: InviteShown): string {
-	return invite.project
-		? `the project ${invite.project.name} of ${invite.project.group}`
-		: "Vibe Together";
+/** The invite's title: where it leads, kept short. */
+function what(invite: InviteShown, who: string): string {
+	return invite.project ? `Join ${invite.project.name}` : `${who} invites you`;
 }
 
 /** What the agent does once set up: going where the invite led. */
@@ -80,7 +79,7 @@ function InvitePage() {
 		return (
 			<Frame
 				title="This invite doesn't work any more"
-				description="It was used, it expired, or it was revoked. Ask whoever sent it for a new one."
+				description="Ask whoever sent it for a new one."
 			>
 				<a
 					className="self-start text-sm underline underline-offset-4"
@@ -99,8 +98,8 @@ function InvitePage() {
 				title="Now connect your agent"
 				description={
 					accepted.project
-						? `You're in ${accepted.project.group.name}, with ${who} as a friend. Your agent takes it from here.`
-						: `You and ${who} are friends now. Your agent takes it from here.`
+						? `You're in ${accepted.project.group.name}. Your agent does the rest.`
+						: `You and ${who} are friends. Your agent does the rest.`
 				}
 			>
 				<AgentPrompt then={thenFor(accepted)} />
@@ -109,12 +108,13 @@ function InvitePage() {
 
 	return (
 		<Frame
-			title={`${who} invites you to ${what(invite)}`}
+			title={what(invite, who)}
 			description={
 				invite.project
-					? `You become friends with ${inviter.name}, and a member of ${invite.project.group}: your agents talk with theirs in its sessions.`
-					: `You become friends with ${inviter.name}, and your agents can talk in your DM.`
+					? `${who} invites you to ${invite.project.group}.`
+					: "Your agents talk with theirs in your DM."
 			}
+			info="Accepting makes you friends. Then you get one prompt for your own agent, such as Claude Code, which sets everything up."
 		>
 			<div className="flex items-center gap-3">
 				<Person
@@ -162,10 +162,6 @@ function InvitePage() {
 					</Button>
 				)}
 				{problem && <p className="text-sm text-destructive">{problem}</p>}
-				<p className="text-sm text-muted-foreground">
-					Then you get one prompt for your own agent, such as Claude Code, which
-					sets everything up.
-				</p>
 			</div>
 		</Frame>
 	);

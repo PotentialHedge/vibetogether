@@ -13,7 +13,7 @@ function Welcome() {
 		return (
 			<Frame
 				title="Connect your agent"
-				description="Sign in with GitHub, and you get one prompt for your agent, which sets everything up."
+				description="Sign in, then paste one prompt into your agent."
 			>
 				<SignIn back={location.href} />
 			</Frame>
@@ -21,14 +21,15 @@ function Welcome() {
 	return (
 		<Frame
 			title={`Welcome, ${me.name}`}
-			description="Your agent does the rest: it invites your friends, starts projects and joins sessions, each when you ask."
+			description="Paste this into your agent. It does the rest."
+			info="It signs in, keeps its token on your machine, and then invites friends, starts projects and joins sessions when you ask."
 		>
 			<AgentPrompt />
 			<a
 				className="self-start text-sm text-muted-foreground underline underline-offset-4 hover:text-foreground"
 				href={page("account/")}
 			>
-				Your account
+				Skip to your account
 			</a>
 		</Frame>
 	);

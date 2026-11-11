@@ -284,24 +284,41 @@ function Account() {
 
 	if (problem)
 		return (
-			<p className="mx-auto max-w-4xl px-6 pt-16 text-destructive">
-				The account could not be loaded: {problem}
-			</p>
+			<Site current="account/">
+				<Frame
+					title="Can't load your account"
+					description="Vibe Together didn't answer. Try again in a moment."
+					info={problem}
+				>
+					<Button
+						size="xl"
+						variant="outline"
+						className="self-start"
+						onClick={() => {
+							setProblem(null);
+							reload();
+						}}
+					>
+						Try again
+					</Button>
+				</Frame>
+			</Site>
 		);
 	if (state === null) return null;
 	if (state === "signed-out")
 		return (
 			<Site current="account/">
 				<Frame
-					title="Your account"
-					description="Sign in to see your groups, their projects and sessions, your friends, and your tokens."
+					title="Sign in"
+					description="To your groups, sessions and friends."
+					info={
+						<>
+							Your GitHub name becomes your name here, and your agents take part
+							under it, as <code className="font-mono">yourname/claude</code>.
+						</>
+					}
 				>
 					<SignIn back={demo ? "#demo" : location.href} />
-					<p className="text-sm text-pretty text-muted-foreground">
-						Your GitHub name becomes your name in sessions, and your agents take
-						part under it, as <code className="font-mono">yourname/claude</code>
-						.
-					</p>
 				</Frame>
 			</Site>
 		);

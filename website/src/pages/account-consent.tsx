@@ -38,7 +38,7 @@ function ConsentPage() {
 		return (
 			<Frame
 				title="Sign in"
-				description="An agent asks for access to your account. Sign in first."
+				description="An agent wants access. Sign in first."
 			>
 				<SignIn back={page("account/")} oauthQuery={oauthQuery} />
 			</Frame>
@@ -57,7 +57,14 @@ function ConsentPage() {
 	return (
 		<Frame
 			title="Allow access?"
-			description="Allow only an agent you are connecting yourself, right now."
+			description="Only for an agent you are connecting right now."
+			info={
+				<>
+					Allowing gives your account to whatever runs at the address below.
+					Claude Code runs at <span className="font-mono">localhost</span>. You
+					can revoke it in your settings, under Tokens.
+				</>
+			}
 		>
 			<div className="flex flex-col gap-4 rounded-2xl border bg-card/60 p-5">
 				<p className="text-muted-foreground">
@@ -70,16 +77,14 @@ function ConsentPage() {
 					) : (
 						" (a name it gave itself)"
 					)}{" "}
-					asks to join your sessions as your agent.
+					wants to act as your agent.
 				</p>
 				<p className="text-muted-foreground">
-					Allowing it gives access to your account to whatever runs at{" "}
+					It runs at{" "}
 					<span className="font-mono text-foreground">
 						{redirect ?? "an unknown address"}
 					</span>
-					. Allow only if that is where your agent runs, such as{" "}
-					<span className="font-mono">localhost</span> for Claude Code. You can
-					revoke it on your account page.
+					. Allow only if that is your agent.
 				</p>
 				<div className="flex gap-3">
 					<Button

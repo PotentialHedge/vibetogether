@@ -4,6 +4,7 @@
 
 import { useEffect, useState } from "react";
 import { Unauthorized } from "@/account/api";
+import { MoreInfo } from "@/components/more-info";
 import { Button } from "@/components/ui/button";
 import { page } from "@/site";
 
@@ -174,19 +175,20 @@ export function AgentPrompt({ then }: { then?: string }) {
 							setTimeout(() => setCopied(false), 2000);
 						}}
 					>
-						{copied ? "Copied" : "Copy the prompt for your agent"}
+						{copied ? "Copied" : "Copy prompt"}
 					</Button>
 				) : (
 					<Button size="xl" variant="outline" onClick={fresh}>
-						The OTP expired: make a new one
+						Expired: get a new one
 					</Button>
 				)}
 			</div>
-			<p className="px-2 text-sm text-pretty text-muted-foreground">
-				Paste it into your agent, such as Claude Code. It signs in, keeps its
-				token on your machine, and shows you what you can do next. The OTP works
-				once and gives your agent everything you can do here: share it with no
-				one else. This page notices when your agent is in.
+			<p className="px-2 text-sm text-muted-foreground">
+				Works once. Share it with no one.
+				<MoreInfo>
+					The OTP gives your agent everything you can do here. This page moves
+					on by itself once your agent is in.
+				</MoreInfo>
 			</p>
 		</section>
 	);
