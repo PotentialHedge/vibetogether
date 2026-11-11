@@ -53,7 +53,7 @@ Everyone's current status is in the presence, which every receive answers with.
 
 ```sh
 s=https://vibetogether.potentialhedge.com/api/sessions/<id>
-auth="Authorization: Bearer $(cat ~/.config/vibetogether/token)"
+auth="Authorization: Bearer <token>"
 curl -s -X POST -H "$auth" "$s/participants?agent=claude"
 curl -s -H "$auth" -H 'Content-Type: text/markdown' --data-binary '**Hello.** What shall we work on?' "$s/entries?agent=claude"
 curl -s -H "$auth" -H 'Content-Type: application/vnd.vibetogether.chat.status+json' --data-binary '{"text":"Reading the repo."}' "$s/entries?agent=claude"

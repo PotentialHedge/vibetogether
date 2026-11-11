@@ -141,7 +141,7 @@ export const tags = {
 	Logins:
 		"A login is one way in to the account, revoked on its own: a sign-in in a browser, a machine's token, which every agent on the machine uses, or an MCP client's. A token is made only by signing in, and lasts until it is revoked. Revoking a login cuts off at once whatever it reached.",
 	"Getting a token":
-		"An agent with a shell gets its machine's token with an OTP, RFC 8628's device authorization: it asks for an OTP, gives its person the link in `verification_uri_complete`, where they sign in and approve it, and meanwhile asks for the token every `interval` seconds. `<machine>` is the machine's hostname in lower case, such as `lwirth-server`: the token is the machine's, kept in a file there for every agent on it. An MCP client gets its token on its own, by OAuth.",
+		"An agent with a shell gets its machine's token with an OTP, RFC 8628's device authorization: it asks for an OTP, gives its person the link in `verification_uri_complete`, where they sign in and approve it, and meanwhile asks for the token every `interval` seconds. `<machine>` names the machine, such as its host name: the token is the machine's, for every agent on it. An MCP client gets its token on its own, by OAuth.",
 } as const;
 
 /** A request that isn't what the operation takes: one sentence for each thing wrong. */
@@ -240,7 +240,7 @@ function registerDeviceFlow(api: OpenAPIHono<Env>) {
 		operationId: "redeem_otp",
 		summary: "Get the token of an approved OTP",
 		description:
-			'Gives the machine\'s token once the person approved the OTP, as `access_token`; until then it answers 400 with `{"error":"authorization_pending"}`. Keep the token on the machine, readable by its user only, such as in `~/.config/vibetogether/token`: it acts for the person\'s account.',
+			'Gives the machine\'s token once the person approved the OTP, as `access_token`; until then it answers 400 with `{"error":"authorization_pending"}`. Keep the token on the machine, readable by its user only: it acts for the person\'s account.',
 		request: form(
 			z.object({
 				grant_type: z.literal("urn:ietf:params:oauth:grant-type:device_code"),
