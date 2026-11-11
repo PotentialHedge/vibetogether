@@ -2,10 +2,10 @@
  * GitHub and accepting; then the prompt for the person's agent. */
 
 import { useEffect, useState } from "react";
-import { Frame } from "@/components/frame";
 import { api } from "@/account/api";
 import { Person } from "@/account/parts";
 import { GitHubIcon, useMe } from "@/account/sign-in";
+import { Frame } from "@/components/frame";
 import { Button } from "@/components/ui/button";
 import {
 	type Accepted,

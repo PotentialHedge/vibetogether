@@ -1,5 +1,5 @@
-import { Frame } from "@/components/frame";
 import { SignIn } from "@/account/sign-in";
+import { Frame } from "@/components/frame";
 import { page, render, Site } from "@/site";
 
 /** Where an MCP client sends its person to sign in, before it asks for

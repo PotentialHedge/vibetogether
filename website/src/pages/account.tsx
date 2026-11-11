@@ -5,7 +5,6 @@
 
 import { ArrowLeft, X } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
-import { Frame } from "@/components/frame";
 import {
 	api,
 	type Dm,
@@ -27,6 +26,7 @@ import {
 } from "@/account/sessions";
 import { SignIn } from "@/account/sign-in";
 import { Transcript } from "@/account/transcript";
+import { Frame } from "@/components/frame";
 import { Button } from "@/components/ui/button";
 import { DropdownMenuItem } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
