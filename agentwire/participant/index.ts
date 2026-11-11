@@ -262,6 +262,15 @@ export class Reader {
 		};
 	}
 
+	/** Entry `n`'s payload, fetched from the log with the token. */
+	async fetch(n: number): Promise<Response> {
+		return checked(
+			await fetch(`${this.link}/log/${n}`, {
+				headers: this.token ? { Authorization: `Bearer ${this.token}` } : {},
+			}),
+		);
+	}
+
 	/** The read loop: one read at a time, after the last entry in the log,
 	 * retried with a growing pause while the relay can't be reached. */
 	async #read(): Promise<void> {

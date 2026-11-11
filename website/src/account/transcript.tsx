@@ -48,6 +48,8 @@ function reader(address: string): Promise<Reader> {
 
 type Log = {
 	reading: boolean;
+	/** What fetches the payloads, once it is made: none in the demo. */
+	reader: Reader | null;
 	entries: Entry[];
 	presence: Presence;
 	problem: string | null;
@@ -56,13 +58,14 @@ type Log = {
 function useLog(session: Pick<Session, "address">): Log {
 	const [log, setLog] = useState<Log>({
 		reading: false,
+		reader: null,
 		entries: [],
 		presence: {},
 		problem: null,
 	});
 	useEffect(() => {
 		if (demo) {
-			setLog({ reading: true, ...made() });
+			setLog({ reading: true, reader: null, ...made() });
 			return;
 		}
 		let stop = () => {};
@@ -70,6 +73,7 @@ function useLog(session: Pick<Session, "address">): Log {
 		reader(session.address).then(
 			(reader) => {
 				if (gone) return;
+				setLog((log) => ({ ...log, reader }));
 				stop = reader.subscribe({
 					entry: () =>
 						setLog((log) => ({
@@ -143,8 +147,10 @@ const size = (bytes: number) =>
 			: `${(bytes / 1024 ** 2).toFixed(1)} MB`;
 
 /** What an entry holds, as the chat spec says to show it. */
-function Body({ entry }: { entry: Entry }) {
+function Body({ entry, reader }: { entry: Entry; reader: Reader | null }) {
 	const type = base(entry.type);
+	if (type.startsWith("image/") && reader)
+		return <Picture entry={entry} reader={reader} />;
 	if (entry.text !== undefined && !entry.filename) {
 		if (type === "text/markdown")
 			return (
@@ -170,8 +176,62 @@ function Body({ entry }: { entry: Entry }) {
 	}
 	return (
 		<p className="font-mono text-[0.85em] text-muted-foreground">
-			{entry.filename ?? type} · {size(entry.size)}
+			{reader ? (
+				<button
+					type="button"
+					className="underline underline-offset-4 hover:text-foreground"
+					onClick={async () => {
+						const blob = await (await reader.fetch(entry.n)).blob();
+						const link = document.createElement("a");
+						link.href = URL.createObjectURL(blob);
+						link.download = entry.filename ?? `${entry.n}`;
+						link.click();
+						URL.revokeObjectURL(link.href);
+					}}
+				>
+					{entry.filename ?? type}
+				</button>
+			) : (
+				(entry.filename ?? type)
+			)}{" "}
+			· {size(entry.size)}
 		</p>
+	);
+}
+
+/** An image sent into the session, fetched with the reader's token, since
+ * the log's payloads need it. */
+function Picture({ entry, reader }: { entry: Entry; reader: Reader }) {
+	const [url, setUrl] = useState<string | null>(null);
+	useEffect(() => {
+		let made: string | null = null;
+		let gone = false;
+		reader.fetch(entry.n).then(
+			async (response) => {
+				const blob = await response.blob();
+				if (gone) return;
+				made = URL.createObjectURL(blob);
+				setUrl(made);
+			},
+			() => {},
+		);
+		return () => {
+			gone = true;
+			if (made) URL.revokeObjectURL(made);
+		};
+	}, [entry.n, reader]);
+	if (!url)
+		return (
+			<p className="font-mono text-[0.85em] text-muted-foreground">
+				{entry.filename ?? "image"} · {size(entry.size)}
+			</p>
+		);
+	return (
+		<img
+			src={url}
+			alt={entry.filename ?? ""}
+			className="mt-1 max-h-[60vh] rounded-lg border"
+		/>
 	);
 }
 
@@ -283,7 +343,7 @@ export function Transcript({
 	/** Leads back to the sessions, where they are not beside it. */
 	back?: ReactNode;
 }) {
-	const { reading, entries, presence, problem } = useLog(session);
+	const { reading, reader, entries, presence, problem } = useLog(session);
 	const status = useMemo(() => statuses(entries), [entries]);
 	const [people, setPeople] = useState(false);
 	const [scale, setScale] = useState(
@@ -454,7 +514,7 @@ export function Transcript({
 														)}
 													</div>
 												)}
-												<Body entry={entry} />
+												<Body entry={entry} reader={reader} />
 											</div>
 										</div>
 									) : (
@@ -479,7 +539,7 @@ export function Transcript({
 }
 
 /** A made-up session, for `#demo`. */
-function made(): Omit<Log, "reading"> {
+function made(): Omit<Log, "reading" | "reader"> {
 	const start = Date.now() - 20 * 60_000;
 	const at = (minutes: number) =>
 		new Date(start + minutes * 60_000).toISOString();
