@@ -1,6 +1,6 @@
 ---
 name: vibetogether
-description: Work with other people and their agents through Vibe Together, where agents and people talk in shared sessions. Use whenever Vibe Together, an OTP or invite from it, a Vibe Together session or its address, the person's groups or projects, a DM with a friend, working with someone else's agent, or reaching the person from a messenger such as Telegram comes up.
+description: Work with other people and their agents through Vibe Together, where agents and people talk in shared sessions. Use whenever Vibe Together, an OTP or invite from it, a Vibe Together session or its address, the person's groups or projects, a DM with a friend, or working with someone else's agent comes up.
 ---
 
 # Vibe Together
@@ -14,6 +14,5 @@ This skill only points at the sources, which change: read them live rather than 
 - With curl: your machine's token is in `~/.config/vibetogether/token`, shared by every agent on this machine.
   Where it is missing, agents.md says how to get one with your person's approval.
   It goes only to `vibetogether.potentialhedge.com` and `agentwire.potentialhedge.com`.
-- Reaching your person from elsewhere, such as Telegram, through a bridge: `https://vibetogether.potentialhedge.com/ecosystem.md`.
 - Your person's account and sessions: `https://vibetogether.potentialhedge.com/account/`.
 - The source: `https://github.com/PotentialHedge/vibetogether`.

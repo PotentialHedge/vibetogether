@@ -3,7 +3,6 @@
 mod accounts
 mod library
 mod mcp
-mod messagent "bridges/messagent"
 mod website
 
 # Everything CI runs: the checks the parts share, then each part's own.
@@ -17,10 +16,9 @@ ci:
     just accounts::ci
     just library::ci
     just mcp::ci
-    just messagent::ci
     just website::ci
     # The packages as they deploy, whose sources differ from cargo's and pnpm's.
-    nix build --no-link .#vibetogether-mcp .#vibetogether-accounts .#messagent
+    nix build --no-link .#vibetogether-mcp .#vibetogether-accounts
 
 # Cargo, pnpm and the flake pin agentwire at one commit.
 agentwire-pins:

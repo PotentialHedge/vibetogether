@@ -1,1 +1,0 @@
-../../../../bridges/messagent/telegram.md

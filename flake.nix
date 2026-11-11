@@ -55,7 +55,7 @@
     }: let
       rustFiles = lib.fileset.fileFilter (file: file.hasExt "rs" || file.name == "Cargo.toml");
       manifests = lib.fileset.fileFilter (file: file.name == "Cargo.toml");
-      others = lib.filter (part: !(lib.elem part parts)) [./mcp ./bridges/messagent];
+      others = lib.filter (part: !(lib.elem part parts)) [./mcp];
     in
       (pkgs.makeRustPlatform {
         cargo = rust pkgs;
@@ -104,18 +104,6 @@
         parts = [./mcp];
       };
 
-      # Both binaries: `messagent`, and `messagent-claude`, which wakes Claude
-      # Code.
-      messagent = rustPackage pkgs {
-        pname = "messagent";
-        parts = [./bridges/messagent];
-        binaries = ["messagent" "messagent-claude"];
-        args = {
-          cargoBuildFlags = ["-p" "messagent" "-p" "messagent-claude"];
-          cargoTestFlags = ["-p" "messagent" "-p" "messagent-claude"];
-        };
-      };
-
       # The account service as it runs: its sources and its production
       # dependencies, which Node runs as they are, stripping the types itself.
       vibetogether-accounts = pkgs.stdenvNoCC.mkDerivation (finalAttrs: {
@@ -157,7 +145,6 @@
     nixosModules = {
       mcp = import ./mcp/nixos-module.nix self;
       accounts = import ./accounts/nixos-module.nix self;
-      messagent = import ./bridges/messagent/nixos-module.nix self;
     };
 
     # Every language in the tree, behind one command. The global pre-commit
