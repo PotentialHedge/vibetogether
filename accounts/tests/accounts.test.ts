@@ -33,7 +33,7 @@ Object.assign(process.env, {
 	AGENTWIRE_RELAY: relayUrl,
 	// messagent's secret is "a-secret-of-the-bot".
 	ACCOUNTS_BRIDGES:
-		"messagent 6ab53bae0eef33d30015a3069604e5f1ca5f9a5d71b53554cc0e2c8b164a4ce2\n",
+		"messagent 6ab53bae0eef33d30015a3069604e5f1ca5f9a5d71b53554cc0e2c8b164a4ce2 telegram\n",
 });
 
 const { app } = await import("../src/app.ts");
@@ -1288,7 +1288,7 @@ test("a bridge is added to one session by a member who approves its OTP, and rea
 	assert.equal((await call(luisToken, "GET", "/api/bridges/self")).status, 404);
 	const self = await call(bridge, "GET", "/api/bridges/self");
 	assert.equal(self.status, 200, self.text);
-	assert.equal(self.json.name, "luis/messagent");
+	assert.equal(self.json.bridge, "messagent");
 	assert.equal(self.json.by, "luis");
 	assert.equal(self.json.session.id, chat.id);
 	assert.equal(self.json.session.address, chat.address);
@@ -1301,8 +1301,8 @@ test("a bridge is added to one session by a member who approves its OTP, and rea
 		);
 		assert.equal(listed.status, 200, listed.text);
 		assert.deepEqual(
-			listed.json.map((b: any) => [b.id, b.name, b.for]),
-			[[self.json.id, "luis/messagent", self.json.for]],
+			listed.json.map((b: any) => [b.id, b.bridge, b.for]),
+			[[self.json.id, "messagent", self.json.for]],
 		);
 	}
 	assert.match(self.json.id, /^b_/);
@@ -1326,12 +1326,68 @@ test("a bridge is added to one session by a member who approves its OTP, and rea
 			token: as,
 			owned: true,
 		});
-	const joined = await join("luis/messagent", bridge);
-	assert.equal(joined.status, 200, joined.text);
-	assert.equal(joined.json.account, "luis");
-	assert.equal(joined.json.about.project, "telegram");
-	assert.equal((await join("luis/messagent", bridge, elsewhere)).status, 403);
+	const read = (as: string, into = chat) =>
+		call(null, "POST", "/agentwire/read", {
+			session: secretOf(into),
+			token: as,
+			owned: true,
+		});
+	// A bridge is no participant: it reads its own session apart, and joins only as the people it
+	// carries, anyone unverified under its messenger's name.
+	assert.equal((await read(bridge)).status, 200);
+	assert.equal((await read(bridge, elsewhere)).status, 403);
+	assert.equal((await join("luis/messagent", bridge)).status, 403);
 	assert.equal((await join("luis/claude", bridge)).status, 403);
+	const stranger = await join("telegram/eve", bridge);
+	assert.equal(stranger.status, 200, stranger.text);
+	assert.equal(stranger.json.account, null);
+	assert.equal(stranger.json.about.project, "telegram");
+	assert.match(stranger.json.grant, /^g1\./);
+	assert.equal((await join("telegram/eve", bridge, elsewhere)).status, 403);
+	for (const name of [
+		"telegram/Eve",
+		"telegram/eve/x",
+		"telegram",
+		"discord/eve",
+	])
+		assert.equal((await join(name, bridge)).status, 403, name);
+	// No one else joins under the messenger's name, so that no account passes as a carried person.
+	for (const as of [luisToken, null])
+		assert.equal(
+			(
+				await call(null, "POST", "/agentwire/join", {
+					session: secretOf(chat),
+					name: "telegram/eve",
+					token: as,
+					owned: true,
+				})
+			).status,
+			403,
+		);
+	// What the bridge says of its room is the session's info.
+	assert.equal(
+		(
+			await call(bridge, "PATCH", "/api/bridges/self", {
+				about: 'the Telegram group "Team" (3 people)',
+			})
+		).status,
+		204,
+	);
+	assert.equal(
+		(await call(luisToken, "PATCH", "/api/bridges/self", { about: "x" }))
+			.status,
+		404,
+	);
+	const info = (await call(ben, "GET", "/api/sessions")).json.find(
+		(s: any) => s.id === chat.id,
+	);
+	assert.deepEqual(info.bridges, [
+		{
+			bridge: "messagent",
+			by: "luis",
+			about: 'the Telegram group "Team" (3 people)',
+		},
+	]);
 	// As a person only once they linked their identity on the bridge.
 	assert.equal((await join("luis", bridge)).status, 403);
 	const privateChat = await askAsBridge({
@@ -1386,16 +1442,16 @@ test("a bridge is added to one session by a member who approves its OTP, and rea
 		204,
 	);
 	assert.equal((await join("luis", bridge)).status, 403);
-	assert.equal((await join("luis/messagent", bridge)).status, 200);
+	assert.equal((await join("telegram/luis", bridge)).status, 200);
 
 	// Ben's bridge in the same session goes once he leaves the group.
 	const bens = await bridgeOf(ben, chat.id);
-	assert.equal((await join("ben/messagent", bens)).status, 200);
+	assert.equal((await read(bens)).status, 200);
 	assert.equal(
 		(await call(ben, "DELETE", `/api/groups/${group}/members/ben`)).status,
 		204,
 	);
-	assert.equal((await join("ben/messagent", bens)).status, 403);
+	assert.equal((await read(bens)).status, 403);
 	assert.equal((await call(bens, "GET", "/api/bridges/self")).status, 401);
 
 	// Any member removes a bridge; the bridge removes itself; and a session takes its bridges with it.
@@ -1409,7 +1465,8 @@ test("a bridge is added to one session by a member who approves its OTP, and rea
 		).status,
 		204,
 	);
-	assert.equal((await join("luis/messagent", bridge)).status, 403);
+	assert.equal((await read(bridge)).status, 403);
+	assert.equal((await join("telegram/eve", bridge)).status, 403);
 	const second = await bridgeOf(luis, chat.id);
 	assert.equal((await call(second, "DELETE", "/api/bridges/self")).status, 204);
 	assert.equal((await call(second, "GET", "/api/bridges/self")).status, 401);

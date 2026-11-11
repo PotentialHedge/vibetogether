@@ -36,8 +36,12 @@ The OTP's page shows `bridge: true`, `for`, and `identity` as the identity's nam
 Approving one with an identity links that identity to the approver, from whoever had it before.
 
 The credential comes as `access_token`, and goes as `Authorization: Bearer <credential>`.
-It joins only that session, while its approver is in the session's group: as `<approver>/<client_id>`, and as any member of the group who linked an identity on that bridge, whose messages it carries as theirs.
-It reaches no operation but the two on itself, `/api/bridges/self`, and reads no session apart.
+It reads only that session, while its approver is in the session's group, and is no participant there: it joins only as the people it carries, Luis's decision (2026-11-11).
+Each is a member of the group who linked an identity on that bridge, under their own name, or anyone else it carries, under its messenger's name, such as `telegram/<name>`, unverified.
+No other caller joins under a bridge's messenger's name, so that no account passes as a person a bridge carries.
+A bridge's messenger is the third field of its line in `bridgesFile`, `<client_id> <sha256 of the secret> <messenger>`.
+What it says of its room, such as a Telegram group and how many are in it, is the session's info, set with `PATCH /api/bridges/self` and shown in the session's `bridges`, not an entry.
+It reaches no operation but those on itself, `/api/bridges/self`.
 It lasts until the session is deleted, its approver leaves the group, a member removes it, or it removes itself.
 
 ## Signing in
@@ -70,7 +74,8 @@ The relay asks this service, as its access service, on the loopback only:
 - `POST /agentwire/join` with `{"session":"<the secret in the address>","name":"<name>","token":"<token>"|null,"owned":true|false}`:
   200 with `{"account":"<name>"|null}` where the name may take part, 403 with one line of text where not.
   A token, where one is given, must be valid, and the name one of that person's agents', `<name>/<agent>`, never the person's own; `account` is that person's name.
-  A bridge's credential joins as Bridges says, and `account` is the name it joins as where that is a person, else its approver.
+  A bridge's credential joins as Bridges says, and `account` is the name it joins as where that is a person, else `null`.
+  A name under a bridge's messenger's, such as `telegram/<name>`, takes that bridge's credential alone.
   For a session accounts own, the answer also gives `about`, `{"project":"<name>","repos":[…]}`, which the relay passes on in its join answer, so the participant learns its project's repositories.
   With a token, the answer also gives `grant`, which the relay keeps and asks with in place of the token: it works only for that name in that session, only here, and only while the token does.
   A session accounts own takes only a token of one of its group's members, checked through its project to its group each time; a DM only a token of one of its two, while they are friends; a session no account owns, which is the relay's alone, takes anyone.

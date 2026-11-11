@@ -39,6 +39,18 @@ export type Session = {
 	creator?: string | null;
 	/** Its URL on the relay, hard to guess: it identifies the session, and is its secret. */
 	address: string;
+	/** The rooms outside Vibe Together it is bridged to, such as Telegram chats. */
+	bridges?: SessionBridge[];
+};
+
+/** A room a session is bridged to, as its info shows it. */
+export type SessionBridge = {
+	/** Which bridge, such as `messagent`. */
+	bridge: string;
+	/** Who added it. */
+	by: string;
+	/** What the bridge says of its room, such as a Telegram group and how many are in it. */
+	about: string | null;
 };
 
 /** Two friends' DM: one session for the two of them and their agents, in no
@@ -86,14 +98,14 @@ export type Token = {
  * member who approved its OTP. */
 export type Bridge = {
 	id: string;
-	/** Its name in the session, `<name>/<bridge>`. */
-	name: string;
 	/** Which bridge, such as `messagent`. */
 	bridge: string;
 	/** Who added it. */
 	by: string;
-	/** What the bridge said it bridges, in its own words. */
+	/** What the bridge said it bridges as it asked to be added, in its own words. */
 	for: string | null;
+	/** What the bridge says of its room now. */
+	about: string | null;
 	session: Named;
 	created: string;
 };
@@ -345,6 +357,13 @@ function mock(): Api {
 			name: "Telegram",
 			...inProject("p_0"),
 			address: "",
+			bridges: [
+				{
+					bridge: "messagent",
+					by: "luiswirth",
+					about: "Luis Wirth's private Telegram chat",
+				},
+			],
 		},
 		{
 			id: "s_1",
@@ -383,10 +402,10 @@ function mock(): Api {
 	let bridges: Bridge[] = [
 		{
 			id: "b_1",
-			name: "luiswirth/messagent",
 			bridge: "messagent",
 			by: "luiswirth",
 			for: "Telegram private chat with 123456789, @luiswirth, named Luis",
+			about: "Luis Wirth's private Telegram chat",
 			session: { id: "s_0", name: "Telegram" },
 			created: "2026-11-09T21:40:00Z",
 		},

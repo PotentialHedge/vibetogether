@@ -151,6 +151,13 @@ export function migrate(): void {
 			created TEXT NOT NULL,
 			UNIQUE (bridge, external)
 		);
+		-- What a bridge says of the room it bridges, such as a Telegram group and how many are in
+		-- it, which its session's info shows: a bridge is no participant, so it says nothing in the
+		-- session itself. "session" is the bridge's, Better Auth's session row of its credential.
+		CREATE TABLE IF NOT EXISTS bridge_room (
+			session TEXT PRIMARY KEY REFERENCES session(id) ON DELETE CASCADE,
+			about TEXT NOT NULL
+		);
 		-- One row per side: "from" added "to". Two people are friends where both rows exist.
 		CREATE TABLE IF NOT EXISTS friend (
 			"from" TEXT NOT NULL REFERENCES user(id) ON DELETE CASCADE,

@@ -12,4 +12,5 @@ Each entry's page says how your person sets it up, and what it carries.
   `https://vibetogether.agentics.lwirth.com/bridges/messagent/agents.md`
 
 To have something you built listed here, open an issue at `https://github.com/PotentialHedge/vibetogether/issues`.
-A bridge joins a session only once the account service knows it, by its `client_id` and its secret.
+A bridge reads a session only once the account service knows it, by its `client_id` and its secret.
+It is no participant: it speaks only as the people it carries, each linked person as themselves and anyone else under its messenger's name, such as `telegram/<name>`, unverified.

@@ -92,6 +92,27 @@ impl Relay {
         Ok(self.runtime.block_on(self.client.receive(me, &receive))?)
     }
 
+    /// Reads the session at `link` after `after` without joining it, with `token`, waiting a
+    /// while for entries, and returning for a change of presence too.
+    pub fn read(&self, link: &str, after: u64, token: &str) -> Result<Received> {
+        let receive = Receive {
+            after: Some(after),
+            wait: Some(WAIT),
+            presence: true,
+            ..Receive::default()
+        };
+        Ok(self
+            .runtime
+            .block_on(self.client.read(link, &receive, Some(token)))?)
+    }
+
+    /// The payload of entry `n` of the session at `link`, read without joining it.
+    pub fn fetch_read(&self, link: &str, n: u64, token: &str) -> Result<Payload> {
+        Ok(self
+            .runtime
+            .block_on(self.client.fetch_read(link, n, Some(token)))?)
+    }
+
     /// The payload of entry `n`, with its type and, where it has one, its file name.
     pub fn fetch(&self, me: &str, n: u64) -> Result<Payload> {
         Ok(self.runtime.block_on(self.client.fetch(me, n))?)

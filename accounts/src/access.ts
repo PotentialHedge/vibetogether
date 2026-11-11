@@ -3,7 +3,7 @@ import { Hono } from "hono";
 import { type Caller, callerOfCredential, callerOfToken } from "./caller.ts";
 import { config } from "./config.ts";
 import { areFriends, db, isMember } from "./db.ts";
-import { isAgentOf } from "./names.ts";
+import { isAgentOf, isNamePart } from "./names.ts";
 import { reposOf } from "./repos.ts";
 
 /**
@@ -100,6 +100,17 @@ access.post("/join", async (c) => {
 			"The token is no valid token: it was revoked, or it expired.",
 			403,
 		);
+	// A name under a bridge's messenger, such as `telegram/<name>`, is a person that bridge carries
+	// unverified: only that bridge joins under it, so that no account passes as one.
+	const messenger = name.split("/")[0];
+	const carrier = [...config.bridges].find(
+		([, known]) => known.messenger === messenger,
+	)?.[0];
+	if (carrier && caller?.bridge?.name !== carrier)
+		return c.text(
+			`A name under ${messenger}/ is a person a bridge carries from ${messenger}: only that bridge joins under it.`,
+			403,
+		);
 	if (caller?.bridge) {
 		const [answer, status] = bridgeJoin(
 			{ ...caller, bridge: caller.bridge },
@@ -187,8 +198,17 @@ access.post("/read", async (c) => {
 			"The token is no valid token: it was revoked, or it expired.",
 			403,
 		);
-	if (caller?.bridge)
-		return c.text("A bridge joins its session, and reads nothing apart.", 403);
+	if (caller?.bridge) {
+		const owned = sessionBySecret(session);
+		if (!owned || owned.id !== caller.bridge.session)
+			return c.text("This bridge was added to another session.", 403);
+		if (!isMember(owned.group, caller.id))
+			return c.text(
+				`${caller.login} is no member of this session's group.`,
+				403,
+			);
+		return c.json({ account: caller.login });
+	}
 	const dm = dmBySecret(session);
 	if (dm) {
 		if (!caller || (caller.id !== dm.a && caller.id !== dm.b))
@@ -210,9 +230,10 @@ access.post("/read", async (c) => {
 
 /**
  * Whether a bridge's credential lets it in, which only its own session does, while the person who
- * added it is a member of the session's group: under its own name, `<person>/<bridge>`, or as a
- * member of the group who linked their identity on the bridge's messenger, whose messages it
- * carries as theirs. As a JSON body and status.
+ * added it is a member of the session's group. A bridge is no participant: it reads the session
+ * apart, and joins only as the people it carries, Luis's decision (2026-11-11). Each is a member of
+ * the group who linked their identity on the bridge's messenger, under their own name, or anyone
+ * else there, unverified, under the messenger's, such as `telegram/<name>`. As a JSON body and status.
  */
 function bridgeJoin(
 	caller: Caller & { bridge: NonNullable<Caller["bridge"]> },
@@ -224,8 +245,18 @@ function bridgeJoin(
 		return ["This bridge was added to another session.", 403];
 	if (!isMember(owned.group, caller.id))
 		return [`${caller.login} is no member of this session's group.`, 403];
-	let account = caller.login;
-	if (name !== `${caller.login}/${caller.bridge.name}`) {
+	const messenger = config.bridges.get(caller.bridge.name)?.messenger;
+	const [first, second, ...rest] = name.split("/");
+	let account: string | null;
+	if (
+		messenger &&
+		first === messenger &&
+		second !== undefined &&
+		isNamePart(second) &&
+		!rest.length
+	)
+		account = null;
+	else {
 		const person = db
 			.prepare(
 				"SELECT u.id FROM identity i JOIN user u ON u.id = i.user WHERE i.bridge = ? AND u.login = ?",
@@ -233,7 +264,9 @@ function bridgeJoin(
 			.get(caller.bridge.name, name) as { id: string } | undefined;
 		if (!person || !isMember(owned.group, person.id))
 			return [
-				`This bridge joins as ${caller.login}/${caller.bridge.name}, or as a member of the session's group who linked their identity on it.`,
+				`This bridge joins as a member of the session's group who linked their identity on it${
+					messenger ? `, or as ${messenger}/<name>` : ""
+				}.`,
 				403,
 			];
 		account = name;

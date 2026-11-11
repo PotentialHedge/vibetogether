@@ -352,7 +352,7 @@ export function Transcript({
 	back,
 }: {
 	/** A session or a DM, as far as the transcript shows it. */
-	session: Pick<Session, "name" | "address">;
+	session: Pick<Session, "name" | "address" | "bridges">;
 	/** What can be done with the session, at the header's end. */
 	actions?: ReactNode;
 	/** What else can be done with it, as items of its menu. */
@@ -476,6 +476,15 @@ export function Transcript({
 							</Button>
 						</div>
 					</div>
+					{session.bridges?.map((bridge) => (
+						<p
+							key={`${bridge.bridge} ${bridge.by} ${bridge.about}`}
+							className="text-xs text-muted-foreground"
+						>
+							Bridged to {bridge.about ?? `a room of ${bridge.bridge}`}, added
+							by {bridge.by}: everything said here reaches it.
+						</p>
+					))}
 					{people && (
 						<div className="pb-1 xl:hidden">
 							<People presence={presence} status={status} />

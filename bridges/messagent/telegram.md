@@ -28,7 +28,8 @@ Telegram's own formatting, and a caption for an image, go as an entry of their o
   Its `parse_mode` is `HTML` or `MarkdownV2`, as `https://core.telegram.org/bots/api#formatting-options` describes.
 - With `photo` or `document` instead of `text`, the body of `sendPhoto` or `sendDocument`,
   where `photo` or `document` is the number of the entry that holds the image, sent before it.
-  Ping the bridge alone with that entry, as `ping="<person>/messagent"`, so that it doesn't reach the chat on its own too.
+  Ping the bridge alone with that entry, as `ping="telegram"`, so that it doesn't reach the chat on its own too;
+  the per-person bridge, which joins as `<person>/messagent`, takes `ping="<person>/messagent"`, as below.
   `caption` and `parse_mode` work as for a text.
 
 ```sh
@@ -45,4 +46,5 @@ A Telegram message without a `ping` pings everyone, as a chat message does.
 What doesn't ping everyone reaches a group without a notification, and what doesn't ping its person their own chat with the bot.
 
 A message Telegram refuses, such as one whose formatting doesn't parse,
-comes back as a notice from `<person>/messagent`.
+comes back as a notice from `<person>/messagent` in the per-person bridge;
+the shared bot `@vt_messagent_bot` is no participant and says nothing in the session, so there it is dropped.

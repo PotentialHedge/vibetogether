@@ -89,6 +89,23 @@ const Session = z
 		address: z.string().nullable().meta({
 			description: "Its address on the relay, which joining takes.",
 		}),
+		bridges: z
+			.array(
+				z.object({
+					bridge: z
+						.string()
+						.meta({ description: "Which bridge, such as `messagent`." }),
+					by: Login.meta({ description: "Who added it." }),
+					about: z.string().nullable().meta({
+						description:
+							"What the bridge says of the room it bridges, such as a Telegram group and how many are in it: everything said in the session reaches them.",
+					}),
+				}),
+			)
+			.meta({
+				description:
+					"The rooms outside Vibe Together the session is bridged to, such as Telegram chats, oldest first. A bridge is no participant: the people it carries speak as themselves.",
+			}),
 	})
 	.openapi("Session");
 
@@ -131,17 +148,17 @@ const Token = z
 const Bridge = z
 	.object({
 		id: Id("b", "bridge"),
-		name: z.string().meta({
-			description:
-				"Its name in the session, `<name>/<bridge>`, such as `luiswirth/messagent`.",
-		}),
 		bridge: z
 			.string()
 			.meta({ description: "Which bridge, such as `messagent`." }),
 		by: Login.meta({ description: "Who added it." }),
 		for: z.string().nullable().meta({
 			description:
-				"What the bridge said it bridges, in its own words, such as a Telegram chat.",
+				"What the bridge said it bridges as it asked to be added, in its own words, such as a Telegram chat.",
+		}),
+		about: z.string().nullable().meta({
+			description:
+				"What the bridge says of its room now, such as a Telegram group and how many are in it.",
 		}),
 		session: Named("s", "session"),
 		created: z.string(),
@@ -332,7 +349,19 @@ async function sessionJson(
 		group: { id: session.groupId, name: session.groupName },
 		creator: session.creatorLogin,
 		address,
+		bridges: bridgesOf(session.id),
 	};
+}
+
+/** A session's bridges, as its info shows them. */
+function bridgesOf(session: string): z.infer<typeof Session>["bridges"] {
+	return db
+		.prepare(
+			`SELECT b.agent AS bridge, u.login AS by, r.about FROM session b JOIN user u ON u.id = b.userId
+			 LEFT JOIN bridge_room r ON r.session = b.id
+			 WHERE b.bridge = ? AND b.expiresAt > ? ORDER BY b.createdAt`,
+		)
+		.all(session, Date.now()) as z.infer<typeof Session>["bridges"];
 }
 
 function friendsOf(me: string): z.infer<typeof Friend>[] {
@@ -1263,22 +1292,24 @@ type BridgeRow = {
 	agent: string;
 	bridge: string;
 	claim: string | null;
+	about: string | null;
 	createdAt: string | number;
 	login: string;
 	sessionName: string;
 };
 
-const bridges = `SELECT b.id, b.agent, b.bridge, b.claim, b.createdAt, u.login, s.name AS sessionName
+const bridges = `SELECT b.id, b.agent, b.bridge, b.claim, b.createdAt, u.login, s.name AS sessionName, r.about
 	FROM session b JOIN user u ON u.id = b.userId JOIN owned_session s ON s.id = b.bridge
+	LEFT JOIN bridge_room r ON r.session = b.id
 	WHERE b.bridge IS NOT NULL AND b.expiresAt > ?`;
 
 function bridgeJson(row: BridgeRow): z.infer<typeof Bridge> {
 	return {
 		id: `b_${row.id}`,
-		name: `${row.login}/${row.agent}`,
 		bridge: row.agent,
 		by: row.login,
 		for: row.claim,
+		about: row.about,
 		session: { id: row.bridge, name: row.sessionName },
 		created: iso(row.createdAt),
 	};
@@ -1360,6 +1391,35 @@ api.openapi(
 			{ ...bridgeJson(row), session: await sessionJson(session) },
 			200,
 		);
+	},
+);
+
+api.openapi(
+	operation({
+		id: "describe_own_bridge",
+		tag: "Bridges",
+		who: "bridge",
+		method: "patch",
+		path: "/bridges/self",
+		summary: "Say what the bridge's room is",
+		description:
+			"Sets what the bridge in use says of the room it bridges, such as a Telegram group and how many are in it, which its session's info shows in place of a message in the session. For bridges only.",
+		request: body(z.object({ about: z.string().min(1).max(500) })),
+		responses: done,
+	}),
+	(c) => {
+		const { id, token } = c.var.caller;
+		const bridge = token?.slice(2) ?? "";
+		const own = db
+			.prepare(
+				"SELECT 1 FROM session WHERE id = ? AND userId = ? AND bridge IS NOT NULL",
+			)
+			.get(bridge, id);
+		if (!own) return c.text("No such bridge.", 404);
+		db.prepare(
+			"INSERT INTO bridge_room (session, about) VALUES (?, ?) ON CONFLICT (session) DO UPDATE SET about = excluded.about",
+		).run(bridge, c.req.valid("json").about);
+		return c.body(null, 204);
 	},
 );
 

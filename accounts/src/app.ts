@@ -83,7 +83,7 @@ async function paramsOf(request: Request): Promise<Record<string, unknown>> {
 function isBridge(params: Record<string, unknown>): boolean {
 	const { client_id: id, client_secret: secret } = params;
 	if (typeof id !== "string" || typeof secret !== "string") return false;
-	const expected = config.bridges.get(id);
+	const expected = config.bridges.get(id)?.hash;
 	if (!expected) return false;
 	const given = createHash("sha256").update(secret).digest();
 	return timingSafeEqual(given, Buffer.from(expected, "hex"));

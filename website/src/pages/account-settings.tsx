@@ -201,7 +201,9 @@ function Settings({
 								title={`${bridge.bridge} in ${bridge.session.name}`}
 								detail={
 									<>
-										{bridge.for && <>{bridge.for} · </>}
+										{(bridge.about ?? bridge.for) && (
+											<>{bridge.about ?? bridge.for} · </>
+										)}
 										added by {bridge.by} · since{" "}
 										{date.format(new Date(bridge.created))}
 									</>

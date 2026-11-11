@@ -1,11 +1,13 @@
 //! The Telegram bridge: one bot for everyone, run as a service of ours.
 //! A Telegram chat, private or a group, is bridged into one Vibe Together session that a member
-//! picks as they approve the bot's OTP: the bot joins it as `<member>/messagent`, and passes
-//! everything both ways, Luis's decisions (2026-11-10).
+//! picks as they approve the bot's OTP, and the bot passes everything both ways, Luis's decisions
+//! (2026-11-10).
 //!
-//! In the session, a person who linked their Telegram account, by an OTP from their private chat
-//! with the bot, speaks as themselves; everyone else's messages come from the bridge, labelled
-//! with their Telegram name and marked unverified.
+//! The bridge is no participant, Luis's decision (2026-11-11): it reads the session without
+//! joining it, and speaks only as the people it carries. A person who linked their Telegram
+//! account, by an OTP from their private chat with the bot, speaks as themselves; everyone else
+//! as `telegram/<name>`, unverified. What the bridge would say of its own, such as which chat the
+//! session reaches, is the session's info at the account service, not an entry.
 //!
 //! It fetches Telegram's updates by long polling, so nothing reaches it from outside.
 //! Each bridged chat has a directory of its own, by its id, with its bridge (`bridge.json`,
@@ -41,6 +43,11 @@ use crate::{
 
 /// The bridge's name at the account service, its `client_id`, which the OTP's page shows.
 pub const CLIENT_ID: &str = "messagent";
+/// The messenger it bridges, under whose name the people who linked no account speak, as
+/// `telegram/<name>`, as the account service knows it of the bridge.
+pub const MESSENGER: &str = "telegram";
+/// The most a name under the messenger's is numbered, where the one before is taken.
+const NUMBERED: u32 = 50;
 
 /// What Telegram shows of the bot, set as the service starts.
 const COMMANDS: &[(&str, &str)] = &[
@@ -101,8 +108,6 @@ pub enum Approval {
 /// A bridge, as the account service tells it of itself.
 #[derive(Deserialize, Debug, Clone)]
 pub struct Own {
-    /// Its name in the session, such as `luis/messagent`.
-    pub name: String,
     /// Who added it.
     pub by: String,
     pub session: OwnSession,
@@ -208,6 +213,23 @@ impl Accounts {
         }
     }
 
+    /// Says what the bridge's room is, which its session's info shows.
+    pub fn describe(&self, credential: &str, about: &str) -> Result<()> {
+        let mut response = self
+            .agent
+            .patch(format!("{}/api/bridges/self", self.url))
+            .header("Authorization", format!("Bearer {credential}"))
+            .send_json(json!({ "about": about }))
+            .map_err(|error| anyhow!("/api/bridges/self: {error}"))?;
+        match response.status().as_u16() {
+            204 => Ok(()),
+            status => Err(anyhow!(
+                "saying what the bridge's room is failed ({status}): {}",
+                response.body_mut().read_to_string().unwrap_or_default()
+            )),
+        }
+    }
+
     /// Removes the bridge of `credential` from its session.
     pub fn remove(&self, credential: &str) -> Result<()> {
         let mut response = self
@@ -229,10 +251,8 @@ impl Accounts {
 /// A chat's bridge, as kept on disk.
 #[derive(Serialize, Deserialize, Debug, Clone)]
 struct Link {
-    /// The credential the bot joins the session with.
+    /// The credential the bot reads the session with, and joins it as the people it carries.
     credential: String,
-    /// Its name in the session, such as `luis/messagent`.
-    name: String,
     /// Who added it.
     by: String,
     session: String,
@@ -247,8 +267,6 @@ struct Link {
 /// The chat's place in its session, as kept on disk.
 #[derive(Serialize, Deserialize, Debug, Default)]
 struct Place {
-    /// The bridge's own link, with which it receives and says its notices.
-    me: Option<String>,
     /// The last entry handled.
     after: u64,
     /// The entries that came from this chat, each with its message in Telegram.
@@ -269,6 +287,9 @@ struct Bridged {
     dir: PathBuf,
     place: Mutex<Place>,
     stopped: AtomicBool,
+    /// Held while a message of the chat goes into the session until its entry is kept, so that
+    /// reading the session never takes it for someone else's and carries it back.
+    carrying: Mutex<()>,
 }
 
 impl Bridged {
@@ -294,9 +315,9 @@ impl Bridged {
     }
 
     /// Whether `name` is an agent whose reading marks this chat's messages seen:
-    /// a participant's agent, and no bridge.
+    /// a participant's agent, and no person a bridge carries.
     fn is_agent(name: &str) -> bool {
-        name.contains('/') && !name.ends_with(&format!("/{CLIENT_ID}"))
+        name.contains('/') && !name.starts_with(&format!("{MESSENGER}/"))
     }
 }
 
@@ -320,8 +341,9 @@ struct Service {
     /// The Telegram accounts linked to an account, by Telegram id, as the bot saw them linked;
     /// the account service decides whether they still are, at each join.
     identities: Mutex<BTreeMap<i64, String>>,
-    /// The participants through which linked people speak, by session address and name, shared
-    /// by every chat bridged into that session, since a name joins a session once.
+    /// The participants through which the people carried speak, by session address and who:
+    /// a linked person's login, or `telegram:<id>` for anyone else. Shared by every chat bridged
+    /// into that session, since a name joins a session once.
     people: Mutex<BTreeMap<String, String>>,
 }
 
@@ -361,6 +383,32 @@ pub fn name_of(user: &User) -> String {
     match &user.username {
         Some(username) => format!("{name} (@{})", label(username, 40)),
         None => name,
+    }
+}
+
+/// A Telegram user's name as a part of an agentwire name, such as `luis-wirth` for "Luis Wirth":
+/// lower case letters and digits, joined by hyphens, `someone` where none is left.
+pub fn slug(user: &User) -> String {
+    let name = match &user.last_name {
+        Some(last) => format!("{} {last}", user.first_name),
+        None => user.first_name.clone(),
+    };
+    let mut slug = String::new();
+    for c in name.to_lowercase().chars() {
+        if c.is_ascii_alphanumeric() {
+            slug.push(c);
+        } else if !slug.is_empty() && !slug.ends_with('-') {
+            slug.push('-');
+        }
+        if slug.len() >= 40 {
+            break;
+        }
+    }
+    let slug = slug.trim_end_matches('-');
+    if slug.is_empty() {
+        "someone".into()
+    } else {
+        slug.into()
     }
 }
 
@@ -436,6 +484,7 @@ impl Service {
             dir,
             link,
             stopped: AtomicBool::new(false),
+            carrying: Mutex::new(()),
         });
         self.chats
             .lock()
@@ -451,21 +500,43 @@ impl Service {
         Ok(bridged)
     }
 
-    /// Ends a chat's bridge here: it stops, leaves the session, and its files go.
+    /// Ends a chat's bridge here: it stops, the people it carried leave the session where no other
+    /// chat carries them there, and its files go.
     /// `remove` removes it at the account service too, as /stop does.
     fn end(&self, chat: i64, remove: bool) {
-        let Some(bridged) = self.chats.lock().expect("no holder panics").remove(&chat) else {
-            return;
+        let (bridged, shared) = {
+            let mut chats = self.chats.lock().expect("no holder panics");
+            let Some(bridged) = chats.remove(&chat) else {
+                return;
+            };
+            let shared = chats
+                .values()
+                .any(|other| other.link.address == bridged.link.address);
+            (bridged, shared)
         };
         bridged.stopped.store(true, Ordering::Relaxed);
+        if !shared {
+            let prefix = format!("{} ", bridged.link.address);
+            let carried: Vec<String> = {
+                let mut people = self.people.lock().expect("no holder panics");
+                let keys: Vec<String> = people
+                    .keys()
+                    .filter(|key| key.starts_with(&prefix))
+                    .cloned()
+                    .collect();
+                keys.iter().filter_map(|key| people.remove(key)).collect()
+            };
+            for link in carried {
+                if let Err(error) = self.relay.leave(&link) {
+                    eprintln!("messagent serve: can't leave the session of {chat}: {error:#}");
+                }
+            }
+            if let Err(error) = self.save_people() {
+                eprintln!("messagent serve: can't keep who speaks where: {error:#}");
+            }
+        }
         if remove && let Err(error) = self.accounts.remove(&bridged.link.credential) {
             eprintln!("messagent serve: can't remove the bridge of {chat}: {error:#}");
-        }
-        let me = bridged.place.lock().expect("no holder panics").me.clone();
-        if let Some(me) = me
-            && let Err(error) = self.relay.leave(&me)
-        {
-            eprintln!("messagent serve: can't leave the session of {chat}: {error:#}");
         }
         if let Err(error) = fs::remove_dir_all(self.chat_dir(chat)) {
             eprintln!("messagent serve: can't remove the files of {chat}: {error:#}");
@@ -495,42 +566,19 @@ impl Service {
         }
     }
 
-    /// The bridge's own link in its session, joined where it has none: the place stays locked
-    /// meanwhile, so that its listening and its notices join once.
-    fn me(&self, bridged: &Bridged) -> Result<String> {
-        let mut place = bridged.place.lock().expect("no holder panics");
-        if let Some(me) = &place.me {
-            return Ok(me.clone());
-        }
-        let joined = self.relay.join(
-            &bridged.link.address,
-            &bridged.link.name,
-            Some(&bridged.link.credential),
-        )?;
-        place.me = Some(joined.link.clone());
-        bridged.save(&place)?;
-        Ok(joined.link)
-    }
-
-    /// Says something of the bridge's own in the session, returning its entry's number.
-    fn notice(&self, bridged: &Bridged, text: &str) -> Result<u64> {
-        let me = self.me(bridged)?;
-        self.send(bridged, &me, SPEECH, None, text.as_bytes())
-    }
-
-    /// Sends with a link of the bridge's, joining again once where it was let go.
+    /// Sends with the link of someone the bridge carries, joining again once where it was let go.
     fn send(
         &self,
         bridged: &Bridged,
-        me: &str,
+        link: &str,
         kind: &str,
         filename: Option<&str>,
         body: &[u8],
     ) -> Result<u64> {
-        match self.relay.send(me, kind, filename, body) {
+        match self.relay.send(link, kind, filename, body) {
             Err(error) if agentwire::status(&error) == Some(403) => {
-                self.relay.rejoin(me, Some(&bridged.link.credential))?;
-                self.relay.send(me, kind, filename, body)
+                self.relay.rejoin(link, Some(&bridged.link.credential))?;
+                self.relay.send(link, kind, filename, body)
             }
             sent => sent,
         }
@@ -566,43 +614,83 @@ impl Service {
         }
     }
 
-    /// Sends as `login`, rejoining once where the participant was let go; `None` where they may
-    /// no longer speak, which forgets their link.
-    fn send_as(
+    /// The link through which `from`, who linked no account, speaks in the chat's session:
+    /// `telegram/<name>`, numbered where the name is taken, kept by their Telegram id.
+    fn stranger(&self, bridged: &Bridged, from: &User) -> Result<String> {
+        let key = format!("{} {MESSENGER}:{}", bridged.link.address, from.id);
+        if let Some(link) = self.people.lock().expect("no holder panics").get(&key) {
+            return Ok(link.clone());
+        }
+        let base = slug(from);
+        for i in 1..=NUMBERED {
+            let name = if i == 1 {
+                format!("{MESSENGER}/{base}")
+            } else {
+                format!("{MESSENGER}/{base}-{i}")
+            };
+            match self
+                .relay
+                .join(&bridged.link.address, &name, Some(&bridged.link.credential))
+            {
+                Ok(joined) => {
+                    self.people
+                        .lock()
+                        .expect("no holder panics")
+                        .insert(key, joined.link.clone());
+                    self.save_people()?;
+                    return Ok(joined.link);
+                }
+                Err(error) if agentwire::status(&error) == Some(409) => {}
+                Err(error) => return Err(error),
+            }
+        }
+        Err(anyhow!(
+            "every name for {base} is taken in {}",
+            bridged.chat
+        ))
+    }
+
+    /// Sends what `from` said into the chat's session: as themselves where they linked their
+    /// Telegram account and may speak there, else as `telegram/<name>`, unverified.
+    fn speak(
         &self,
         bridged: &Bridged,
-        login: &str,
+        from: &User,
         kind: &str,
         filename: Option<&str>,
         body: &[u8],
-    ) -> Result<Option<u64>> {
-        let Some(link) = self.person(bridged, login)? else {
-            return Ok(None);
-        };
-        match self.send(bridged, &link, kind, filename, body) {
-            Ok(n) => Ok(Some(n)),
-            Err(error) if matches!(agentwire::status(&error), Some(403 | 404)) => {
-                eprintln!(
-                    "messagent serve: {login} no longer speaks in {}: {error:#}",
-                    bridged.chat
-                );
-                let key = format!("{} {login}", bridged.link.address);
-                self.people.lock().expect("no holder panics").remove(&key);
-                self.save_people()?;
-                Ok(None)
+    ) -> Result<u64> {
+        let login = self
+            .identities
+            .lock()
+            .expect("no holder panics")
+            .get(&from.id)
+            .cloned();
+        if let Some(login) = login
+            && let Some(link) = self.person(bridged, &login)?
+        {
+            match self.send(bridged, &link, kind, filename, body) {
+                Err(error) if matches!(agentwire::status(&error), Some(403 | 404)) => {
+                    eprintln!(
+                        "messagent serve: {login} no longer speaks in {}: {error:#}",
+                        bridged.chat
+                    );
+                    let key = format!("{} {login}", bridged.link.address);
+                    self.people.lock().expect("no holder panics").remove(&key);
+                    self.save_people()?;
+                }
+                sent => return sent,
             }
-            Err(error) => Err(error),
         }
+        let link = self.stranger(bridged, from)?;
+        self.send(bridged, &link, kind, filename, body)
     }
 
-    /// Tells the session who reads it: the chat, and in a group how many are in it.
+    /// Tells the session's info who reads it: the chat, and in a group how many are in it.
     fn audience(&self, bridged: &Bridged) -> Result<()> {
         let link = &bridged.link;
-        let text = if link.private {
-            format!(
-                "This session is bridged to {}'s private Telegram chat with messagent, added by {}: everything said here reaches that chat.",
-                link.title, link.by
-            )
+        let about = if link.private {
+            format!("{}'s private Telegram chat", link.title)
         } else {
             let members = self
                 .bot
@@ -613,15 +701,14 @@ impl Service {
             if told.is_some() && told == members {
                 return Ok(());
             }
-            bridged.update(|place| place.members = members)?;
             let count = members.map_or(String::new(), |n| format!(" ({n} people)"));
-            format!(
-                "This session is bridged to the Telegram group \"{}\"{count}, added by {}: everything said here reaches all of them. \
-                 People who linked their Telegram account speak here as themselves; everyone else's messages come from {}, marked unverified.",
-                link.title, link.by, link.name
-            )
+            self.accounts.describe(
+                &link.credential,
+                &format!("the Telegram group \"{}\"{count}", link.title),
+            )?;
+            return bridged.update(|place| place.members = members);
         };
-        self.notice(bridged, &text).map(drop)
+        self.accounts.describe(&link.credential, &about)
     }
 
     /// Starts bridging a chat, unless it is being bridged already.
@@ -732,7 +819,6 @@ impl Service {
             .context("the new bridge doesn't count")?;
         let link = Link {
             credential,
-            name: own.name.clone(),
             by: own.by.clone(),
             session: own.session.id.clone(),
             address: own
@@ -770,7 +856,7 @@ impl Service {
                 if private {
                     ""
                 } else {
-                    " People who linked their Telegram account, in a private chat with me, show there as themselves; everyone else as unverified."
+                    " People who linked their Telegram account, in a private chat with me, show there as themselves; everyone else as telegram/<name>, unverified."
                 }
             ),
         );
@@ -879,7 +965,7 @@ impl Service {
     }
 
     /// Carries a message into the session: as its sender where they linked their Telegram
-    /// account, else from the bridge, labelled with their name and marked unverified.
+    /// account, else as `telegram/<name>`, unverified.
     fn carry(&self, bridged: &Bridged, message: &Message, from: &User, edited: bool) -> Result<()> {
         let Arrived::Message { id, image, text } = message_of(message) else {
             return Ok(());
@@ -899,57 +985,18 @@ impl Service {
         };
         let text = text.filter(|text| !text.is_empty());
         let telegram = self.telegram(bridged.chat);
-        let login = self
-            .identities
-            .lock()
-            .expect("no holder panics")
-            .get(&from.id)
-            .cloned();
-        if let Some(login) = login {
-            let mut spoke = true;
-            if let Some(file) = &image {
-                let bytes = telegram.download(file)?;
-                match self.send_as(
-                    bridged,
-                    &login,
-                    &file.kind,
-                    file.filename.as_deref(),
-                    &bytes,
-                )? {
-                    Some(n) => bridged.sent(n, &id)?,
-                    None => spoke = false,
-                }
-            }
-            if spoke
-                && let Some(text) =
-                    text.as_ref()
-                        .map(|text| format!("{mark}{text}"))
-                        .or_else(|| {
-                            (!mark.is_empty() && image.is_none()).then(|| mark.trim().to_string())
-                        })
-            {
-                match self.send_as(bridged, &login, SPEECH, None, text.as_bytes())? {
-                    Some(n) => bridged.sent(n, &id)?,
-                    None => spoke = false,
-                }
-            }
-            if spoke {
-                return Ok(());
-            }
-        }
-        // Unverified: from the bridge itself, its sender named in front.
-        let me = self.me(bridged)?;
-        let who = format!("{} (Telegram, unverified)", name_of(from));
-        let said = match (&text, &image) {
-            (Some(text), _) => format!("{who}: {mark}{text}"),
-            (None, Some(_)) => format!("{who}: {mark}[an image, below]"),
-            (None, None) => format!("{who}: {mark}"),
-        };
-        let n = self.send(bridged, &me, SPEECH, None, said.as_bytes())?;
-        bridged.sent(n, &id)?;
+        let _carrying = bridged.carrying.lock().expect("no holder panics");
         if let Some(file) = &image {
             let bytes = telegram.download(file)?;
-            let n = self.send(bridged, &me, &file.kind, file.filename.as_deref(), &bytes)?;
+            let n = self.speak(bridged, from, &file.kind, file.filename.as_deref(), &bytes)?;
+            bridged.sent(n, &id)?;
+        }
+        let said = match text {
+            Some(text) => Some(format!("{mark}{text}")),
+            None => (!mark.is_empty() && image.is_none()).then(|| mark.trim().to_string()),
+        };
+        if let Some(said) = said {
+            let n = self.speak(bridged, from, SPEECH, None, said.as_bytes())?;
             bridged.sent(n, &id)?;
         }
         Ok(())
@@ -1016,76 +1063,54 @@ impl Service {
         }
     }
 
-    /// Receives from the session for good, carrying what comes out to the chat.
+    /// Reads the session for good, without joining it, carrying what comes out to the chat.
     fn listen(&self, bridged: &Bridged) -> Result<()> {
         let telegram = self.telegram(bridged.chat);
         let mut backoff = Backoff::new();
         while !bridged.stopped.load(Ordering::Relaxed) {
-            let me = match self.me(bridged) {
-                Ok(me) => me,
-                Err(error) if matches!(agentwire::status(&error), Some(403 | 404)) => {
-                    if !self.still(bridged) {
-                        return Ok(());
-                    }
-                    backoff.wait(&error);
-                    continue;
-                }
-                Err(error) => {
-                    backoff.wait(&error);
-                    continue;
-                }
-            };
             let after = bridged.place.lock().expect("no holder panics").after;
-            match self.relay.receive(&me, after) {
+            match self
+                .relay
+                .read(&bridged.link.address, after, &bridged.link.credential)
+            {
                 Ok(received) => {
                     backoff = Backoff::new();
                     self.received(bridged, &telegram, received)?;
                 }
-                Err(error) => match agentwire::status(&error) {
-                    Some(404) => {
-                        if !self.still(bridged) {
-                            return Ok(());
-                        }
-                        // The relay lost the session's participant: it joins anew.
-                        bridged.update(|place| place.me = None)?;
-                        backoff.wait(&error);
+                Err(error) => {
+                    if matches!(agentwire::status(&error), Some(403 | 404)) && !self.still(bridged)
+                    {
+                        return Ok(());
                     }
-                    Some(403) => {
-                        if let Err(error) = self.relay.rejoin(&me, Some(&bridged.link.credential)) {
-                            if !self.still(bridged) {
-                                return Ok(());
-                            }
-                            backoff.wait(&error);
-                        }
-                    }
-                    _ => backoff.wait(&error),
-                },
+                    backoff.wait(&error);
+                }
             }
         }
         Ok(())
     }
 
-    /// Takes in one receive: what goes out to the chat, and what the agents have read.
+    /// Takes in one read: what goes out to the chat, and what the agents have read.
     fn received(&self, bridged: &Bridged, telegram: &UserChat, received: Received) -> Result<()> {
         for entry in &received.entries {
             if bridged.stopped.load(Ordering::Relaxed) {
                 return Ok(());
             }
             let (after, ours) = {
+                let _carrying = bridged.carrying.lock().expect("no holder panics");
                 let place = bridged.place.lock().expect("no holder panics");
                 (place.after, place.messages.contains_key(&entry.n))
             };
             if entry.n <= after {
                 continue;
             }
-            // What came from this chat, and the bridge's own notices, are the chat's already;
-            // one that pings bridges alone is for their use, such as an image a Telegram
-            // message sends.
-            let own = entry.from == bridged.link.name;
+            // What came from this chat is the chat's already; one that pings the bridge alone, by
+            // its messenger's name, `telegram`, is for its use, such as an image a Telegram message
+            // sends. `<person>/messagent`, the per-person bridge's name, counts too, so that an
+            // agent writing for that one sends nothing twice here.
             let for_bridge = !entry.is(telegram.native())
                 && matches!(Ping::of(&entry.kind), Some(Ping::Only(names))
-                    if !names.is_empty() && names.iter().all(|name| !Bridged::is_agent(name) && name.contains('/')));
-            if !(ours || own || for_bridge || entry.is(JOIN) || entry.is(LEAVE)) {
+                    if !names.is_empty() && names.iter().all(|name| name == MESSENGER || name.ends_with(&format!("/{CLIENT_ID}"))));
+            if !(ours || for_bridge || entry.is(JOIN) || entry.is(LEAVE)) {
                 self.deliver(bridged, telegram, entry)?;
             }
             bridged.update(|place| place.after = entry.n)?;
@@ -1124,19 +1149,18 @@ impl Service {
         Ok(())
     }
 
-    /// Carries an entry out, riding out passing failures; one Telegram refuses becomes a notice.
+    /// Carries an entry out, riding out passing failures; one Telegram refuses is skipped.
     fn deliver(&self, bridged: &Bridged, telegram: &UserChat, entry: &Entry) -> Result<()> {
         let mut backoff = Backoff::new();
         loop {
             match self.out(bridged, telegram, entry) {
                 Ok(()) => return Ok(()),
                 Err(error) if refused(&error) => {
-                    let text = format!(
-                        "Entry {} didn't reach the Telegram chat: {error:#}",
-                        entry.n
+                    eprintln!(
+                        "messagent serve: entry {} didn't reach {}: {error:#}",
+                        entry.n, bridged.chat
                     );
-                    eprintln!("messagent serve: {text}");
-                    return self.notice(bridged, &text).map(drop);
+                    return Ok(());
                 }
                 Err(error) => backoff.wait(&error),
             }
@@ -1145,7 +1169,10 @@ impl Service {
 
     /// Carries one entry out to the chat, if it is for people.
     fn out(&self, bridged: &Bridged, telegram: &UserChat, entry: &Entry) -> Result<()> {
-        let me = self.me(bridged)?;
+        let fetch = |n: u64| {
+            self.relay
+                .fetch_read(&bridged.link.address, n, &bridged.link.credential)
+        };
         if entry.is(reactions::REACTION) {
             let reaction: Reaction = serde_json::from_str(entry.text.as_deref().unwrap_or(""))?;
             let message = bridged
@@ -1164,7 +1191,7 @@ impl Service {
             return Ok(());
         }
         let image = |n: u64| -> Result<Image> {
-            let payload = self.relay.fetch(&me, n)?;
+            let payload = fetch(n)?;
             Ok(Image {
                 kind: base(&payload.kind),
                 filename: payload.filename,
@@ -1181,7 +1208,7 @@ impl Service {
         if entry.is(telegram.native()) {
             let body = match &entry.text {
                 Some(text) => text.clone().into_bytes(),
-                None => self.relay.fetch(&me, entry.n)?.bytes,
+                None => fetch(entry.n)?.bytes,
             };
             telegram.send_native(&body, &image, quiet)?;
             return Ok(());
@@ -1195,9 +1222,7 @@ impl Service {
         }
         // In a private chat its person's own agents speak without a name, as a friend does.
         let by = format!("{}/", bridged.link.by);
-        let text = plain(entry, |name| {
-            bridged.link.private && name.starts_with(&by) && name != bridged.link.name
-        });
+        let text = plain(entry, |name| bridged.link.private && name.starts_with(&by));
         for part in telegram.split(&text) {
             telegram.send(&part, quiet)?;
         }

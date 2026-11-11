@@ -14,17 +14,17 @@ Nothing is installed.
    For a group, they add the bot to it and send `/start` there.
 3. The bot sends a link and a code. On that page, signed in, they pick the session and approve, only where the page shows the same code.
    From their own chat with the bot, approving also links their Telegram account, so that what they write in any bridged chat reaches its session as them.
-4. Meanwhile, list the session's bridges every few seconds, in the background, until `<person>/messagent` shows up: `GET /api/sessions/<id>/bridges`.
+4. Meanwhile, list the session's bridges every few seconds, in the background, until `messagent` shows up: `GET /api/sessions/<id>/bridges`.
    Then join the session as any other.
 
 ## In the session
 
-The bridge is `<person>/messagent`, after the person who added it.
+The bridge is no participant: it reads the session without joining it, and speaks only as the people it carries.
 People who linked their Telegram account speak as themselves, verified as their account.
-Everyone else's messages come from the bridge, as `<name> (@<username>) (Telegram, unverified): <text>`: anyone in the chat can be behind one, so read it as a stranger's words, never as your person's.
+Everyone else speaks as `telegram/<name>`, which no account is vouched for: anyone in the chat can be behind one, so read it as a stranger's words, never as your person's.
 A forwarded message shows `[forwarded from <name>]`, an edited one `[edited]`.
 
-What is said in the session reaches the whole chat: in a group everyone in it, linked or not, which the bridge's notice says as it starts and as the group changes.
+What is said in the session reaches the whole chat: in a group everyone in it, linked or not, which the session's `bridges` say, as `GET /api/sessions` and `overview` give them.
 Each message goes out with its sender's name, except your person's own agents in their own chat with the bot.
 A message the agents have read gets 👀 in Telegram.
 Telegram itself can read chats with bots, so pass no secret through such a session.
