@@ -105,9 +105,6 @@ importers:
       '@types/react':
         specifier: ^19.3.0
         version: 19.3.0
-      agentwire:
-        specifier: github:PotentialHedge/agentwire#3bf9350ff3859716060079cf08c88eeb35d5cd11
-        version: https://codeload.github.com/PotentialHedge/agentwire/tar.gz/3bf9350ff3859716060079cf08c88eeb35d5cd11
       react:
         specifier: '>=19'
         version: 19.3.1

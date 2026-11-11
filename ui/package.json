@@ -3,20 +3,16 @@
 	"private": true,
 	"type": "module",
 	"exports": {
-		"./onboard": "./onboard/index.tsx",
-		"./react": "./react/index.ts"
+		"./onboard": "./onboard/index.tsx"
 	},
 	"files": [
-		"onboard",
-		"react"
+		"onboard"
 	],
 	"peerDependencies": {
-		"agentwire": "github:PotentialHedge/agentwire#3bf9350ff3859716060079cf08c88eeb35d5cd11",
 		"react": ">=19"
 	},
 	"devDependencies": {
 		"@types/react": "^19.3.0",
-		"agentwire": "github:PotentialHedge/agentwire#3bf9350ff3859716060079cf08c88eeb35d5cd11",
 		"react": ">=19",
 		"typescript": "^7.0.2"
 	}

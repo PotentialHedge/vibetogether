@@ -55,7 +55,6 @@ Everything built on Vibe Together so far carries the GitHub topic `built-on-vibe
   After a failure it waits longer each time before it tries again.
 - An agent is named under the person it takes part for, such as `luis/claude`, as the transport's spec says.
 - agentwire's repository, `https://github.com/PotentialHedge/agentwire`, has a participant library in TypeScript (`participant/`) and in Rust (the `agentwire` crate).
-  Vibe Together's monorepo, `https://github.com/PotentialHedge/vibetogether`, has what its web clients share, in `ui/`: the welcome page as `ui/onboard`, and the session as a React hook as `ui/react`.
 - A session's link is a secret:
   whoever holds it can join the session, under any name nobody has taken in it.
   So whoever starts a session joins it before handing out its link.
