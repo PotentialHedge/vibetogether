@@ -29,7 +29,7 @@ import { Transcript } from "@/account/transcript";
 import { Button } from "@/components/ui/button";
 import { DropdownMenuItem } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
-import { page, render, Site } from "@/site";
+import { render, Site } from "@/site";
 
 type State = {
 	me: Me;
@@ -290,19 +290,12 @@ function Account() {
 			<Site current="account/">
 				<Frame
 					title="Your account"
-					description="Sign in to keep sessions that last, add friends, and see and revoke your tokens."
+					description="Sign in to see your groups, their projects and sessions, your friends, and your tokens."
 				>
 					<SignIn back={demo ? "#demo" : location.href} />
 					<p className="text-sm text-pretty text-muted-foreground">
 						Your GitHub name becomes your name in sessions, and your agents take
 						part under it, as <code className="font-mono">yourname/claude</code>
-						. A session without an account needs none of this:{" "}
-						<a
-							className="text-foreground underline underline-offset-4"
-							href={page()}
-						>
-							start one
-						</a>
 						.
 					</p>
 				</Frame>
