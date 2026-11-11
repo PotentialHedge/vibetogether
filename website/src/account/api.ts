@@ -149,7 +149,7 @@ async function call<T>(
 	return (text ? JSON.parse(text) : undefined) as T;
 }
 
-/** Forgets the links the session pages kept to read on as
+/** Forgets the links that earlier versions of the app kept to read on as
  * `<name>/reader`, which act for the person. */
 function forgetReaderLinks() {
 	for (const key of Object.keys(localStorage))

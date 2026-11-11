@@ -22,8 +22,8 @@ export type Presence = Record<
 export type Subscriber = {
 	entry?(entry: Entry): void;
 	presence?(presence: Presence): void;
-	/** The receive stopped for good: the participant left, another page
-	 * receives as it, or the session is gone. */
+	/** The receive or read stopped for good: the participant left, another
+	 * page receives as it, the reader may not read, or the session is gone. */
 	end?(why: string): void;
 };
 
@@ -206,6 +206,91 @@ export class Session {
 				failures = 0;
 			} catch {
 				if (receiving.signal.aborted) return;
+				await new Promise((wake) =>
+					setTimeout(wake, Math.min(1000 * 2 ** failures, 30_000)),
+				);
+				failures += 1;
+			}
+		}
+	}
+
+	#take(line: Entry | { presence: Presence }): void {
+		if ("presence" in line) {
+			this.presence = line.presence;
+			for (const subscriber of this.#subscribers) {
+				subscriber.presence?.(line.presence);
+			}
+		} else if (line.n > (this.log.at(-1)?.n ?? 0)) {
+			this.log.push(line);
+			for (const subscriber of this.#subscribers) subscriber.entry?.(line);
+		}
+	}
+}
+
+/** A session read without joining it, as `agentwire.md`'s Read has it: no
+ * participant, so it writes nothing and shows in no presence. It reads on as
+ * the log grows, and hands every entry and every change of presence to all
+ * who subscribed, as a `Session` does. */
+export class Reader {
+	readonly link: string;
+	/** The token presented on each read, as for joining. */
+	readonly token: string | null;
+	readonly log: Entry[] = [];
+	presence: Presence = {};
+	#subscribers = new Set<Subscriber>();
+	#reading: AbortController | null = null;
+
+	constructor(link: string, token: string | null = null) {
+		this.link = link.replace(/\/$/, "");
+		this.token = token;
+	}
+
+	/** Hands `subscriber` the log so far and the presence, then everything
+	 * that comes, reading while anyone is subscribed. Returns what
+	 * unsubscribes it. */
+	subscribe(subscriber: Subscriber): () => void {
+		for (const entry of this.log) subscriber.entry?.(entry);
+		subscriber.presence?.(this.presence);
+		this.#subscribers.add(subscriber);
+		this.#read();
+		return () => {
+			this.#subscribers.delete(subscriber);
+			if (this.#subscribers.size === 0) {
+				this.#reading?.abort();
+				this.#reading = null;
+			}
+		};
+	}
+
+	/** The read loop: one read at a time, after the last entry in the log,
+	 * retried with a growing pause while the relay can't be reached. */
+	async #read(): Promise<void> {
+		if (this.#reading) return;
+		const reading = new AbortController();
+		this.#reading = reading;
+		let failures = 0;
+		while (!reading.signal.aborted) {
+			try {
+				const url = new URL(`${this.link}/log`);
+				url.searchParams.set("after", String(this.log.at(-1)?.n ?? 0));
+				url.searchParams.set("presence", "1");
+				const response = await fetch(url, {
+					headers: this.token ? { Authorization: `Bearer ${this.token}` } : {},
+					signal: reading.signal,
+				});
+				if ([401, 403, 404].includes(response.status)) {
+					const why = (await response.text()).trim();
+					if (this.#reading === reading) this.#reading = null;
+					for (const subscriber of this.#subscribers) subscriber.end?.(why);
+					return;
+				}
+				const lines = (await (await checked(response)).text())
+					.split("\n")
+					.filter(Boolean);
+				for (const line of lines) this.#take(JSON.parse(line));
+				failures = 0;
+			} catch {
+				if (reading.signal.aborted) return;
 				await new Promise((wake) =>
 					setTimeout(wake, Math.min(1000 * 2 ** failures, 30_000)),
 				);

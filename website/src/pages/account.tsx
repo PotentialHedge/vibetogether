@@ -189,7 +189,6 @@ function App({ state, reload }: { state: State; reload: () => Promise<void> }) {
 							name: dm.friend.displayName || dm.friend.name,
 							address: dm.dm.address,
 						}}
-						me={me}
 						back={
 							<Button
 								variant="ghost"
@@ -207,7 +206,6 @@ function App({ state, reload }: { state: State; reload: () => Promise<void> }) {
 					<Transcript
 						key={session.id}
 						session={session}
-						me={me}
 						back={
 							<Button
 								variant="ghost"

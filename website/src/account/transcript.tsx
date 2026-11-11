@@ -1,14 +1,13 @@
-/** One of the account's sessions, its log as it grows: the app joins the
- * session itself, as `<name>/reader`, so it reads exactly where the person may,
- * and stands in the presence like anyone else who reads. */
+/** One of the account's sessions, its log as it grows: the app reads it
+ * without joining, with the token of its own sign-in, so it reads exactly
+ * where the person may, and stands in no presence. */
 
 import {
 	type Entry,
 	JOIN,
 	LEAVE,
-	Session as Participant,
 	type Presence,
-	RelayError,
+	Reader,
 } from "agentwire/participant";
 import { Download, Ellipsis, Minus, Plus, Users } from "lucide-react";
 import {
@@ -21,7 +20,7 @@ import {
 } from "react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { api, demo, type Me, type Session } from "@/account/api";
+import { api, demo, type Session } from "@/account/api";
 import { Button } from "@/components/ui/button";
 import {
 	DropdownMenu,
@@ -34,84 +33,54 @@ import { cn } from "@/lib/utils";
 
 const STATUS = "application/vnd.agentwire.chat.status+json";
 
-/** The page's reader in a session, one per page load: kept across React
- * mounting it twice, since a second join would find the name taken. */
-const readers = new Map<string, Promise<Participant>>();
+/** The app's reader of a session, one per address: kept across React mounting
+ * it twice, and across opening the session again. */
+const readers = new Map<string, Promise<Reader>>();
 
-/** Joins `address` as `<me>/reader`, or `reader-2` and on while another page of
- * the same person is reading there. The own link is kept, so that a reload
- * reads on as the same participant. */
-function reader(address: string, me: string): Promise<Participant> {
-	let joined = readers.get(address);
-	if (!joined) {
-		joined = (async () => {
-			const token = await api.pageToken();
-			for (let i = 1; ; i++) {
-				const name = `${me}/reader${i === 1 ? "" : `-${i}`}`;
-				const key = `vibetogether ${address} ${name}`;
-				const kept = localStorage.getItem(key);
-				const attempt = async (link: string | null) => {
-					const participant = new Participant(address, name, link, token);
-					await participant.join();
-					if (participant.me) localStorage.setItem(key, participant.me);
-					return participant;
-				};
-				try {
-					return await attempt(kept);
-				} catch (error) {
-					if (!(error instanceof RelayError)) throw error;
-					// A kept link that is no participant's any more joins anew.
-					if (kept && error.status === 403) {
-						localStorage.removeItem(key);
-						try {
-							return await attempt(null);
-						} catch (again) {
-							if (!(again instanceof RelayError) || again.status !== 409)
-								throw again;
-						}
-					} else if (error.status !== 409 || i >= 9) throw error;
-				}
-			}
-		})();
-		readers.set(address, joined);
+function reader(address: string): Promise<Reader> {
+	let made = readers.get(address);
+	if (!made) {
+		made = api.pageToken().then((token) => new Reader(address, token));
+		readers.set(address, made);
 	}
-	return joined;
+	return made;
 }
 
 type Log = {
-	participant: Participant | null;
+	reading: boolean;
 	entries: Entry[];
 	presence: Presence;
 	problem: string | null;
 };
 
-function useLog(session: Pick<Session, "address">, me: Me): Log {
+function useLog(session: Pick<Session, "address">): Log {
 	const [log, setLog] = useState<Log>({
-		participant: null,
+		reading: false,
 		entries: [],
 		presence: {},
 		problem: null,
 	});
 	useEffect(() => {
 		if (demo) {
-			setLog({ participant: null, ...made(me) });
+			setLog({ reading: true, ...made() });
 			return;
 		}
 		let stop = () => {};
 		let gone = false;
-		reader(session.address, me.name).then(
-			(participant) => {
+		reader(session.address).then(
+			(reader) => {
 				if (gone) return;
-				stop = participant.subscribe({
+				stop = reader.subscribe({
 					entry: () =>
 						setLog((log) => ({
 							...log,
-							participant,
-							entries: [...participant.log],
+							reading: true,
+							entries: [...reader.log],
 						})),
 					presence: (presence) =>
-						setLog((log) => ({ ...log, participant, presence })),
-					end: (why) => setLog((log) => ({ ...log, problem: why })),
+						setLog((log) => ({ ...log, reading: true, presence })),
+					end: (why) =>
+						setLog((log) => ({ ...log, reading: false, problem: why })),
 				});
 			},
 			(error: Error) =>
@@ -121,7 +90,7 @@ function useLog(session: Pick<Session, "address">, me: Me): Log {
 			gone = true;
 			stop();
 		};
-	}, [session.address, me]);
+	}, [session.address]);
 	return log;
 }
 
@@ -174,23 +143,8 @@ const size = (bytes: number) =>
 			: `${(bytes / 1024 ** 2).toFixed(1)} MB`;
 
 /** What an entry holds, as the chat spec says to show it. */
-function Body({
-	entry,
-	participant,
-}: {
-	entry: Entry;
-	participant: Participant | null;
-}) {
+function Body({ entry }: { entry: Entry }) {
 	const type = base(entry.type);
-	const url = participant?.me ? participant.url(entry.n) : undefined;
-	if (type.startsWith("image/") && url)
-		return (
-			<img
-				src={url}
-				alt={entry.filename ?? ""}
-				className="mt-1 max-h-[60vh] rounded-lg border"
-			/>
-		);
 	if (entry.text !== undefined && !entry.filename) {
 		if (type === "text/markdown")
 			return (
@@ -216,14 +170,7 @@ function Body({
 	}
 	return (
 		<p className="font-mono text-[0.85em] text-muted-foreground">
-			{url ? (
-				<a href={url} download={entry.filename} className="underline">
-					{entry.filename ?? type}
-				</a>
-			) : (
-				(entry.filename ?? type)
-			)}{" "}
-			· {size(entry.size)}
+			{entry.filename ?? type} · {size(entry.size)}
 		</p>
 	);
 }
@@ -280,14 +227,12 @@ const isMessage = (entry: Entry) =>
 /** Who is in the session, each with whether it receives and its status. */
 function People({
 	presence,
-	self,
 	status,
 }: {
 	presence: Presence;
-	self: string | undefined;
 	status: Map<string, string>;
 }) {
-	const others = Object.entries(presence).filter(([name]) => name !== self);
+	const others = Object.entries(presence);
 	return (
 		<ul className="flex flex-col gap-3 text-sm">
 			{others.map(([name, state]) => (
@@ -316,12 +261,7 @@ function People({
 				</li>
 			))}
 			{others.length === 0 && (
-				<li className="text-muted-foreground">no one else</li>
-			)}
-			{self && (
-				<li className="text-xs text-muted-foreground">
-					you read as <span className="font-mono">{self}</span>
-				</li>
+				<li className="text-muted-foreground">no one here</li>
 			)}
 		</ul>
 	);
@@ -330,14 +270,12 @@ function People({
 /** A session, live: its log as it grows, who is there and their status. */
 export function Transcript({
 	session,
-	me,
 	actions,
 	menu,
 	back,
 }: {
 	/** A session or a DM, as far as the transcript shows it. */
 	session: Pick<Session, "name" | "address">;
-	me: Me;
 	/** What can be done with the session, at the header's end. */
 	actions?: ReactNode;
 	/** What else can be done with it, as items of its menu. */
@@ -345,8 +283,7 @@ export function Transcript({
 	/** Leads back to the sessions, where they are not beside it. */
 	back?: ReactNode;
 }) {
-	const { participant, entries, presence, problem } = useLog(session, me);
-	const self = participant?.name;
+	const { reading, entries, presence, problem } = useLog(session);
 	const status = useMemo(() => statuses(entries), [entries]);
 	const [people, setPeople] = useState(false);
 	const [scale, setScale] = useState(
@@ -362,12 +299,11 @@ export function Transcript({
 		const shown = entries.map((entry) => entry.n);
 		const under = new Map<number, string[]>();
 		for (const [name, { read }] of Object.entries(presence)) {
-			if (name === self) continue;
 			const at = shown.filter((n) => n <= read).at(-1);
 			if (at !== undefined) under.set(at, [...(under.get(at) ?? []), name]);
 		}
 		return under;
-	}, [entries, presence, self]);
+	}, [entries, presence]);
 
 	// Follows the log as it grows, while it is scrolled to its end.
 	const scroller = useRef<HTMLDivElement>(null);
@@ -390,8 +326,7 @@ export function Transcript({
 		URL.revokeObjectURL(link.href);
 	};
 
-	const live = self !== undefined && presence[self]?.receiving;
-	const count = Object.keys(presence).filter((name) => name !== self).length;
+	const count = Object.keys(presence).length;
 
 	return (
 		<div className="flex h-full min-h-0">
@@ -403,10 +338,12 @@ export function Transcript({
 							{session.name}
 						</h1>
 						<span
-							title={live ? "live" : participant ? "not receiving" : "joining"}
+							title={reading ? "live" : "not reading"}
 							className={cn(
 								"size-2 shrink-0 rounded-full",
-								live ? "animate-pulse bg-emerald-400" : "bg-muted-foreground",
+								reading
+									? "animate-pulse bg-emerald-400"
+									: "bg-muted-foreground",
 							)}
 						/>
 						<div className="ml-auto flex shrink-0 items-center gap-1">
@@ -464,7 +401,7 @@ export function Transcript({
 					</div>
 					{people && (
 						<div className="pb-1 xl:hidden">
-							<People presence={presence} self={self} status={status} />
+							<People presence={presence} status={status} />
 						</div>
 					)}
 				</header>
@@ -517,7 +454,7 @@ export function Transcript({
 														)}
 													</div>
 												)}
-												<Body entry={entry} participant={participant} />
+												<Body entry={entry} />
 											</div>
 										</div>
 									) : (
@@ -535,14 +472,14 @@ export function Transcript({
 				</div>
 			</div>
 			<aside className="hidden w-72 shrink-0 overflow-y-auto border-l px-5 py-4 xl:block">
-				<People presence={presence} self={self} status={status} />
+				<People presence={presence} status={status} />
 			</aside>
 		</div>
 	);
 }
 
 /** A made-up session, for `#demo`. */
-function made(me: Me): Omit<Log, "participant"> {
+function made(): Omit<Log, "reading"> {
 	const start = Date.now() - 20 * 60_000;
 	const at = (minutes: number) =>
 		new Date(start + minutes * 60_000).toISOString();
@@ -594,7 +531,6 @@ function made(me: Me): Omit<Log, "participant"> {
 				account: "benarmstrong",
 			},
 			"tristangabl/codex": { read: 7, receiving: true, account: "tristangabl" },
-			[`${me.name}/reader`]: { read: 7, receiving: true, account: me.name },
 		},
 		problem: null,
 	};
