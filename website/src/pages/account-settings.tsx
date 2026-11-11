@@ -1,8 +1,19 @@
-/** The account's settings: tokens, bridges and linked identities, friends,
- * what agents changed, signing out and deleting the account. */
+/** The account's settings, one tab each: friends, tokens, bridges, linked
+ * identities, what agents changed, and signing out and deleting the account. */
 
-import { ArrowLeft, Cable, Monitor, Plug, UserCheck } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import {
+	ArrowLeft,
+	Cable,
+	CircleUser,
+	History,
+	KeyRound,
+	LogOut,
+	Monitor,
+	Plug,
+	UserCheck,
+	Users,
+} from "lucide-react";
+import { type ReactNode, useCallback, useEffect, useState } from "react";
 import {
 	type Activity,
 	api,
@@ -15,17 +26,10 @@ import {
 	type Token,
 	Unauthorized,
 } from "@/account/api";
-import {
-	AddByName,
-	Empty,
-	Panel,
-	Person,
-	Row,
-	Titled,
-	useActions,
-} from "@/account/parts";
+import { AddByName, Person, Row, Titled, useActions } from "@/account/parts";
 import { SignIn } from "@/account/sign-in";
 import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 import { page, render, Site } from "@/site";
 
 type State = {
@@ -70,6 +74,70 @@ const argumentsOf = (args: Record<string, unknown>) =>
 
 const app = page(`account/${demo ? "#demo" : ""}`);
 
+/** The settings' tabs, one thing each, kept in the address as `?tab=`. */
+const TABS = [
+	{ id: "friends", label: "Friends", icon: Users },
+	{ id: "tokens", label: "Tokens", icon: KeyRound },
+	{ id: "bridges", label: "Bridges", icon: Cable },
+	{ id: "identities", label: "Linked identities", icon: UserCheck },
+	{ id: "activity", label: "Activity", icon: History },
+	{ id: "account", label: "Account", icon: CircleUser },
+] as const;
+type Tab = (typeof TABS)[number]["id"];
+
+function tabOfAddress(): Tab {
+	const tab = new URLSearchParams(location.search).get("tab");
+	return TABS.find(({ id }) => id === tab)?.id ?? "friends";
+}
+
+/** One tab's content: its title, a line on what it is where that helps, and
+ * what can be added on the right. */
+function Pane({
+	title,
+	line,
+	action,
+	children,
+}: {
+	title: string;
+	line?: ReactNode;
+	action?: ReactNode;
+	children: ReactNode;
+}) {
+	return (
+		<section className="flex flex-col gap-5">
+			<div className="flex flex-wrap items-end justify-between gap-x-6 gap-y-3">
+				<div className="flex flex-col gap-1">
+					<h2 className="font-mono text-lg font-medium tracking-tight">
+						{title}
+					</h2>
+					{line && (
+						<p className="text-sm text-pretty text-muted-foreground">{line}</p>
+					)}
+				</div>
+				{action}
+			</div>
+			{children}
+		</section>
+	);
+}
+
+/** The rows of a pane, or one quiet line where there are none. */
+function Rows({
+	empty,
+	children,
+}: {
+	empty: ReactNode;
+	children: ReactNode[];
+}) {
+	return children.length === 0 ? (
+		<p className="text-sm text-muted-foreground">{empty}</p>
+	) : (
+		<div className="divide-y overflow-hidden rounded-xl border bg-card/50">
+			{children}
+		</div>
+	);
+}
+
 function Settings({
 	state,
 	reload,
@@ -80,275 +148,319 @@ function Settings({
 	const { me, friends, tokens, bridges, identities, activity } = state;
 	const { problem, act } = useActions(reload);
 	const [minted, setMinted] = useState<Minted | null>(null);
+	const [tab, setTab] = useState<Tab>(tabOfAddress);
+	useEffect(() => {
+		const back = () => setTab(tabOfAddress());
+		addEventListener("popstate", back);
+		return () => removeEventListener("popstate", back);
+	}, []);
+	const open = (next: Tab) => {
+		const query = new URLSearchParams(location.search);
+		query.set("tab", next);
+		history.pushState(
+			null,
+			"",
+			`${location.pathname}?${query}${location.hash}`,
+		);
+		setTab(next);
+	};
+	const asking = friends.filter((friend) => friend.state === "asking").length;
 
 	return (
-		<div className="mx-auto flex w-full max-w-4xl flex-col gap-14 px-6 pt-8 md:pt-12">
-			<header className="flex flex-wrap items-center gap-4">
-				<a
-					href={app}
-					aria-label="Back to the app"
-					className="text-muted-foreground hover:text-foreground"
-				>
-					<ArrowLeft className="size-5" />
-				</a>
-				<Person {...me} size="lg" />
-				<div className="flex flex-col">
-					<h1 className="text-xl font-medium">{me.displayName}</h1>
-					<span className="font-mono text-sm text-muted-foreground">
-						{me.name}
-					</span>
+		<div className="mx-auto flex w-full max-w-5xl flex-col gap-8 px-6 pt-8 pb-16 md:flex-row md:gap-12 md:pt-12">
+			<aside className="flex shrink-0 flex-col gap-6 md:w-52">
+				<div className="flex items-center gap-3">
+					<a
+						href={app}
+						aria-label="Back to the app"
+						title="Back to the app"
+						className="-ml-1 rounded-md p-1 text-muted-foreground hover:text-foreground"
+					>
+						<ArrowLeft className="size-5" />
+					</a>
+					<Person {...me} />
+					<div className="flex min-w-0 flex-col leading-tight">
+						<span className="truncate font-medium">{me.displayName}</span>
+						<span className="truncate font-mono text-xs text-muted-foreground">
+							{me.name}
+						</span>
+					</div>
 				</div>
+				<nav
+					aria-label="Settings"
+					className="-mx-6 flex gap-1 overflow-x-auto px-6 md:mx-0 md:flex-col md:px-0"
+				>
+					{TABS.map(({ id, label, icon: Icon }) => (
+						<button
+							key={id}
+							type="button"
+							aria-current={id === tab ? "page" : undefined}
+							onClick={() => open(id)}
+							className={cn(
+								"flex h-9 shrink-0 items-center gap-2.5 rounded-md px-3 text-sm whitespace-nowrap text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground",
+								id === tab && "bg-muted text-foreground",
+							)}
+						>
+							<Icon className="size-4" />
+							{label}
+							{id === "friends" && asking > 0 && (
+								<span className="ml-auto rounded-full bg-primary px-1.5 text-xs text-primary-foreground">
+									{asking}
+								</span>
+							)}
+						</button>
+					))}
+				</nav>
+			</aside>
+
+			<main className="flex min-w-0 flex-1 flex-col gap-4">
+				{problem && <p className="text-sm text-destructive">{problem}</p>}
+
+				{tab === "friends" && (
+					<Pane
+						title="Friends"
+						line="You become friends once each of you has added the other."
+						action={
+							<AddByName
+								placeholder="github name"
+								label="Add"
+								onAdd={async (name) => {
+									await api.addFriend(name);
+									await reload();
+								}}
+							/>
+						}
+					>
+						<Rows empty="No friends yet.">
+							{friends.map((friend) => (
+								<Row
+									key={friend.name}
+									actions={
+										<>
+											{friend.state === "asked" && (
+												<span className="text-sm text-muted-foreground">
+													waiting for them
+												</span>
+											)}
+											{friend.state === "asking" && (
+												<Button
+													size="sm"
+													onClick={act(() => api.addFriend(friend.name))}
+												>
+													Accept
+												</Button>
+											)}
+											<Button
+												variant="ghost"
+												size="sm"
+												onClick={act(() => api.removeFriend(friend.name))}
+											>
+												{friend.state === "asking" ? "Decline" : "Remove"}
+											</Button>
+										</>
+									}
+								>
+									<Person {...friend} size="sm" />
+									<Titled
+										title={friend.displayName || friend.name}
+										detail={friend.name}
+									/>
+								</Row>
+							))}
+						</Rows>
+					</Pane>
+				)}
+
+				{tab === "tokens" && (
+					<Pane
+						title="Tokens"
+						line="Each connects a machine's agents, or an MCP client, to your account."
+						action={
+							<AddByName
+								placeholder="machine name"
+								label="Mint token"
+								onAdd={async (name) => {
+									setMinted(await api.mint(name));
+									await reload();
+								}}
+							/>
+						}
+					>
+						{minted && <MintedToken minted={minted} />}
+						<Rows empty="No tokens yet.">
+							{tokens.map((token) => (
+								<Row
+									key={token.id}
+									actions={
+										<Button
+											variant="ghost"
+											size="sm"
+											onClick={act(() => api.revoke(token.id))}
+										>
+											Revoke
+										</Button>
+									}
+								>
+									{token.kind === "mcp" ? (
+										<Plug
+											aria-label="MCP client"
+											className="size-4 shrink-0 text-muted-foreground"
+										/>
+									) : (
+										<Monitor
+											aria-label="machine"
+											className="size-4 shrink-0 text-muted-foreground"
+										/>
+									)}
+									<Titled
+										title={token.name}
+										detail={`${token.kind === "mcp" ? "MCP client" : "machine"} · since ${date.format(new Date(token.created))}`}
+									/>
+								</Row>
+							))}
+						</Rows>
+					</Pane>
+				)}
+
+				{tab === "bridges" && (
+					<Pane
+						title="Bridges"
+						line="Chats outside Vibe Together, such as on Telegram, mirrored into your sessions."
+					>
+						<Rows
+							empty={
+								<>
+									None yet. Your agent sets one up from{" "}
+									<a
+										className="text-foreground underline underline-offset-4"
+										href={page("ecosystem.md")}
+									>
+										ecosystem.md
+									</a>
+									.
+								</>
+							}
+						>
+							{bridges.map((bridge) => (
+								<Row
+									key={bridge.id}
+									actions={
+										<Button
+											variant="ghost"
+											size="sm"
+											onClick={act(() =>
+												api.removeBridge(bridge.session.id, bridge.id),
+											)}
+										>
+											Remove
+										</Button>
+									}
+								>
+									<Cable
+										aria-hidden
+										className="size-4 shrink-0 text-muted-foreground"
+									/>
+									<Titled
+										title={`${bridge.bridge} in ${bridge.session.name}`}
+										detail={
+											<>
+												{(bridge.about ?? bridge.for) && (
+													<>{bridge.about ?? bridge.for} · </>
+												)}
+												added by {bridge.by} · since{" "}
+												{date.format(new Date(bridge.created))}
+											</>
+										}
+									/>
+								</Row>
+							))}
+						</Rows>
+					</Pane>
+				)}
+
+				{tab === "identities" && (
+					<Pane
+						title="Linked identities"
+						line="Your accounts on messengers, which bridges carry as you."
+					>
+						<Rows empty="None yet. Send /start to messagent on Telegram to link yours.">
+							{identities.map((identity) => (
+								<Row
+									key={identity.id}
+									actions={
+										<Button
+											variant="ghost"
+											size="sm"
+											onClick={act(() => api.unlinkIdentity(identity.id))}
+										>
+											Unlink
+										</Button>
+									}
+								>
+									<UserCheck
+										aria-hidden
+										className="size-4 shrink-0 text-muted-foreground"
+									/>
+									<Titled
+										title={identity.name}
+										detail={`id ${identity.external}, through ${identity.bridge} · since ${date.format(new Date(identity.created))}`}
+									/>
+								</Row>
+							))}
+						</Rows>
+					</Pane>
+				)}
+
+				{tab === "activity" && (
+					<Pane title="Activity" line="What your agents changed, newest first.">
+						<Rows empty="Nothing yet.">
+							{activity.map((change) => (
+								<Row
+									key={`${change.created} ${change.token} ${change.operation} ${JSON.stringify(change.arguments)}`}
+								>
+									<Titled
+										title={change.operation}
+										detail={`${change.agent} · ${when.format(new Date(change.created))}${Object.keys(change.arguments).length ? ` · ${argumentsOf(change.arguments)}` : ""}`}
+									/>
+								</Row>
+							))}
+						</Rows>
+					</Pane>
+				)}
+
+				{tab === "account" && <AccountPane />}
+			</main>
+		</div>
+	);
+}
+
+/** Signing out, and deleting the account after a second click that says what
+ * goes with it. */
+function AccountPane() {
+	const [asked, setAsked] = useState(false);
+	const [problem, setProblem] = useState<string | null>(null);
+	return (
+		<Pane title="Account">
+			<div className="flex flex-col items-start gap-2">
 				<Button
-					variant="ghost"
-					className="ml-auto"
+					variant="outline"
 					onClick={async () => {
 						await api.signOut();
 						location.href = page();
 					}}
 				>
+					<LogOut />
 					Sign out
 				</Button>
-			</header>
-			{problem && <p className="-mt-8 text-sm text-destructive">{problem}</p>}
-
-			<Panel
-				title="Tokens"
-				description="A token connects the agents of a machine, or an MCP client, to your account, until you revoke it."
-				action={
-					<AddByName
-						placeholder="machine name"
-						label="Mint new token"
-						onAdd={async (name) => {
-							setMinted(await api.mint(name));
-							await reload();
-						}}
-					/>
-				}
-			>
-				{minted && <MintedToken minted={minted} />}
-				{tokens.length === 0 ? (
-					<Empty>No token yet.</Empty>
-				) : (
-					tokens.map((token) => (
-						<Row
-							key={token.id}
-							actions={
-								<Button
-									variant="ghost"
-									size="sm"
-									onClick={act(() => api.revoke(token.id))}
-								>
-									Revoke
-								</Button>
-							}
-						>
-							{token.kind === "mcp" ? (
-								<Plug
-									aria-label="MCP client"
-									className="size-4 shrink-0 text-muted-foreground"
-								/>
-							) : (
-								<Monitor
-									aria-label="machine"
-									className="size-4 shrink-0 text-muted-foreground"
-								/>
-							)}
-							<Titled
-								title={token.name}
-								detail={`${token.kind === "mcp" ? "MCP client" : "machine"} · since ${date.format(new Date(token.created))}`}
-							/>
-						</Row>
-					))
-				)}
-			</Panel>
-
-			<Panel
-				title="Bridges"
-				description="A bridge mirrors a chat outside Vibe Together and a session onto each other, such as a Telegram chat with messagent: everything said in either reaches the other. Any member of the session's group removes one."
-			>
-				{bridges.length === 0 ? (
-					<Empty>
-						No bridge in your sessions yet. Your agent sets one up for you from{" "}
-						<a
-							className="text-foreground underline underline-offset-4"
-							href={page("ecosystem.md")}
-						>
-							ecosystem.md
-						</a>
-						.
-					</Empty>
-				) : (
-					bridges.map((bridge) => (
-						<Row
-							key={bridge.id}
-							actions={
-								<Button
-									variant="ghost"
-									size="sm"
-									onClick={act(() =>
-										api.removeBridge(bridge.session.id, bridge.id),
-									)}
-								>
-									Remove
-								</Button>
-							}
-						>
-							<Cable
-								aria-hidden
-								className="size-4 shrink-0 text-muted-foreground"
-							/>
-							<Titled
-								title={`${bridge.bridge} in ${bridge.session.name}`}
-								detail={
-									<>
-										{(bridge.about ?? bridge.for) && (
-											<>{bridge.about ?? bridge.for} · </>
-										)}
-										added by {bridge.by} · since{" "}
-										{date.format(new Date(bridge.created))}
-									</>
-								}
-							/>
-						</Row>
-					))
-				)}
-			</Panel>
-
-			<Panel
-				title="Linked identities"
-				description="Your accounts on messengers, such as Telegram, which bridges carry as you: what you write in a bridged chat reaches its session as you. Once unlinked, it shows as anyone else's, unverified."
-			>
-				{identities.length === 0 ? (
-					<Empty>
-						None yet. Send /start to messagent in a private chat on Telegram to
-						link yours.
-					</Empty>
-				) : (
-					identities.map((identity) => (
-						<Row
-							key={identity.id}
-							actions={
-								<Button
-									variant="ghost"
-									size="sm"
-									onClick={act(() => api.unlinkIdentity(identity.id))}
-								>
-									Unlink
-								</Button>
-							}
-						>
-							<UserCheck
-								aria-hidden
-								className="size-4 shrink-0 text-muted-foreground"
-							/>
-							<Titled
-								title={identity.name}
-								detail={`id ${identity.external}, through ${identity.bridge} · since ${date.format(new Date(identity.created))}`}
-							/>
-						</Row>
-					))
-				)}
-			</Panel>
-
-			<Panel
-				title="Friends"
-				description="Two people are friends once each has added the other."
-				action={
-					<AddByName
-						placeholder="github name"
-						label="Add"
-						onAdd={async (name) => {
-							await api.addFriend(name);
-							await reload();
-						}}
-					/>
-				}
-			>
-				{friends.length === 0 ? (
-					<Empty>No friends yet. Add someone by their GitHub name.</Empty>
-				) : (
-					friends.map((friend) => (
-						<Row
-							key={friend.name}
-							actions={
-								<>
-									{friend.state === "asked" && (
-										<span className="text-sm text-muted-foreground">
-											waiting for them
-										</span>
-									)}
-									{friend.state === "asking" && (
-										<Button
-											size="sm"
-											onClick={act(() => api.addFriend(friend.name))}
-										>
-											Accept
-										</Button>
-									)}
-									<Button
-										variant="ghost"
-										size="sm"
-										onClick={act(() => api.removeFriend(friend.name))}
-									>
-										{friend.state === "asking" ? "Decline" : "Remove"}
-									</Button>
-								</>
-							}
-						>
-							<Person {...friend} size="sm" />
-							<span className="flex min-w-0 flex-col leading-tight">
-								<span className="truncate">{friend.displayName}</span>
-								<span className="font-mono text-xs text-muted-foreground">
-									{friend.name}
-								</span>
-							</span>
-						</Row>
-					))
-				)}
-			</Panel>
-
-			<Panel
-				title="Activity"
-				description="What your agents changed in your account, newest first."
-			>
-				{activity.length === 0 ? (
-					<Empty>Nothing yet.</Empty>
-				) : (
-					activity.map((change) => (
-						<Row
-							key={`${change.created} ${change.token} ${change.operation} ${JSON.stringify(change.arguments)}`}
-						>
-							<Titled
-								title={change.operation}
-								detail={`${change.agent} · ${when.format(new Date(change.created))}${Object.keys(change.arguments).length ? ` · ${argumentsOf(change.arguments)}` : ""}`}
-							/>
-						</Row>
-					))
-				)}
-			</Panel>
-
-			<DeleteAccount />
-		</div>
-	);
-}
-
-/** Deleting the account, after a second click that says what goes with it. */
-function DeleteAccount() {
-	const [asked, setAsked] = useState(false);
-	const [problem, setProblem] = useState<string | null>(null);
-	return (
-		<section className="flex flex-col gap-3 border-t pt-8 pb-4">
-			<h2 className="font-mono text-lg font-medium tracking-tight">
-				Delete account
-			</h2>
-			<p className="max-w-xl text-sm text-pretty text-muted-foreground">
-				This deletes your account with its tokens and DMs, and every group you
-				are the last member of, with its projects and sessions. You leave the
-				other groups. It can't be undone.
-			</p>
-			<div className="flex flex-wrap gap-2">
+			</div>
+			<div className="flex flex-col items-start gap-3 border-t pt-5">
+				<p className="max-w-xl text-sm text-pretty text-muted-foreground">
+					Deleting your account deletes its tokens and DMs, and every group you
+					are the last member of. You leave the other groups. It can't be
+					undone.
+				</p>
 				{asked ? (
-					<>
+					<div className="flex flex-wrap gap-2">
 						<Button
 							variant="destructive"
 							onClick={async () => {
@@ -367,15 +479,15 @@ function DeleteAccount() {
 						<Button variant="ghost" onClick={() => setAsked(false)}>
 							Cancel
 						</Button>
-					</>
+					</div>
 				) : (
 					<Button variant="destructive" onClick={() => setAsked(true)}>
 						Delete account
 					</Button>
 				)}
+				{problem && <p className="text-sm text-destructive">{problem}</p>}
 			</div>
-			{problem && <p className="text-sm text-destructive">{problem}</p>}
-		</section>
+		</Pane>
 	);
 }
 

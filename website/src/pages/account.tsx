@@ -226,8 +226,7 @@ function App({ state, reload }: { state: State; reload: () => Promise<void> }) {
 					/>
 				) : (
 					<p className="m-auto max-w-sm px-6 text-center text-sm text-pretty text-muted-foreground">
-						{group &&
-						!projects.some((project) => project.group.id === group.id)
+						{group && !projects.some((project) => project.group.id === group.id)
 							? `Make a project in ${group.name} on the left, then start a session in it.`
 							: "Open a session on the left, or start one with the + by a project."}
 					</p>

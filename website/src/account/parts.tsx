@@ -1,5 +1,4 @@
-/** The parts the pages of an account share: a person's face, and panels of
- * rows. */
+/** The parts the pages of an account share: a person's face, and rows. */
 
 import { type ReactNode, useState } from "react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -28,38 +27,7 @@ export function Person({
 	);
 }
 
-export function Panel({
-	title,
-	description,
-	action,
-	children,
-}: {
-	title: string;
-	description: ReactNode;
-	action?: ReactNode;
-	children: ReactNode;
-}) {
-	return (
-		<section className="flex flex-col gap-4">
-			<div className="flex flex-wrap items-end justify-between gap-x-6 gap-y-3">
-				<div className="flex flex-col gap-1">
-					<h2 className="font-mono text-lg font-medium tracking-tight">
-						{title}
-					</h2>
-					<p className="max-w-xl text-sm text-pretty text-muted-foreground">
-						{description}
-					</p>
-				</div>
-				{action}
-			</div>
-			<div className="divide-y overflow-hidden rounded-2xl border bg-card/50">
-				{children}
-			</div>
-		</section>
-	);
-}
-
-/** One thing in a panel: what it is, and on the right what can be done with
+/** One thing in a list: what it is, and on the right what can be done with
  * it, which goes below it where the two don't fit side by side. */
 export function Row({
 	children,
@@ -78,7 +46,7 @@ export function Row({
 				inset && "py-3 pl-11",
 			)}
 		>
-			<div className="flex min-w-0 flex-1 basis-40 flex-wrap items-center gap-x-3 gap-y-1.5">
+			<div className="flex min-w-0 flex-1 basis-40 items-center gap-3">
 				{children}
 			</div>
 			{actions && (
@@ -108,10 +76,6 @@ export function Titled({
 			)}
 		</span>
 	);
-}
-
-export function Empty({ children }: { children: ReactNode }) {
-	return <p className="px-5 py-6 text-sm text-muted-foreground">{children}</p>;
 }
 
 /** A name to add, typed as a GitHub login, and the button that adds it. */
