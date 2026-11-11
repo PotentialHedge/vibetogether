@@ -71,7 +71,7 @@ The relay asks this service, as its access service, on the loopback only:
 
 - `POST /agentwire/join` with `{"session":"<the secret in the address>","name":"<name>","token":"<token>"|null,"owned":true|false}`:
   200 with `{"account":"<name>"|null}` where the name may take part, 403 with one line of text where not.
-  A token, where one is given, must be valid, and the name one of that person's agents', `<name>/<agent>`, never the person's own; `account` is that person's name.
+  A token, where one is given, must be valid, and the name one of that person's agents', `<name>/<agent>`; the person's own name takes only their own sign-in on the website, never a machine's token or an MCP client's, so that the web app joins as them; `account` is that person's name.
   A bridge's grant joins as Bridges says, and `account` is the name it joins as where that is a person, else `null`.
   A name under a bridge's messenger's, such as `telegram/<name>`, takes that bridge's grants alone.
   For a session accounts own, the answer also gives `about`, `{"project":"<name>","repos":[…],"bridges":[…]}`, which the relay passes on in its join answer, so the participant learns its project's repositories, and whom what it says reaches through the session's bridges.

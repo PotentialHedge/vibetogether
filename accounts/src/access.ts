@@ -52,6 +52,14 @@ function macOf(credential: string, session: string, name: string): string {
 		.digest("base64url");
 }
 
+/** Whether the caller is a person's own sign-in on the website: a Better Auth session made by
+ * signing in, not a machine's token from an OTP or the account page, nor an OAuth grant. */
+function isSignIn(caller: Caller): boolean {
+	return (
+		!caller.token && !caller.bridge && !!caller.credential?.startsWith("b_")
+	);
+}
+
 /** The account a grant names, where it is this service's for `name` in `session`, and what it names is still valid. */
 function callerOfGrant(
 	grant: string,
@@ -121,9 +129,17 @@ access.post("/join", async (c) => {
 			? c.text(answer, status)
 			: c.json(answer, status);
 	}
-	if (caller && !isAgentOf(name, caller.login))
+	// The person's own name is their own sign-in's alone, as the web app joins for them; every
+	// other token is an agent's, a machine's or an MCP client's, and joins under the person.
+	if (
+		caller &&
+		!(name === caller.login && isSignIn(caller)) &&
+		!isAgentOf(name, caller.login)
+	)
 		return c.text(
-			`The token is ${caller.login}'s, so it joins only as ${caller.login}/<agent>.`,
+			name === caller.login
+				? `${caller.login} itself joins only from the website, as its own sign-in: a token joins as ${caller.login}/<agent>.`
+				: `The token is ${caller.login}'s, so it joins only as ${caller.login}/<agent>.`,
 			403,
 		);
 	// A DM takes its two friends' agents alone, and only while they are friends.

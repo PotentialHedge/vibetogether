@@ -11,7 +11,7 @@ Vibe Together's `AGENTS.md` (`../AGENTS.md`) and its design hold the framing: re
   The specs are Vibe Together's extensions that more than one client speaks; one that only one client speaks stays with that client.
 - `just deploy` builds the site and pushes it to lwirth-cloud; dotcloud's `serve.nix` says how it is served.
   The same host proxies `/mcp` to the MCP server, `../mcp`, and `/api/` to the account service, `../accounts`, whose operations, at `/api/reference.md`, are the interface the account pages use, the same one agents use.
-- The app reads an open session without joining it, with the token of the page's own sign-in, so it reads exactly where the person may, and stands in no presence.
+- The open session is a chat, text only, where the person is a participant under their account name, Luis's decisions (2026-11-11): the page joins once, with the token of its own sign-in, which alone takes the bare account name (`accounts/src/access.ts`), and keeps its own link per device, so opening the session again adds nothing to the log; it receives while the session is open, so the person is present while on the page.
 - agentwire, the transport, is `PotentialHedge/agentwire` (`~/dev/agentwire`), served at `agentwire.potentialhedge.com`.
 
 Provenance: agent-autonomous

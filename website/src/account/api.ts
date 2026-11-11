@@ -163,11 +163,19 @@ async function call<T>(
 	return (text ? JSON.parse(text) : undefined) as T;
 }
 
-/** Forgets the links that earlier versions of the app kept to read on as
- * `<name>/reader`, which act for the person. */
-function forgetReaderLinks() {
+/** The key under which the app keeps the person's own link in a session,
+ * which acts as them. */
+export const linkKey = (address: string) => `vibetogether link ${address}`;
+
+/** Forgets the person's own links in sessions, and those that earlier
+ * versions of the app kept to read on as `<name>/reader`: all act for the
+ * person. */
+function forgetLinks() {
 	for (const key of Object.keys(localStorage))
-		if (/^vibetogether \S+ [^ /]+\/reader(-\d+)?$/.test(key))
+		if (
+			key.startsWith(linkKey("")) ||
+			/^vibetogether \S+ [^ /]+\/reader(-\d+)?$/.test(key)
+		)
 			localStorage.removeItem(key);
 }
 
@@ -207,7 +215,7 @@ const live = {
 	 * kept links too, as signing out does. */
 	deleteAccount: async () => {
 		await call<void>("DELETE", "api/me");
-		forgetReaderLinks();
+		forgetLinks();
 	},
 	dms: () => call<Dm[]>("GET", "api/dms"),
 	addFriend: (name: string) =>
@@ -232,14 +240,14 @@ const live = {
 				...(oauthQuery ? { oauth_query: oauthQuery } : {}),
 			})
 		).url,
-	/** Signs out, and forgets the links the session pages kept to read on as
-	 * `<name>/reader`, which act for the person. */
+	/** Signs out, and forgets the links the session pages kept, which act
+	 * for the person. */
 	signOut: async () => {
 		await call<void>("POST", "api/auth/sign-out", {});
-		forgetReaderLinks();
+		forgetLinks();
 	},
 	/** The token of the page's own sign-in, with which a page joins a session
-	 * as one of the person's, `<name>/<part>`, exactly where the person may. */
+	 * as the person, exactly where they may. */
 	pageToken: async () =>
 		(await call<{ session: { token: string } }>("GET", "api/auth/get-session"))
 			.session.token,

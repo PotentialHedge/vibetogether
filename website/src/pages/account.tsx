@@ -182,6 +182,7 @@ function App({ state, reload }: { state: State; reload: () => Promise<void> }) {
 				{dm ? (
 					<Transcript
 						key={dm.dm.id}
+						as={me.name}
 						session={{
 							name: dm.friend.displayName || dm.friend.name,
 							address: dm.dm.address,
@@ -202,6 +203,7 @@ function App({ state, reload }: { state: State; reload: () => Promise<void> }) {
 				) : session ? (
 					<Transcript
 						key={session.id}
+						as={me.name}
 						session={session}
 						back={
 							<Button

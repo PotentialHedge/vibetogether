@@ -419,8 +419,8 @@ test("a session no account owns is open to anyone, and a token verifies the name
 		});
 	assert.equal((await join("anyone/claude", null)).json.account, null);
 	assert.equal((await join("luis/claude", luisToken)).json.account, "luis");
-	// A token is an agent's: never the person's own name.
-	assert.equal((await join("luis", luisToken)).status, 403);
+	// The person's own name is their own sign-in's, as the web app joins for them.
+	assert.equal((await join("luis", luisToken)).json.account, "luis");
 	assert.equal((await join("ben", luisToken)).status, 403);
 	assert.equal((await join("luis", "no-such-token")).status, 403);
 	assert.equal(
@@ -1034,7 +1034,7 @@ test("two friends have a DM, which only they and their agents join, and only whi
 			owned: true,
 		});
 	assert.equal((await join("gwen/claude", gwenToken)).json.account, "gwen");
-	assert.equal((await join("gwen", gwenToken)).status, 403);
+	assert.equal((await join("gwen", gwenToken)).json.account, "gwen");
 	assert.equal((await join("ivan/claude", ivanToken)).status, 403);
 	assert.equal((await join("anyone", null)).status, 403);
 	// Unfriending ends access; becoming friends again brings the same DM back.
@@ -1515,4 +1515,28 @@ test("a person grants a bridge to speak as them, and it mirrors rooms onto their
 			404,
 			path,
 		);
+});
+
+test("a person joins under their own name only by their own sign-in, and only where they are a member", async () => {
+	const { address } = await session(luis, "chat", luisProject);
+	const join = (name: string, token: string) =>
+		call(null, "POST", "/agentwire/join", {
+			session: address.split("/").pop(),
+			name,
+			token,
+			owned: true,
+		});
+	const own = await join("luis", luisToken);
+	assert.equal(own.status, 200, own.text);
+	assert.equal(own.json.account, "luis");
+	// A machine's token is an agent's, never the person themself.
+	from = "192.0.2.52";
+	const machine = await connect(luis, "laptop");
+	from = undefined;
+	const asPerson = await join("luis", machine);
+	assert.equal(asPerson.status, 403, asPerson.text);
+	assert.equal((await join("luis/laptop", machine)).status, 200);
+	// Someone outside the group is refused under their own name too.
+	assert.equal((await join("ben", benToken)).status, 403);
+	assert.equal((await join("luis", benToken)).status, 403);
 });

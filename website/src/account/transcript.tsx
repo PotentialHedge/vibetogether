@@ -1,16 +1,21 @@
-/** One of the account's sessions, its log as it grows: the app reads it
- * without joining, with the token of its own sign-in, so it reads exactly
- * where the person may, and stands in no presence. */
+/** One of the account's sessions, live, as a chat: the person is in it as
+ * themself, under their account name, joined once with the token of the
+ * page's own sign-in, so they are in exactly where they may. The page
+ * receives while the session is open in it, so the person is present while
+ * they are on the page. */
 
 import {
 	type Entry,
 	JOIN,
 	LEAVE,
+	Session as Participant,
 	type Presence,
 	Reader,
+	RelayError,
 } from "agentwire/participant";
 import {
 	ArrowLeftRight,
+	ArrowUp,
 	Download,
 	Ellipsis,
 	Minus,
@@ -27,7 +32,7 @@ import {
 } from "react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { api, demo, type Session } from "@/account/api";
+import { api, demo, linkKey, type Session } from "@/account/api";
 import { MoreInfo } from "@/components/more-info";
 import { Button } from "@/components/ui/button";
 import {
@@ -41,68 +46,167 @@ import { cn } from "@/lib/utils";
 
 const STATUS = "application/vnd.agentwire.chat.status+json";
 
-/** The app's reader of a session, one per address: kept across React mounting
- * it twice, and across opening the session again. */
-const readers = new Map<string, Promise<Reader>>();
+/** The person in a session, one per address: joined once, and kept across
+ * React mounting the page twice and across opening the session again. */
+const seats = new Map<string, Promise<Participant>>();
 
-function reader(address: string): Promise<Reader> {
-	let made = readers.get(address);
+/** Joins `address` as `name`, again with the link kept from before, so that
+ * opening the session again adds nothing to its log. */
+async function join(address: string, name: string): Promise<Participant> {
+	const token = await api.pageToken();
+	const kept = localStorage.getItem(linkKey(address));
+	const take = async (me: string | null) => {
+		const person = new Participant(address, name, me, token);
+		await person.join();
+		localStorage.setItem(linkKey(address), person.me as string);
+		return person;
+	};
+	if (kept)
+		try {
+			return await take(kept);
+		} catch (error) {
+			// The kept link is no participant's any more, such as after the
+			// name was taken back: join afresh.
+			if (!(error instanceof RelayError && error.status === 403)) throw error;
+			localStorage.removeItem(linkKey(address));
+		}
+	return take(null);
+}
+
+function seat(address: string, name: string): Promise<Participant> {
+	let made = seats.get(address);
 	if (!made) {
-		made = api.pageToken().then((token) => new Reader(address, token));
-		readers.set(address, made);
+		made = join(address, name);
+		made.catch(() => seats.delete(address));
+		seats.set(address, made);
 	}
 	return made;
 }
 
 type Log = {
-	reading: boolean;
+	live: boolean;
 	/** What fetches the payloads, once it is made: none in the demo. */
-	reader: Reader | null;
+	source: Participant | Reader | null;
 	entries: Entry[];
 	presence: Presence;
 	problem: string | null;
+	/** Sends a message as the person, where they are in: not while only
+	 * reading. */
+	send: ((text: string, ping: string[] | null) => Promise<void>) | null;
+	/** Why the person only reads here, where they do. */
+	note: string | null;
 };
 
-function useLog(session: Pick<Session, "address">): Log {
+const markdown = (ping: string[] | null) =>
+	ping ? `text/markdown; ping="${ping.join(" ")}"` : "text/markdown";
+
+function useLog(session: Pick<Session, "address">, name: string): Log {
 	const [log, setLog] = useState<Log>({
-		reading: false,
-		reader: null,
+		live: false,
+		source: null,
 		entries: [],
 		presence: {},
 		problem: null,
+		send: null,
+		note: null,
 	});
 	useEffect(() => {
 		if (demo) {
-			setLog({ reading: true, reader: null, ...made() });
+			const entries = made();
+			setLog({
+				live: true,
+				source: null,
+				note: null,
+				...entries,
+				send: async (text, ping) =>
+					setLog((log) => ({
+						...log,
+						entries: [
+							...log.entries,
+							{
+								n: (log.entries.at(-1)?.n ?? 0) + 1,
+								time: new Date().toISOString(),
+								from: name,
+								type: markdown(ping),
+								size: text.length,
+								text,
+								account: name,
+							},
+						],
+					})),
+			});
 			return;
 		}
-		let stop = () => {};
 		let gone = false;
-		reader(session.address).then(
-			(reader) => {
+		let stop = () => {};
+		let person: Participant | null = null;
+		const follow = (source: Participant | Reader) => {
+			stop();
+			if (gone) return;
+			setLog((log) => ({ ...log, source }));
+			stop = source.subscribe({
+				entry: () =>
+					!gone &&
+					setLog((log) => ({ ...log, live: true, entries: [...source.log] })),
+				presence: (presence) =>
+					!gone && setLog((log) => ({ ...log, live: true, presence })),
+				end: (why) => {
+					if (gone) return;
+					// Another page of the person's receives now, such as on another
+					// device: this one reads on, and takes over again once used.
+					if (source === person && person.me) {
+						read(null);
+						return;
+					}
+					setLog((log) => ({ ...log, live: false, problem: why }));
+				},
+			});
+		};
+		const read = (note: string | null) =>
+			api.pageToken().then((token) => {
 				if (gone) return;
-				setLog((log) => ({ ...log, reader }));
-				stop = reader.subscribe({
-					entry: () =>
-						setLog((log) => ({
-							...log,
-							reading: true,
-							entries: [...reader.log],
-						})),
-					presence: (presence) =>
-						setLog((log) => ({ ...log, reading: true, presence })),
-					end: (why) =>
-						setLog((log) => ({ ...log, reading: false, problem: why })),
-				});
+				follow(new Reader(session.address, token));
+				if (note) setLog((log) => ({ ...log, note }));
+			});
+		const back = () => {
+			if (person && document.visibilityState === "visible")
+				person.join().then(
+					() => person && follow(person),
+					() => {},
+				);
+		};
+		seat(session.address, name).then(
+			(joined) => {
+				if (gone) return;
+				person = joined;
+				// Joining again while in adds nothing, and receives again.
+				joined.join().then(
+					() => follow(joined),
+					() => read(null),
+				);
+				setLog((log) => ({
+					...log,
+					send: async (text, ping) => {
+						await joined.send(text, { type: markdown(ping) });
+					},
+				}));
+				document.addEventListener("visibilitychange", back);
+				window.addEventListener("focus", back);
 			},
 			(error: Error) =>
-				!gone && setLog((log) => ({ ...log, problem: error.message })),
+				!gone &&
+				(error instanceof RelayError && error.status === 409
+					? read("You're in on another device, so here you only read.")
+					: setLog((log) => ({ ...log, problem: error.message }))),
 		);
 		return () => {
 			gone = true;
 			stop();
+			person?.close();
+			document.removeEventListener("visibilitychange", back);
+			window.removeEventListener("focus", back);
 		};
-	}, [session.address]);
+	}, [session.address, name]);
 	return log;
 }
 
@@ -155,7 +259,10 @@ const size = (bytes: number) =>
 			: `${(bytes / 1024 ** 2).toFixed(1)} MB`;
 
 /** What an entry holds, as the chat spec says to show it. */
-function Body({ entry, reader }: { entry: Entry; reader: Reader | null }) {
+/** What fetches an entry's payload: the person's own link, or a reader's. */
+type Fetcher = Pick<Reader, "fetch">;
+
+function Body({ entry, reader }: { entry: Entry; reader: Fetcher | null }) {
 	const type = base(entry.type);
 	if (RASTER.has(type) && reader)
 		return <Picture entry={entry} reader={reader} />;
@@ -224,7 +331,7 @@ const RASTER = new Set([
 
 /** A raster image sent into the session, fetched with the reader's token,
  * since the log's payloads need it, and typed as its entry says. */
-function Picture({ entry, reader }: { entry: Entry; reader: Reader }) {
+function Picture({ entry, reader }: { entry: Entry; reader: Fetcher }) {
 	const [url, setUrl] = useState<string | null>(null);
 	useEffect(() => {
 		let made: string | null = null;
@@ -373,12 +480,15 @@ function People({
 /** A session, live: its log as it grows, who is there and their status. */
 export function Transcript({
 	session,
+	as,
 	actions,
 	menu,
 	back,
 }: {
 	/** A session or a DM, as far as the transcript shows it. */
 	session: Pick<Session, "name" | "address" | "bridges">;
+	/** The person's account name, under which they are in the session. */
+	as: string;
 	/** What can be done with the session, at the header's end. */
 	actions?: ReactNode;
 	/** What else can be done with it, as items of its menu. */
@@ -386,7 +496,15 @@ export function Transcript({
 	/** Leads back to the sessions, where they are not beside it. */
 	back?: ReactNode;
 }) {
-	const { reading, reader, entries, presence, problem } = useLog(session);
+	const {
+		live: reading,
+		source: reader,
+		entries,
+		presence,
+		problem,
+		send,
+		note,
+	} = useLog(session, as);
 	const status = useMemo(() => statuses(entries), [entries]);
 	const [people, setPeople] = useState(false);
 	const [scale, setScale] = useState(
@@ -402,11 +520,12 @@ export function Transcript({
 		const shown = entries.map((entry) => entry.n);
 		const under = new Map<number, string[]>();
 		for (const [name, { read }] of Object.entries(presence)) {
+			if (name === as) continue;
 			const at = shown.filter((n) => n <= read).at(-1);
 			if (at !== undefined) under.set(at, [...(under.get(at) ?? []), name]);
 		}
 		return under;
-	}, [entries, presence]);
+	}, [entries, presence, as]);
 
 	// Follows the log as it grows, while it is scrolled to its end.
 	const scroller = useRef<HTMLDivElement>(null);
@@ -594,6 +713,13 @@ export function Transcript({
 						})}
 					</ol>
 				</div>
+				{note && !send ? (
+					<p className="border-t px-4 py-3 text-center text-sm text-muted-foreground md:px-6">
+						{note}
+					</p>
+				) : (
+					<Composer send={send} names={Object.keys(presence)} />
+				)}
 			</div>
 			<aside className="hidden w-72 shrink-0 overflow-y-auto border-l px-5 py-4 xl:block">
 				<People presence={presence} status={status} />
@@ -602,12 +728,100 @@ export function Transcript({
 	);
 }
 
+/** Whom a message pings: the names in the session it mentions as `@name`,
+ * or everyone where it mentions none. */
+function mentioned(text: string, names: string[]): string[] | null {
+	const named = names.filter((name) =>
+		new RegExp(`(^|\\s)@${name.replace(/[-/]/g, "\\$&")}(?![\\w/-])`).test(
+			text,
+		),
+	);
+	return named.length ? named : null;
+}
+
+/** The chatbox: Enter sends, Shift+Enter starts a new line. */
+function Composer({ send, names }: { send: Log["send"]; names: string[] }) {
+	const [text, setText] = useState("");
+	const [sending, setSending] = useState(false);
+	const [problem, setProblem] = useState<string | null>(null);
+	const box = useRef<HTMLTextAreaElement>(null);
+	// Grows with what is typed, up to a few lines.
+	// biome-ignore lint/correctness/useExhaustiveDependencies: runs as the text changes.
+	useLayoutEffect(() => {
+		const element = box.current;
+		if (!element) return;
+		element.style.height = "auto";
+		element.style.height = `${Math.min(element.scrollHeight, 200)}px`;
+	}, [text]);
+	if (!send) return null;
+	const submit = async () => {
+		const said = text.trim();
+		if (!said || sending) return;
+		setSending(true);
+		setProblem(null);
+		try {
+			await send(said, mentioned(said, names));
+			setText("");
+		} catch (error) {
+			setProblem((error as Error).message);
+		} finally {
+			setSending(false);
+			box.current?.focus();
+		}
+	};
+	return (
+		<form
+			className="border-t px-4 py-3 md:px-6"
+			onSubmit={(event) => {
+				event.preventDefault();
+				submit();
+			}}
+		>
+			<div className="mx-auto flex max-w-4xl items-end gap-2">
+				<textarea
+					ref={box}
+					rows={1}
+					value={text}
+					placeholder="Message"
+					aria-label="Message"
+					className="min-h-9 flex-1 resize-none rounded-lg border bg-transparent px-3 py-1.5 text-base leading-relaxed outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 md:text-sm"
+					onChange={(event) => setText(event.target.value)}
+					onKeyDown={(event) => {
+						if (
+							event.key === "Enter" &&
+							!event.shiftKey &&
+							!event.nativeEvent.isComposing
+						) {
+							event.preventDefault();
+							submit();
+						}
+					}}
+				/>
+				<Button
+					type="submit"
+					size="icon"
+					aria-label="Send"
+					disabled={!text.trim() || sending}
+				>
+					<ArrowUp />
+				</Button>
+			</div>
+			{problem && (
+				<p className="mx-auto mt-2 max-w-4xl text-xs text-destructive">
+					{problem}
+				</p>
+			)}
+		</form>
+	);
+}
+
 /** A made-up session, for `#demo`. */
-function made(): Omit<Log, "reading" | "reader"> {
+function made(): Omit<Log, "live" | "source" | "send" | "note"> {
 	const start = Date.now() - 20 * 60_000;
 	const at = (minutes: number) =>
 		new Date(start + minutes * 60_000).toISOString();
 	const entries: Entry[] = [
+		["luiswirth", JOIN, "", 0],
 		["luiswirth/claude", JOIN, "", 0],
 		["benarmstrong/claude", JOIN, "", 1],
 		[
@@ -647,7 +861,8 @@ function made(): Omit<Log, "reading" | "reader"> {
 	return {
 		entries,
 		presence: {
-			"luiswirth/claude": { read: 7, receiving: true, account: "luiswirth" },
+			luiswirth: { read: 8, receiving: true, account: "luiswirth" },
+			"luiswirth/claude": { read: 8, receiving: true, account: "luiswirth" },
 			"benarmstrong/claude": {
 				read: 6,
 				receiving: false,
