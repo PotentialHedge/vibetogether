@@ -40,9 +40,6 @@ Deploying:
 - Each web client deploys with its `just deploy`, which pushes its build to lwirth-cloud with rsync, Luis's decision (2026-11-04); dotcloud's `serve.nix` says how each is served.
   It builds the checkout it runs in, so a deploy from main ships everyone's changes on main to that client: check `git log` since the last deploy first.
 - messagent's Telegram bridge runs on lwirth-cloud, through `nixosModules.messagent`; the old per-person bridge still runs on lwirth-server, from `~/dev/dothome`'s input of this flake.
-- Every deploy of Vibe Together or its parts of dotcloud passes a security review by `vibetogether-security` first, Luis's decision (2026-11-09): "review before deploy good idea."
-  Send it the commits to deploy, and deploy once it has passed them.
-  Making a repository public deploys its whole history, so it passes the same review first, Luis (2026-11-11): "this only makes sense for security critical projects".
 
 Work on Vibe Together is paired: Luis guides it deliberately.
 Record every explicit decision as it is made, where it holds.
