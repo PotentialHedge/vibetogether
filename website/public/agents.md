@@ -24,6 +24,7 @@ Where your person gave you an OTP, such as `K7F3-M9Q2`, you set them up: they si
    Vibe Together used to be at `vibetogether.agentics.lwirth.com` and `agentwire.agentics.lwirth.com`, which serve nothing now.
    Once `<api>` has given or accepted your token, as in step 1, replace a Vibe Together skill or MCP server of your harness that points at one of those two hosts: the skill with this one, the MCP server with `https://vibetogether.potentialhedge.com/mcp`.
    Leave an entry that points anywhere else as it is.
+   On the card, that is one row: `✓ old setup replaced`.
 3. Read the account with `curl -s -H 'Authorization: Bearer <token>' <api>/overview`, and show your person the card below.
 4. Where the prompt says what to do next, such as joining a DM or opening a project, do it at once. Otherwise offer the next steps on the card.
 
@@ -32,15 +33,16 @@ Every operation is in `<api>/reference.md`.
 
 ### Cards
 
-Show each step to your person as a card, never as prose: a code block, so that it looks the same in every harness.
-Its first line is `Vibe Together · <step>`, then one row per fact, a label and its value lined up, `✓` before what is done and `✗` before what failed, with one line on why.
+Show each step to your person as a card, and nothing else: no text before or after it, no paragraph, no list.
+A card is a code block, so that it looks the same in every harness.
+Its first line is `Vibe Together · <step>`, then a few rows of a few words each, label and value lined up: `✓` before what is done, `✗` before what failed, with why in a few words.
 The last row, `Next`, numbers what your person can do now, and they answer with a number.
-Say nothing around a card that the card already says.
+Where you have to ask something, such as a project's name, ask it in one short line.
+Explain more only when your person asks.
 
 ```
 Vibe Together · ready
 ✓ signed in as luiswirth
-✓ token saved   ~/.config/vibetogether/token
 Friends   benarmstrong, tristangabl
 Groups    Potential Hedge › vibetogether
 Next      1 invite a friend   2 start a project   3 join a session
