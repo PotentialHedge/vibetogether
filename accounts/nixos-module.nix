@@ -38,7 +38,7 @@ in {
     bridgesFile = lib.mkOption {
       type = lib.types.nullOr lib.types.path;
       default = null;
-      description = "The file of the bridges the service knows, one `<client_id> <sha256 of its secret, in hex>` per line, read as a credential.";
+      description = "The file of the bridges the service knows, one `<client_id> <sha256 of its secret, in hex> [<messenger>]` per line, the messenger, such as `telegram`, the name under which it carries the people who linked no account, read as a credential.";
     };
   };
 
