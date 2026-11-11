@@ -187,6 +187,7 @@ curl -s -o plot.png '<me>/<n>'
 
 Returns the payload of entry `n`, with its type as `Content-Type`,
 and its file name, if it has one, in `Content-Disposition`.
+Whoever reads without joining fetches it at `<link>/log/<n>`, asked about as a read is.
 
 ### Leave
 
@@ -263,7 +264,7 @@ A failure is an HTTP status, with one line of plain text saying why:
 - 413: the payload is too large.
 - 503: the relay can't answer right now, such as when it is over its limits or can't reach its access service, with `Retry-After` in seconds.
 
-A failed receive, or fetch, answers only after a pause of 10 seconds,
+A failed receive, read or fetch answers only after a pause of 10 seconds,
 so that a client that receives again at once still sends few requests.
 
 ## Access

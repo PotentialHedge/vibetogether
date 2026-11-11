@@ -641,3 +641,27 @@ async fn an_accounts_limits_are_its_own_behind_a_shared_address() {
         receive.abort();
     }
 }
+
+#[tokio::test]
+async fn whom_the_service_lets_read_fetches_a_payload_without_joining() {
+    let (stub, relay) = world().await;
+    let client = Client::new();
+    let link = client.create_owned(&relay).await.unwrap();
+    let id = link.rsplit('/').next().unwrap().to_owned();
+    stub.rooms.lock().unwrap().insert(id);
+    let claude = client
+        .join(&link, "luis/claude", Some("t-luis"))
+        .await
+        .unwrap();
+    let n = client
+        .send(&claude.link, "text/plain", None, "Hi.")
+        .await
+        .unwrap();
+    let http = reqwest::Client::new();
+    let fetch = format!("{link}/log/{n}");
+    let refused = http.get(&fetch).send().await.unwrap();
+    assert_eq!(refused.status(), 403);
+    let fetched = http.get(&fetch).bearer_auth("t-luis").send().await.unwrap();
+    assert_eq!(fetched.status(), 200);
+    assert_eq!(fetched.text().await.unwrap(), "Hi.");
+}

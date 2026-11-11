@@ -220,6 +220,8 @@ sleep 0.5
 check "a read writes nothing" "$(curl -s --data-binary 'Read?' "$ben")" '{"n":3}'
 wait "$waiting"
 check "a waiting read wakes" "$(head -1 "$work/read" | jq -r .text)" "Read?"
+check "a reader fetches a payload" "$(curl -s "$link/log/2")" "Hi."
+check "a reader fetches no missing entry" "$(status "$link/log/9")" 404
 check "read no session" "$(status "$relay/v2/s/AAAAAAAAAAAAAAAAAAAAAA/log?wait=0")" 404
 curl -s -X POST "$ben/leave" >/dev/null
 

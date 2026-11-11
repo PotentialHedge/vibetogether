@@ -589,6 +589,11 @@ async fn session(
             )?;
             read(relay, client, id, token.as_deref(), query).await
         }
+        ("log", [n]) if get && number(n).is_some() => {
+            takes(query, "a fetch", &[])?;
+            relay.may_read(id, token.as_deref()).await?;
+            served(relay.sessions().entry(id, number(n).unwrap_or_default())?)
+        }
         ("join", []) if post => {
             takes(query, "a join", &["as"])?;
             // A join with a token counts once the service has said whose it is.
@@ -889,12 +894,16 @@ async fn receive(
 }
 
 fn payload(relay: &Relay, id: &str, secret: &str, n: i64) -> Result<Response, Fail> {
-    let payload = relay.sessions().payload(id, secret, n)?;
+    served(relay.sessions().payload(id, secret, n)?)
+}
+
+/// A payload as the answer to a fetch.
+fn served(payload: sessions::Payload) -> Result<Response, Fail> {
     let mut response = payload.body.into_response();
     let headers = response.headers_mut();
     // The type is the sender's: a payload opened as a page, such as HTML,
     // runs in a sandbox of its own, never as the relay's site. Its URL holds
-    // the caller's own link, which no page it opens learns.
+    // the caller's own link or the session's, which no page it opens learns.
     let kind = HeaderValue::from_str(&payload.kind)
         .unwrap_or(HeaderValue::from_static("application/octet-stream"));
     headers.insert(CONTENT_TYPE, kind);

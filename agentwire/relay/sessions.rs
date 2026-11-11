@@ -673,6 +673,11 @@ impl Sessions {
 
     pub fn payload(&self, session: &str, secret: &str, n: i64) -> Result<Payload, Fail> {
         self.inside(session, secret)?;
+        self.entry(session, n)
+    }
+
+    /// Entry `n`'s payload, for whoever may read the session.
+    pub fn entry(&self, session: &str, n: i64) -> Result<Payload, Fail> {
         self.db
             .prepare_cached(
                 "SELECT type, filename, COALESCE(CAST(text AS BLOB), payload, X'') FROM entries
