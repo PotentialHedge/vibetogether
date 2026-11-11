@@ -78,6 +78,8 @@ const MAX_CHOICES: usize = 40;
 const UNBRIDGED: Duration = Duration::from_secs(10 * 60);
 /// The longest a label from Telegram gets: a group's title or a person's name.
 const LABEL: usize = 60;
+/// What someone hears who may not move a bridged chat, which ends its bridge as /stop does.
+const MOVE_REFUSED: &str = "Only whoever bridged it, or a group admin, moves it.";
 
 /// What the service runs with.
 pub struct Settings {
@@ -984,6 +986,8 @@ impl Service {
     }
 
     /// Offers the sender's sessions as buttons, to bridge the chat into the one pressed.
+    /// Offers `from`'s sessions to bridge the chat into, or to move it to where it is bridged and
+    /// they may end its bridge: moving a chat ends its bridge, so it takes what /stop takes.
     fn offer(&self, chat: i64, from: &User) {
         let Some(linked) = self.linked(from.id) else {
             return;
@@ -1025,6 +1029,10 @@ impl Service {
             })
             .collect();
         let text = match self.bridged(chat) {
+            Some(bridged) if !self.may_stop(&bridged, from) => {
+                self.tell(chat, MOVE_REFUSED);
+                return;
+            }
             Some(bridged) => format!(
                 "Bridged by {}. Move it to which session?",
                 bridged.link.login
@@ -1062,6 +1070,12 @@ impl Service {
             ));
         };
         let chat = message.chat.id;
+        // Checked at the press, not only at the offer, since an older offer's buttons still work.
+        if let Some(bridged) = self.bridged(chat)
+            && !self.may_stop(&bridged, from)
+        {
+            return answer(Some(MOVE_REFUSED));
+        }
         let private = message.chat.kind == "private";
         if !private && self.chats.lock().expect("no holder panics").len() >= MAX_CHATS {
             return answer(Some("Busy: try again in a few minutes."));

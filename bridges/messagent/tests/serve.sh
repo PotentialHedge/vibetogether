@@ -183,6 +183,13 @@ check "someone unlinked presses in vain" "$(answered)" "Link your account first:
 press 42 -100 "$group_session"
 until_ 'said -100 | grep -q "Bridged into"' || true
 check "the group is bridged" "$(said -100 | grep -c 'Bridged into "chat" (Team)')" 1
+inject '{"from":43,"chat":-100,"name":"Ben","text":"/start"}'
+until_ 'said -100 | grep -q "Only whoever bridged it, or a group admin, moves it."' || true
+check "another linked member is offered no move" "$(said -100 | grep -c 'Only whoever bridged it, or a group admin, moves it.')" 1
+press 43 -100 "$ben_session"
+until_ '[ "$(answered)" = "Only whoever bridged it, or a group admin, moves it." ]' || true
+check "nor can they move it by an older button" "$(answered)" "Only whoever bridged it, or a group admin, moves it."
+check "the group stays bridged" "$(said -100 | grep -c 'Bridged into "ben"')" 0
 member=$(curl -s -X POST -H "authorization: Bearer $token" "$(address_of "$group_session")/join?as=luis/claude" | field link)
 
 inject '{"from":42,"chat":-100,"text":"from luis"}'
@@ -213,7 +220,7 @@ check "the private chat's bridge gets nothing of the group's session" "$(said 42
 
 inject '{"from":7,"chat":-100,"text":"/stop"}'
 until_ 'said -100 | grep -q "Only whoever bridged"' || true
-check "a stranger can't end the bridge" "$(said -100 | grep -c 'Only whoever bridged')" 1
+check "a stranger can't end the bridge" "$(said -100 | grep -c 'Only whoever bridged it, or a group admin, ends it.')" 1
 inject '{"from":99,"chat":-100,"text":"/stop"}'
 until_ 'said -100 | grep -q "Bridge ended"' || true
 check "an admin of the group can" "$(said -100 | grep -c 'Bridge ended')" 1
