@@ -1,17 +1,23 @@
 //! The Telegram bridge: one bot for everyone, run as a service of ours.
-//! A Telegram chat, private or a group, is bridged into one Vibe Together session that a member
-//! picks as they approve the bot's OTP, and the bot passes everything both ways, Luis's decisions
-//! (2026-11-10).
+//! A Telegram chat, private or a group, is bridged into one Vibe Together session, and the bot
+//! passes everything both ways, Luis's decisions (2026-11-10).
+//!
+//! Vibe Together knows nothing of Telegram, Luis's decision (2026-11-11): a person links their
+//! Telegram account once, by an OTP that grants the bridge to speak as them, and the bot alone
+//! keeps which Telegram user is which account (`linked.json`). Everything else is managed here, in
+//! the bot, Luis's decision (2026-11-11): "the interface is the VT telegram bot". /start links, or
+//! where linked offers the person's sessions as buttons, and the one pressed gets the chat as a
+//! room; /stop ends a chat's bridge; /unlink revokes the grant.
 //!
 //! The bridge is no participant, Luis's decision (2026-11-11): it reads the session without
-//! joining it, and speaks only as the people it carries. A person who linked their Telegram
-//! account, by an OTP from their private chat with the bot, speaks as themselves; everyone else
-//! as `telegram/<name>`, unverified. What the bridge would say of its own, such as which chat the
-//! session reaches, is the session's info at the account service, not an entry.
+//! joining it, with the grant of whoever bridged the chat, and speaks only as the people it
+//! carries: a linked person as themselves, by their own grant; everyone else as
+//! `telegram/<name>`, unverified. What the bridge would say of its own, such as which chat the
+//! session reaches, is the room's info at the account service, not an entry.
 //!
 //! It fetches Telegram's updates by long polling, so nothing reaches it from outside.
-//! Each bridged chat has a directory of its own, by its id, with its bridge (`bridge.json`,
-//! holding the credential) and its place in the session (`place.json`).
+//! Each bridged chat has a directory of its own, by its id, with its bridge (`bridge.json`) and
+//! its place in the session (`place.json`).
 
 use std::{
     collections::{BTreeMap, BTreeSet, HashMap, HashSet},
@@ -38,7 +44,7 @@ use crate::{
     config::write_private,
     messenger::{Arrived, Image, Messages, Reactions},
     reactions::{self, Reaction},
-    telegram::{Bot, Message, Refusal, Update, User, UserChat, message_of},
+    telegram::{Bot, CallbackQuery, Message, Refusal, Update, User, UserChat, message_of},
 };
 
 /// The bridge's name at the account service, its `client_id`, which the OTP's page shows.
@@ -48,22 +54,26 @@ pub const CLIENT_ID: &str = "messagent";
 pub const MESSENGER: &str = "telegram";
 /// The most a name under the messenger's is numbered, where the one before is taken.
 const NUMBERED: u32 = 50;
+/// Where a person makes a session, when they have none.
+const SITE: &str = "https://vibetogether.potentialhedge.com/account/";
 
 /// What Telegram shows of the bot, set as the service starts.
 const COMMANDS: &[(&str, &str)] = &[
-    ("start", "Bridge this chat into a Vibe Together session"),
+    ("start", "Link your account, or bridge this chat"),
     ("stop", "End this chat's bridge"),
+    ("unlink", "Unlink your Vibe Together account"),
 ];
-const DESCRIPTION: &str = "This bot bridges a Telegram chat, private or a group, into a Vibe Together session: \
-everything said in either reaches the other, so you talk with the agents there from here.\n\n\
-Send /start, then approve on the page it sends you, signed in, and pick the session. /stop ends the bridge.\n\n\
+const DESCRIPTION: &str = "Talk with the agents of your Vibe Together sessions from Telegram.\n\n\
+/start links your account and bridges this chat into a session. In a group, add me and send /start.\n\n\
 https://vibetogether.potentialhedge.com";
 const SHORT_DESCRIPTION: &str = "Talk with agents from Telegram, through Vibe Together. https://vibetogether.potentialhedge.com";
 
-/// The most bridgings at once, each a thread asking the account service, one per chat.
+/// The most linkings at once, each a thread asking the account service.
 const MAX_LINKING: usize = 50;
 /// The most chats bridged at once, so that no one fills the service.
 const MAX_CHATS: usize = 1000;
+/// The most sessions offered as buttons.
+const MAX_CHOICES: usize = 40;
 /// How long the bot stays in a group nobody bridged.
 const UNBRIDGED: Duration = Duration::from_secs(10 * 60);
 /// The longest a label from Telegram gets: a group's title or a person's name.
@@ -73,7 +83,7 @@ const LABEL: usize = 60;
 pub struct Settings {
     pub bot: Bot,
     pub accounts: Accounts,
-    /// Where its files are: the offset, the linked identities, and each chat's directory.
+    /// Where its files are: the offset, the linked people, and each chat's directory.
     pub state: PathBuf,
 }
 
@@ -85,7 +95,7 @@ pub struct Accounts {
     secret: String,
 }
 
-/// An OTP the service gave, for a member to approve.
+/// An OTP the service gave, for a person to approve.
 #[derive(Deserialize, Debug)]
 pub struct DeviceCode {
     pub device_code: String,
@@ -99,24 +109,18 @@ pub struct DeviceCode {
 #[derive(Debug, PartialEq)]
 pub enum Approval {
     Pending,
-    /// A member approved it: the bridge's credential.
+    /// The person approved it: the bridge's grant to speak as them.
     Approved(String),
     /// Denied or expired, with the service's error.
     Ended(String),
 }
 
-/// A bridge, as the account service tells it of itself.
-#[derive(Deserialize, Debug, Clone)]
-pub struct Own {
-    /// Who added it.
-    pub by: String,
-    pub session: OwnSession,
-}
-
+/// A session, as the account service lists it.
 #[derive(Deserialize, Debug, Clone)]
 pub struct OwnSession {
     pub id: String,
     pub name: String,
+    pub project: Named,
     pub group: Named,
     pub address: Option<String>,
 }
@@ -124,6 +128,18 @@ pub struct OwnSession {
 #[derive(Deserialize, Debug, Clone)]
 pub struct Named {
     pub name: String,
+}
+
+/// A room the bridge mirrors onto a session, as the account service tells it.
+#[derive(Deserialize, Debug, Clone)]
+pub struct Room {
+    pub id: String,
+    pub session: OwnSession,
+}
+
+/// What the account service answered: 401 and 404 mean the grant or the thing is gone.
+fn gone(status: u16) -> bool {
+    matches!(status, 401 | 404)
 }
 
 impl Accounts {
@@ -141,31 +157,69 @@ impl Accounts {
         }
     }
 
-    fn post(&self, path: &str, body: Value) -> Result<(u16, Value)> {
-        let mut response = self
-            .agent
-            .post(format!("{}{path}", self.url))
-            .send_json(body)
-            .map_err(|error| anyhow!("{path}: {error}"))?;
+    /// One request, with the grant where one is given, and its status and body.
+    fn call(
+        &self,
+        method: &str,
+        path: &str,
+        grant: Option<&str>,
+        body: Option<Value>,
+    ) -> Result<(u16, Value)> {
+        let url = format!("{}{path}", self.url);
+        let auth = grant.map(|grant| format!("Bearer {grant}"));
+        let result = match (method, body) {
+            ("GET", _) => {
+                let mut request = self.agent.get(&url);
+                if let Some(auth) = &auth {
+                    request = request.header("Authorization", auth);
+                }
+                request.call()
+            }
+            ("DELETE", _) => {
+                let mut request = self.agent.delete(&url);
+                if let Some(auth) = &auth {
+                    request = request.header("Authorization", auth);
+                }
+                request.call()
+            }
+            (method, body) => {
+                let mut request = if method == "PATCH" {
+                    self.agent.patch(&url)
+                } else {
+                    self.agent.post(&url)
+                };
+                if let Some(auth) = &auth {
+                    request = request.header("Authorization", auth);
+                }
+                request.send_json(body.unwrap_or(Value::Null))
+            }
+        };
+        let mut response = result.map_err(|error| anyhow!("{path}: {error}"))?;
         let status = response.status().as_u16();
-        let body = response.body_mut().read_json().unwrap_or(Value::Null);
-        Ok((status, body))
+        let text = response.body_mut().read_to_string().unwrap_or_default();
+        Ok((status, serde_json::from_str(&text).unwrap_or(Value::String(text))))
     }
 
-    /// Asks for an OTP to be added to a session, saying what it bridges, and where the chat is
-    /// the sender's alone, their Telegram id and name, which approving links.
-    pub fn ask(&self, what_for: &str, identity: Option<(i64, String)>) -> Result<DeviceCode> {
-        let mut body = json!({
+    /// Fails on any status but `ok` and the ones that mean gone, which are `None`.
+    fn expect(&self, what: &str, (status, body): (u16, Value), ok: u16) -> Result<Option<Value>> {
+        if status == ok {
+            Ok(Some(body))
+        } else if gone(status) {
+            Ok(None)
+        } else {
+            Err(anyhow!("{what} failed ({status}): {body}"))
+        }
+    }
+
+    /// Asks for an OTP that grants the bridge to speak as the person, saying who asks.
+    pub fn ask(&self, who: &str) -> Result<DeviceCode> {
+        let body = json!({
             "client_id": CLIENT_ID,
             "client_secret": self.secret,
             "scope": "bridge",
-            "for": what_for,
+            "for": who,
         });
-        if let Some((id, name)) = identity {
-            body["identity"] = id.to_string().into();
-            body["identity_name"] = name.into();
-        }
-        let (status, body) = self.post("/api/auth/device/code", body)?;
+        let (status, body) = self.call("POST", "/api/auth/device/code", None, Some(body))?;
         if status != 200 {
             return Err(anyhow!(
                 "the account service refused an OTP ({status}): {body}"
@@ -174,22 +228,24 @@ impl Accounts {
         Ok(serde_json::from_value(body)?)
     }
 
-    /// Whether a member approved the OTP of `device_code` yet.
+    /// Whether the person approved the OTP of `device_code` yet.
     pub fn poll(&self, device_code: &str) -> Result<Approval> {
-        let (status, body) = self.post(
+        let (status, body) = self.call(
+            "POST",
             "/api/auth/device/token",
-            json!({
+            None,
+            Some(json!({
                 "grant_type": "urn:ietf:params:oauth:grant-type:device_code",
                 "device_code": device_code,
                 "client_id": CLIENT_ID,
                 "client_secret": self.secret,
-            }),
+            })),
         )?;
         if status == 200 {
-            let credential = body["access_token"]
+            let grant = body["access_token"]
                 .as_str()
-                .context("the account service gave no credential")?;
-            return Ok(Approval::Approved(credential.into()));
+                .context("the account service gave no grant")?;
+            return Ok(Approval::Approved(grant.into()));
         }
         Ok(match body["error"].as_str() {
             Some("authorization_pending" | "slow_down") => Approval::Pending,
@@ -198,63 +254,81 @@ impl Accounts {
         })
     }
 
-    /// The bridge of `credential`, or `None` where it no longer is.
-    pub fn own(&self, credential: &str) -> Result<Option<Own>> {
-        let mut response = self
-            .agent
-            .get(format!("{}/api/bridges/self", self.url))
-            .header("Authorization", format!("Bearer {credential}"))
-            .call()
-            .map_err(|error| anyhow!("/api/bridges/self: {error}"))?;
-        match response.status().as_u16() {
-            200 => Ok(Some(response.body_mut().read_json()?)),
-            401 | 404 => Ok(None),
-            status => Err(anyhow!("/api/bridges/self answered {status}")),
-        }
+    /// The name of the account `grant` speaks as, or `None` where it was revoked.
+    pub fn account(&self, grant: &str) -> Result<Option<String>> {
+        let answer = self.call("GET", "/api/bridges/self", Some(grant), None)?;
+        Ok(self
+            .expect("asking about the grant", answer, 200)?
+            .and_then(|body| body["account"].as_str().map(String::from)))
     }
 
-    /// Says what the bridge's room is, which its session's info shows.
-    pub fn describe(&self, credential: &str, about: &str) -> Result<()> {
-        let mut response = self
-            .agent
-            .patch(format!("{}/api/bridges/self", self.url))
-            .header("Authorization", format!("Bearer {credential}"))
-            .send_json(json!({ "about": about }))
-            .map_err(|error| anyhow!("/api/bridges/self: {error}"))?;
-        match response.status().as_u16() {
-            204 => Ok(()),
-            status => Err(anyhow!(
-                "saying what the bridge's room is failed ({status}): {}",
-                response.body_mut().read_to_string().unwrap_or_default()
-            )),
-        }
+    /// The sessions of the person's groups, or `None` where the grant was revoked.
+    pub fn sessions(&self, grant: &str) -> Result<Option<Vec<OwnSession>>> {
+        let answer = self.call("GET", "/api/bridges/self/sessions", Some(grant), None)?;
+        self.expect("listing the sessions", answer, 200)?
+            .map(|body| Ok(serde_json::from_value(body)?))
+            .transpose()
     }
 
-    /// Removes the bridge of `credential` from its session.
-    pub fn remove(&self, credential: &str) -> Result<()> {
-        let mut response = self
-            .agent
-            .delete(format!("{}/api/bridges/self", self.url))
-            .header("Authorization", format!("Bearer {credential}"))
-            .call()
-            .map_err(|error| anyhow!("/api/bridges/self: {error}"))?;
-        match response.status().as_u16() {
-            204 | 401 | 404 => Ok(()),
-            status => Err(anyhow!(
-                "removing the bridge failed ({status}): {}",
-                response.body_mut().read_to_string().unwrap_or_default()
-            )),
-        }
+    /// Mirrors a room onto `session`, or `None` where the grant or the session is gone.
+    pub fn add(&self, grant: &str, session: &str, about: &str) -> Result<Option<Room>> {
+        let answer = self.call(
+            "POST",
+            "/api/bridges/self/rooms",
+            Some(grant),
+            Some(json!({ "session": session, "about": about })),
+        )?;
+        self.expect("bridging the chat", answer, 201)?
+            .map(|body| Ok(serde_json::from_value(body)?))
+            .transpose()
     }
+
+    /// Whether the room still is.
+    pub fn room(&self, grant: &str, room: &str) -> Result<bool> {
+        let answer = self.call("GET", &format!("/api/bridges/self/rooms/{room}"), Some(grant), None)?;
+        Ok(self.expect("asking about the room", answer, 200)?.is_some())
+    }
+
+    /// Says what the room is, which its session's info shows.
+    pub fn describe(&self, grant: &str, room: &str, about: &str) -> Result<()> {
+        let answer = self.call(
+            "PATCH",
+            &format!("/api/bridges/self/rooms/{room}"),
+            Some(grant),
+            Some(json!({ "about": about })),
+        )?;
+        self.expect("saying what the room is", answer, 204).map(drop)
+    }
+
+    /// Stops mirroring the room.
+    pub fn remove(&self, grant: &str, room: &str) -> Result<()> {
+        let answer = self.call("DELETE", &format!("/api/bridges/self/rooms/{room}"), Some(grant), None)?;
+        self.expect("removing the room", answer, 204).map(drop)
+    }
+
+    /// Revokes the grant, with its rooms.
+    pub fn revoke(&self, grant: &str) -> Result<()> {
+        let answer = self.call("DELETE", "/api/bridges/self", Some(grant), None)?;
+        self.expect("revoking the grant", answer, 204).map(drop)
+    }
+}
+
+/// A Telegram user who linked their account: its name, and the bridge's grant to speak as it.
+#[derive(Serialize, Deserialize, Debug, Clone)]
+struct Linked {
+    login: String,
+    grant: String,
 }
 
 /// A chat's bridge, as kept on disk.
 #[derive(Serialize, Deserialize, Debug, Clone)]
 struct Link {
-    /// The credential the bot reads the session with, and joins it as the people it carries.
-    credential: String,
-    /// Who added it.
-    by: String,
+    /// The room at the account service.
+    room: String,
+    /// Who bridged it, by Telegram id, by whose grant the bot reads the session.
+    by: i64,
+    /// Their account's name.
+    login: String,
     session: String,
     /// Its address on the relay.
     address: String,
@@ -330,17 +404,19 @@ struct Offset {
 /// What every thread of the service shares.
 struct Service {
     bot: Bot,
+    /// The bot's username, for the link to its private chat.
+    username: String,
     accounts: Accounts,
     relay: Relay,
     state: PathBuf,
     chats: Mutex<HashMap<i64, Arc<Bridged>>>,
-    /// The chats being bridged: one bridging each at a time.
+    /// The people linking: one OTP each at a time, by Telegram id.
     linking: Mutex<HashSet<i64>>,
     /// The groups the bot was added to and nobody bridged yet, since when.
     waiting: Mutex<HashMap<i64, Instant>>,
-    /// The Telegram accounts linked to an account, by Telegram id, as the bot saw them linked;
-    /// the account service decides whether they still are, at each join.
-    identities: Mutex<BTreeMap<i64, String>>,
+    /// The Telegram users who linked their account, by Telegram id: Vibe Together knows nothing
+    /// of it, and decides at each request whether the grant still holds.
+    linked: Mutex<BTreeMap<i64, Linked>>,
     /// The participants through which the people carried speak, by session address and who:
     /// a linked person's login, or `telegram:<id>` for anyone else. Shared by every chat bridged
     /// into that session, since a name joins a session once.
@@ -458,11 +534,24 @@ impl Service {
             .cloned()
     }
 
-    fn save_identities(&self) -> Result<()> {
-        let identities = self.identities.lock().expect("no holder panics");
+    fn linked(&self, user: i64) -> Option<Linked> {
+        self.linked
+            .lock()
+            .expect("no holder panics")
+            .get(&user)
+            .cloned()
+    }
+
+    /// The grant by which the bot reads a chat's session: its bridger's.
+    fn grant(&self, bridged: &Bridged) -> Option<String> {
+        self.linked(bridged.link.by).map(|linked| linked.grant)
+    }
+
+    fn save_linked(&self) -> Result<()> {
+        let linked = self.linked.lock().expect("no holder panics");
         write_private(
-            &self.state.join("identities.json"),
-            &serde_json::to_vec(&*identities)?,
+            &self.state.join("linked.json"),
+            &serde_json::to_vec(&*linked)?,
         )
     }
 
@@ -472,6 +561,33 @@ impl Service {
             &self.state.join("people.json"),
             &serde_json::to_vec(&*people)?,
         )
+    }
+
+    /// Forgets that `user` linked their account, where the grant is still `grant`: it was revoked
+    /// in Vibe Together. The chats they bridged end.
+    fn forget(&self, user: i64, grant: &str) {
+        {
+            let mut linked = self.linked.lock().expect("no holder panics");
+            if linked.get(&user).is_none_or(|linked| linked.grant != grant) {
+                return;
+            }
+            linked.remove(&user);
+        }
+        if let Err(error) = self.save_linked() {
+            eprintln!("messagent serve: can't keep who linked: {error:#}");
+        }
+        let theirs: Vec<i64> = self
+            .chats
+            .lock()
+            .expect("no holder panics")
+            .values()
+            .filter(|bridged| bridged.link.by == user)
+            .map(|bridged| bridged.chat)
+            .collect();
+        for chat in theirs {
+            self.end(chat, false);
+            self.tell(chat, "This chat is no longer bridged: its link was revoked.");
+        }
     }
 
     /// Starts carrying a bridged chat.
@@ -502,7 +618,7 @@ impl Service {
 
     /// Ends a chat's bridge here: it stops, the people it carried leave the session where no other
     /// chat carries them there, and its files go.
-    /// `remove` removes it at the account service too, as /stop does.
+    /// `remove` removes its room at the account service too, as /stop does.
     fn end(&self, chat: i64, remove: bool) {
         let (bridged, shared) = {
             let mut chats = self.chats.lock().expect("no holder panics");
@@ -535,24 +651,33 @@ impl Service {
                 eprintln!("messagent serve: can't keep who speaks where: {error:#}");
             }
         }
-        if remove && let Err(error) = self.accounts.remove(&bridged.link.credential) {
-            eprintln!("messagent serve: can't remove the bridge of {chat}: {error:#}");
+        if remove
+            && let Some(grant) = self.grant(&bridged)
+            && let Err(error) = self.accounts.remove(&grant, &bridged.link.room)
+        {
+            eprintln!("messagent serve: can't remove the room of {chat}: {error:#}");
         }
         if let Err(error) = fs::remove_dir_all(self.chat_dir(chat)) {
             eprintln!("messagent serve: can't remove the files of {chat}: {error:#}");
         }
     }
 
-    /// Whether the bridge still is at the account service: where it no longer is, removed in
-    /// Vibe Together or gone with its session or its member, the chat is told and it ends.
+    /// Whether the room still is at the account service: where it no longer is, removed in
+    /// Vibe Together, gone with its session or its member, or its link revoked, the chat is told
+    /// and it ends.
     fn still(&self, bridged: &Bridged) -> bool {
-        match self.accounts.own(&bridged.link.credential) {
-            Ok(Some(_)) => true,
-            Ok(None) => {
+        let Some(grant) = self.grant(bridged) else {
+            self.end(bridged.chat, false);
+            self.tell(bridged.chat, "This chat is no longer bridged: its link was revoked.");
+            return false;
+        };
+        match self.accounts.room(&grant, &bridged.link.room) {
+            Ok(true) => true,
+            Ok(false) => {
                 self.end(bridged.chat, false);
                 self.tell(
                     bridged.chat,
-                    "This chat is no longer bridged: the bridge was removed in Vibe Together, or its session is gone. Send /start to bridge it again.",
+                    "This chat is no longer bridged: it was removed in Vibe Together. /start bridges it again.",
                 );
                 false
             }
@@ -569,31 +694,31 @@ impl Service {
     /// Sends with the link of someone the bridge carries, joining again once where it was let go.
     fn send(
         &self,
-        bridged: &Bridged,
         link: &str,
+        grant: &str,
         kind: &str,
         filename: Option<&str>,
         body: &[u8],
     ) -> Result<u64> {
         match self.relay.send(link, kind, filename, body) {
             Err(error) if agentwire::status(&error) == Some(403) => {
-                self.relay.rejoin(link, Some(&bridged.link.credential))?;
+                self.relay.rejoin(link, Some(grant))?;
                 self.relay.send(link, kind, filename, body)
             }
             sent => sent,
         }
     }
 
-    /// The link through which `login` speaks in the chat's session, or `None` where they may not:
-    /// they unlinked their Telegram, or are no member of the session's group.
-    fn person(&self, bridged: &Bridged, login: &str) -> Result<Option<String>> {
-        let key = format!("{} {login}", bridged.link.address);
+    /// The link through which a linked person speaks in the chat's session, by their own grant,
+    /// or `None` where they may not, such as no member of the session's group.
+    fn person(&self, bridged: &Bridged, linked: &Linked) -> Result<Option<String>> {
+        let key = format!("{} {}", bridged.link.address, linked.login);
         if let Some(link) = self.people.lock().expect("no holder panics").get(&key) {
             return Ok(Some(link.clone()));
         }
         match self
             .relay
-            .join(&bridged.link.address, login, Some(&bridged.link.credential))
+            .join(&bridged.link.address, &linked.login, Some(&linked.grant))
         {
             Ok(joined) => {
                 self.people
@@ -603,10 +728,10 @@ impl Service {
                 self.save_people()?;
                 Ok(Some(joined.link))
             }
-            Err(error) if matches!(agentwire::status(&error), Some(403 | 409)) => {
+            Err(error) if matches!(agentwire::status(&error), Some(401 | 403 | 409)) => {
                 eprintln!(
-                    "messagent serve: {login} doesn't speak in {}: {error:#}",
-                    bridged.chat
+                    "messagent serve: {} doesn't speak in {}: {error:#}",
+                    linked.login, bridged.chat
                 );
                 Ok(None)
             }
@@ -616,7 +741,7 @@ impl Service {
 
     /// The link through which `from`, who linked no account, speaks in the chat's session:
     /// `telegram/<name>`, numbered where the name is taken, kept by their Telegram id.
-    fn stranger(&self, bridged: &Bridged, from: &User) -> Result<String> {
+    fn stranger(&self, bridged: &Bridged, from: &User, grant: &str) -> Result<String> {
         let key = format!("{} {MESSENGER}:{}", bridged.link.address, from.id);
         if let Some(link) = self.people.lock().expect("no holder panics").get(&key) {
             return Ok(link.clone());
@@ -628,10 +753,7 @@ impl Service {
             } else {
                 format!("{MESSENGER}/{base}-{i}")
             };
-            match self
-                .relay
-                .join(&bridged.link.address, &name, Some(&bridged.link.credential))
-            {
+            match self.relay.join(&bridged.link.address, &name, Some(grant)) {
                 Ok(joined) => {
                     self.people
                         .lock()
@@ -651,7 +773,7 @@ impl Service {
     }
 
     /// Sends what `from` said into the chat's session: as themselves where they linked their
-    /// Telegram account and may speak there, else as `telegram/<name>`, unverified.
+    /// account and may speak there, else as `telegram/<name>`, unverified.
     fn speak(
         &self,
         bridged: &Bridged,
@@ -660,168 +782,284 @@ impl Service {
         filename: Option<&str>,
         body: &[u8],
     ) -> Result<u64> {
-        let login = self
-            .identities
-            .lock()
-            .expect("no holder panics")
-            .get(&from.id)
-            .cloned();
-        if let Some(login) = login
-            && let Some(link) = self.person(bridged, &login)?
+        if let Some(linked) = self.linked(from.id)
+            && let Some(link) = self.person(bridged, &linked)?
         {
-            match self.send(bridged, &link, kind, filename, body) {
-                Err(error) if matches!(agentwire::status(&error), Some(403 | 404)) => {
+            match self.send(&link, &linked.grant, kind, filename, body) {
+                Err(error) if matches!(agentwire::status(&error), Some(401 | 403 | 404)) => {
                     eprintln!(
-                        "messagent serve: {login} no longer speaks in {}: {error:#}",
-                        bridged.chat
+                        "messagent serve: {} no longer speaks in {}: {error:#}",
+                        linked.login, bridged.chat
                     );
-                    let key = format!("{} {login}", bridged.link.address);
+                    let key = format!("{} {}", bridged.link.address, linked.login);
                     self.people.lock().expect("no holder panics").remove(&key);
                     self.save_people()?;
                 }
                 sent => return sent,
             }
         }
-        let link = self.stranger(bridged, from)?;
-        self.send(bridged, &link, kind, filename, body)
+        let grant = self
+            .grant(bridged)
+            .context("whoever bridged the chat unlinked")?;
+        let link = self.stranger(bridged, from, &grant)?;
+        self.send(&link, &grant, kind, filename, body)
     }
 
-    /// Tells the session's info who reads it: the chat, and in a group how many are in it.
+    /// What the room is, as its session's info shows it: the chat, and in a group how many are in it.
+    fn about(&self, chat: i64, private: bool, title: &str) -> (String, Option<u64>) {
+        if private {
+            return (format!("{title}'s private Telegram chat"), None);
+        }
+        let members = self
+            .bot
+            .member_count(chat)
+            .map(|n| n.saturating_sub(1))
+            .ok();
+        let count = members.map_or(String::new(), |n| format!(" ({n} people)"));
+        (format!("the Telegram group \"{title}\"{count}"), members)
+    }
+
+    /// Tells the session's info who reads it, where a group's count changed.
     fn audience(&self, bridged: &Bridged) -> Result<()> {
         let link = &bridged.link;
-        let about = if link.private {
-            format!("{}'s private Telegram chat", link.title)
-        } else {
-            let members = self
-                .bot
-                .member_count(bridged.chat)
-                .map(|n| n.saturating_sub(1))
-                .ok();
-            let told = bridged.place.lock().expect("no holder panics").members;
-            if told.is_some() && told == members {
-                return Ok(());
-            }
-            let count = members.map_or(String::new(), |n| format!(" ({n} people)"));
-            self.accounts.describe(
-                &link.credential,
-                &format!("the Telegram group \"{}\"{count}", link.title),
-            )?;
-            return bridged.update(|place| place.members = members);
-        };
-        self.accounts.describe(&link.credential, &about)
+        if link.private {
+            return Ok(());
+        }
+        let (about, members) = self.about(bridged.chat, false, &link.title);
+        let told = bridged.place.lock().expect("no holder panics").members;
+        if told.is_some() && told == members {
+            return Ok(());
+        }
+        let grant = self.grant(bridged).context("whoever bridged the chat unlinked")?;
+        self.accounts.describe(&grant, &link.room, &about)?;
+        bridged.update(|place| place.members = members)
     }
 
-    /// Starts bridging a chat, unless it is being bridged already.
-    fn link(self: &Arc<Self>, message: &Message, from: &User) {
+    /// The chat's label: a group's title, or the person's name.
+    fn title(chat: &crate::telegram::Chat, from: &User) -> String {
+        if chat.kind == "private" {
+            name_of(from)
+        } else {
+            label(chat.title.as_deref().unwrap_or("a group"), LABEL)
+        }
+    }
+
+    /// /start: links the sender's account, in their private chat, or where they linked it
+    /// offers their sessions to bridge the chat into.
+    fn begin(self: &Arc<Self>, message: &Message, from: &User) {
         let chat = message.chat.id;
+        let private = message.chat.kind == "private";
+        if self.linked(from.id).is_some() {
+            self.offer(chat, from);
+        } else if private {
+            self.link(chat, from);
+        } else {
+            self.tell(
+                chat,
+                &format!(
+                    "{}: link your account first, at https://t.me/{}?start=link, then send /start here again.",
+                    label(&from.first_name, LABEL),
+                    self.username
+                ),
+            );
+        }
+    }
+
+    /// Starts linking `from`'s account, by an OTP they approve, unless they are linking already.
+    fn link(self: &Arc<Self>, chat: i64, from: &User) {
         {
             let mut linking = self.linking.lock().expect("no holder panics");
-            if linking.contains(&chat) {
+            if linking.contains(&from.id) {
                 return;
             }
-            if linking.len() >= MAX_LINKING
-                || self.chats.lock().expect("no holder panics").len() >= MAX_CHATS
-            {
+            if linking.len() >= MAX_LINKING {
                 drop(linking);
                 self.tell(chat, "Busy: try again in a few minutes.");
                 return;
             }
-            linking.insert(chat);
+            linking.insert(from.id);
         }
         let service = self.clone();
-        let private = message.chat.kind == "private";
-        let title = if private {
-            name_of(from)
-        } else {
-            label(message.chat.title.as_deref().unwrap_or("a group"), LABEL)
-        };
         let from = from.clone();
         thread::spawn(move || {
-            if let Err(error) = service.linking(chat, private, &title, &from) {
-                eprintln!("messagent serve: bridging {chat} failed: {error:#}");
-                service.tell(
-                    chat,
-                    "Bridging failed on our side. Send /start to try again.",
-                );
+            if let Err(error) = service.linking(chat, &from) {
+                eprintln!("messagent serve: linking {} failed: {error:#}", from.id);
+                service.tell(chat, "Linking failed on our side. /start tries again.");
             }
             service
                 .linking
                 .lock()
                 .expect("no holder panics")
-                .remove(&chat);
+                .remove(&from.id);
         });
     }
 
-    /// Bridges a chat: a member approves the OTP and picks the session, and the bridge starts.
-    fn linking(self: &Arc<Self>, chat: i64, private: bool, title: &str, from: &User) -> Result<()> {
-        let asker = what_for(from);
-        let (what_for, identity) = if private {
-            (
-                format!("Telegram private chat with {asker}"),
-                Some((from.id, name_of(from))),
-            )
-        } else {
-            let members = self.bot.member_count(chat).map_or(String::new(), |n| {
-                format!(", {} people", n.saturating_sub(1))
-            });
-            (
-                format!("Telegram group \"{title}\", id {chat}{members}; asked by {asker}"),
-                None,
-            )
-        };
-        let code = self.accounts.ask(&what_for, identity)?;
-        let linked = if private {
-            " Approving also links your Telegram account to your Vibe Together account, so that what you write in bridged chats reaches their sessions as you."
-        } else {
-            ""
-        };
+    /// Links `from`'s account: they approve the OTP signed in, and the bot keeps the grant.
+    fn linking(self: &Arc<Self>, chat: i64, from: &User) -> Result<()> {
+        let code = self.accounts.ask(&what_for(from))?;
         self.tell(
             chat,
             &format!(
-                "To bridge this chat into a Vibe Together session, open\n{}\nsigned in, pick the session, and approve. \
-                 Approve only if the page shows the code {}.{linked}\n\
-                 Once bridged, everything said here reaches the session, its people and their agents, and everything said there comes here. \
-                 Telegram itself can read chats with bots.",
+                "Link your Vibe Together account: open {} and approve the code {}.",
                 code.verification_uri_complete, code.user_code
             ),
         );
         let until = Instant::now() + Duration::from_secs(code.expires_in);
         let mut interval = Duration::from_secs(code.interval.max(1));
-        let credential = loop {
+        let grant = loop {
             thread::sleep(interval);
             if Instant::now() > until {
-                self.tell(
-                    chat,
-                    "The OTP expired before it was approved. Send /start to try again.",
-                );
+                self.tell(chat, "The code expired. /start tries again.");
                 return Ok(());
             }
             match self.accounts.poll(&code.device_code) {
                 Ok(Approval::Pending) => {}
-                Ok(Approval::Approved(credential)) => break credential,
+                Ok(Approval::Approved(grant)) => break grant,
                 Ok(Approval::Ended(error)) => {
                     let text = match error.as_str() {
-                        "access_denied" => "Bridging was denied. Send /start to try again.",
-                        _ => "The OTP expired before it was approved. Send /start to try again.",
+                        "access_denied" => "Denied. /start tries again.",
+                        _ => "The code expired. /start tries again.",
                     };
                     self.tell(chat, text);
                     return Ok(());
                 }
                 Err(error) => {
-                    eprintln!("messagent serve: asking about {chat}'s OTP failed: {error:#}");
+                    eprintln!("messagent serve: asking about {}'s OTP failed: {error:#}", from.id);
                     interval = (interval * 2).min(Duration::from_secs(60));
                 }
             }
         };
-        let own = self
+        let login = self
             .accounts
-            .own(&credential)?
-            .context("the new bridge doesn't count")?;
+            .account(&grant)?
+            .context("the new grant doesn't count")?;
+        // A Telegram account links one account: one it linked before is let go there.
+        let before = self
+            .linked
+            .lock()
+            .expect("no holder panics")
+            .insert(from.id, Linked { login: login.clone(), grant });
+        self.save_linked()?;
+        if let Some(before) = before
+            && before.login != login
+            && let Err(error) = self.accounts.revoke(&before.grant)
+        {
+            eprintln!("messagent serve: can't revoke {}'s grant: {error:#}", before.login);
+        }
+        self.tell(chat, &format!("Linked as {login}."));
+        if self.bridged(chat).is_none() {
+            self.offer(chat, from);
+        }
+        Ok(())
+    }
+
+    /// Offers the sender's sessions as buttons, to bridge the chat into the one pressed.
+    fn offer(&self, chat: i64, from: &User) {
+        let Some(linked) = self.linked(from.id) else {
+            return;
+        };
+        let sessions = match self.accounts.sessions(&linked.grant) {
+            Ok(Some(sessions)) => sessions,
+            Ok(None) => {
+                self.forget(from.id, &linked.grant);
+                self.tell(chat, "Your link was revoked. /start links again.");
+                return;
+            }
+            Err(error) => {
+                eprintln!("messagent serve: can't list {}'s sessions: {error:#}", linked.login);
+                self.tell(chat, "That failed on our side. /start tries again.");
+                return;
+            }
+        };
+        if sessions.is_empty() {
+            self.tell(chat, &format!("You have no session yet: make one at {SITE}, then /start."));
+            return;
+        }
+        let buttons: Vec<(String, String)> = sessions
+            .iter()
+            .take(MAX_CHOICES)
+            .map(|session| {
+                (
+                    label(&format!("{} · {}", session.name, session.project.name), LABEL),
+                    format!("b:{}", session.id),
+                )
+            })
+            .collect();
+        let text = match self.bridged(chat) {
+            Some(bridged) => format!(
+                "Bridged by {}. Move it to which session?",
+                bridged.link.login
+            ),
+            None => "Bridge this chat into which session?".into(),
+        };
+        if let Err(error) = self.bot.send_buttons(chat, &text, &buttons) {
+            eprintln!("messagent serve: can't offer {chat} its sessions: {error:#}");
+        }
+    }
+
+    /// A button pressed: bridges the chat into the session it names, by the presser's grant.
+    fn pressed(self: &Arc<Self>, query: &CallbackQuery) {
+        let answer = |text: Option<&str>| {
+            if let Err(error) = self.bot.answer_callback(&query.id, text) {
+                eprintln!("messagent serve: can't answer a button: {error:#}");
+            }
+        };
+        let (Some(message), Some(session)) = (
+            &query.message,
+            query.data.as_deref().and_then(|data| data.strip_prefix("b:")),
+        ) else {
+            return answer(None);
+        };
+        let from = &query.from;
+        if from.is_bot {
+            return answer(None);
+        }
+        let Some(linked) = self.linked(from.id) else {
+            return answer(Some("Link your account first: /start in a private chat with me."));
+        };
+        let chat = message.chat.id;
+        let private = message.chat.kind == "private";
+        if !private && self.chats.lock().expect("no holder panics").len() >= MAX_CHATS {
+            return answer(Some("Busy: try again in a few minutes."));
+        }
+        let title = Self::title(&message.chat, from);
+        match self.bridge(chat, private, &title, from.id, &linked, session) {
+            Ok(Some(text)) => {
+                answer(None);
+                if let Err(error) = self.bot.edit_text(chat, message.message_id, &text) {
+                    eprintln!("messagent serve: can't update the offer in {chat}: {error:#}");
+                    self.tell(chat, &text);
+                }
+            }
+            Ok(None) => answer(Some("That session is gone, or not yours.")),
+            Err(error) => {
+                eprintln!("messagent serve: bridging {chat} failed: {error:#}");
+                answer(Some("That failed on our side. Try again."));
+            }
+        }
+    }
+
+    /// Bridges a chat into a session, ending its bridge before; what to tell the chat, or `None`
+    /// where the account service refused the session.
+    fn bridge(
+        self: &Arc<Self>,
+        chat: i64,
+        private: bool,
+        title: &str,
+        by: i64,
+        linked: &Linked,
+        session: &str,
+    ) -> Result<Option<String>> {
+        let (about, members) = self.about(chat, private, title);
+        let Some(room) = self.accounts.add(&linked.grant, session, &about)? else {
+            return Ok(None);
+        };
         let link = Link {
-            credential,
-            by: own.by.clone(),
-            session: own.session.id.clone(),
-            address: own
+            room: room.id,
+            by,
+            login: linked.login.clone(),
+            session: room.session.id.clone(),
+            address: room
                 .session
                 .address
                 .clone()
@@ -836,46 +1074,41 @@ impl Service {
         let dir = self.chat_dir(chat);
         private_dir(&dir)?;
         write_private(&dir.join("bridge.json"), &serde_json::to_vec(&link)?)?;
-        if private {
-            self.identities
-                .lock()
-                .expect("no holder panics")
-                .insert(from.id, own.by.clone());
-            self.save_identities()?;
-        }
         self.waiting.lock().expect("no holder panics").remove(&chat);
         let bridged = self.start(chat, link)?;
-        self.audience(&bridged)?;
-        self.tell(
-            chat,
-            &format!(
-                "Bridged into the session \"{}\" of {}, added by {}. Everything said there comes here, and what is said here goes there.{} /stop ends the bridge.",
-                label(&own.session.name, LABEL),
-                label(&own.session.group.name, LABEL),
-                own.by,
-                if private {
-                    ""
-                } else {
-                    " People who linked their Telegram account, in a private chat with me, show there as themselves; everyone else as telegram/<name>, unverified."
-                }
-            ),
-        );
-        Ok(())
+        bridged.update(|place| place.members = members)?;
+        Ok(Some(format!(
+            "Bridged into \"{}\" ({}). Everything said here reaches it, and back. /stop ends it.{}",
+            label(&room.session.name, LABEL),
+            label(&room.session.group.name, LABEL),
+            if private {
+                ""
+            } else {
+                " Linked people show as themselves, everyone else as telegram/<name>."
+            }
+        )))
+    }
+
+    /// /unlink: revokes the sender's grant, and the chats they bridged end.
+    fn unlink(&self, chat: i64, from: &User) {
+        let Some(linked) = self.linked(from.id) else {
+            self.tell(chat, "You haven't linked an account.");
+            return;
+        };
+        if let Err(error) = self.accounts.revoke(&linked.grant) {
+            eprintln!("messagent serve: can't revoke {}'s grant: {error:#}", linked.login);
+            self.tell(chat, "That failed on our side. Try again.");
+            return;
+        }
+        self.forget(from.id, &linked.grant);
+        self.tell(chat, &format!("Unlinked from {}.", linked.login));
     }
 
     /// Whether `from` may end a chat's bridge: in a private chat its person, in a group whoever
-    /// added it, by their linked Telegram account, or an admin of the group.
+    /// bridged it or an admin of the group.
     fn may_stop(&self, bridged: &Bridged, from: &User) -> bool {
-        if bridged.link.private {
-            return true;
-        }
-        let linked = self
-            .identities
-            .lock()
-            .expect("no holder panics")
-            .get(&from.id)
-            .cloned();
-        linked.as_deref() == Some(bridged.link.by.as_str())
+        bridged.link.private
+            || bridged.link.by == from.id
             || self
                 .bot
                 .member_status(bridged.chat, from.id)
@@ -909,23 +1142,34 @@ impl Service {
         if from.is_bot || message.sender_chat.is_some() {
             return;
         }
+        let private = message.chat.kind == "private";
+        match command(message).filter(|_| !edited) {
+            Some("unlink") if private => return self.unlink(chat, from),
+            Some("start") => return self.begin(message, from),
+            Some("stop") => {
+                match &bridged {
+                    Some(bridged) if self.may_stop(bridged, from) => {
+                        self.end(chat, true);
+                        self.tell(chat, "Bridge ended. /start bridges it again.");
+                    }
+                    Some(_) => self.tell(chat, "Only whoever bridged it, or a group admin, ends it."),
+                    None => self.tell(chat, "This chat isn't bridged."),
+                }
+                return;
+            }
+            _ => {}
+        }
         let Some(bridged) = bridged else {
-            let private = message.chat.kind == "private";
             if edited {
                 return;
             }
-            if private || command(message) == Some("start") {
-                self.link(message, from);
+            if private {
+                self.begin(message, from);
             } else if !self
                 .waiting
                 .lock()
                 .expect("no holder panics")
                 .contains_key(&chat)
-                && !self
-                    .linking
-                    .lock()
-                    .expect("no holder panics")
-                    .contains(&chat)
             {
                 // A group nobody bridged, such as from before a restart.
                 if let Err(error) = self.bot.leave_chat(chat) {
@@ -934,38 +1178,16 @@ impl Service {
             }
             return;
         };
-        match command(message).filter(|_| !edited) {
-            Some("stop") => {
-                if self.may_stop(&bridged, from) {
-                    self.end(chat, true);
-                    self.tell(chat, "The bridge ended: this chat no longer reaches the session. Send /start to bridge it again.");
-                } else {
-                    self.tell(
-                        chat,
-                        "Only whoever added the bridge, or an admin of the group, ends it.",
-                    );
-                }
-            }
-            Some("start") => self.tell(
-                chat,
-                &format!(
-                    "This chat is bridged into a session, added by {}. /stop ends the bridge.",
-                    bridged.link.by
-                ),
-            ),
-            _ => {
-                if let Err(error) = self.carry(&bridged, message, from, edited) {
-                    eprintln!("messagent serve: can't carry a message of {chat}: {error:#}");
-                    if matches!(agentwire::status(&error), Some(403 | 404)) {
-                        self.still(&bridged);
-                    }
-                }
+        if let Err(error) = self.carry(&bridged, message, from, edited) {
+            eprintln!("messagent serve: can't carry a message of {chat}: {error:#}");
+            if matches!(agentwire::status(&error), Some(401 | 403 | 404)) {
+                self.still(&bridged);
             }
         }
     }
 
-    /// Carries a message into the session: as its sender where they linked their Telegram
-    /// account, else as `telegram/<name>`, unverified.
+    /// Carries a message into the session: as its sender where they linked their account, else
+    /// as `telegram/<name>`, unverified.
     fn carry(&self, bridged: &Bridged, message: &Message, from: &User, edited: bool) -> Result<()> {
         let Arrived::Message { id, image, text } = message_of(message) else {
             return Ok(());
@@ -1043,10 +1265,9 @@ impl Service {
     fn leave_unbridged(&self) {
         let due: Vec<i64> = {
             let mut waiting = self.waiting.lock().expect("no holder panics");
-            let linking = self.linking.lock().expect("no holder panics");
             let due: Vec<i64> = waiting
                 .iter()
-                .filter(|(chat, since)| since.elapsed() > UNBRIDGED && !linking.contains(chat))
+                .filter(|(_, since)| since.elapsed() > UNBRIDGED)
                 .map(|(chat, _)| *chat)
                 .collect();
             for chat in &due {
@@ -1069,10 +1290,11 @@ impl Service {
         let mut backoff = Backoff::new();
         while !bridged.stopped.load(Ordering::Relaxed) {
             let after = bridged.place.lock().expect("no holder panics").after;
-            match self
-                .relay
-                .read(&bridged.link.address, after, &bridged.link.credential)
-            {
+            let Some(grant) = self.grant(bridged) else {
+                self.still(bridged);
+                return Ok(());
+            };
+            match self.relay.read(&bridged.link.address, after, &grant) {
                 Ok(received) => {
                     backoff = Backoff::new();
                     self.received(bridged, &telegram, received)?;
@@ -1169,10 +1391,10 @@ impl Service {
 
     /// Carries one entry out to the chat, if it is for people.
     fn out(&self, bridged: &Bridged, telegram: &UserChat, entry: &Entry) -> Result<()> {
-        let fetch = |n: u64| {
-            self.relay
-                .fetch_read(&bridged.link.address, n, &bridged.link.credential)
-        };
+        let grant = self
+            .grant(bridged)
+            .context("whoever bridged the chat unlinked")?;
+        let fetch = |n: u64| self.relay.fetch_read(&bridged.link.address, n, &grant);
         if entry.is(reactions::REACTION) {
             let reaction: Reaction = serde_json::from_str(entry.text.as_deref().unwrap_or(""))?;
             let message = bridged
@@ -1201,7 +1423,7 @@ impl Service {
         // What pings nobody in the chat reaches it without a notification: in a private chat
         // its person is pinged by their name, in a group anyone by a message for everyone.
         let quiet = if bridged.link.private {
-            !pings(entry, &bridged.link.by, telegram.native())
+            !pings(entry, &bridged.link.login, telegram.native())
         } else {
             !pings_any(entry, telegram.native(), |_| false)
         };
@@ -1221,7 +1443,7 @@ impl Service {
             return Ok(());
         }
         // In a private chat its person's own agents speak without a name, as a friend does.
-        let by = format!("{}/", bridged.link.by);
+        let by = format!("{}/", bridged.link.login);
         let text = plain(entry, |name| bridged.link.private && name.starts_with(&by));
         for part in telegram.split(&text) {
             telegram.send(&part, quiet)?;
@@ -1262,14 +1484,36 @@ pub fn serve(settings: Settings) -> Result<()> {
         );
         fs::remove_dir_all(&before)?;
     }
+    // The state of before grants, Luis's decision (2026-11-11): each chat's bridge held a
+    // credential for one session, and the linked Telegram accounts were Vibe Together's too.
+    // Neither counts any more, so each person links again, once.
+    let identities = settings.state.join("identities.json");
+    if identities.exists() {
+        eprintln!("messagent serve: removing the bridges of before grants, which no longer count");
+        for old in ["chats", "people.json"] {
+            let path = settings.state.join(old);
+            if path.is_dir() {
+                fs::remove_dir_all(&path)?;
+            } else if path.exists() {
+                fs::remove_file(&path)?;
+            }
+        }
+        fs::remove_file(&identities)?;
+    }
     private_dir(&settings.state.join("chats"))?;
+    let username = settings
+        .bot
+        .get_me()?
+        .username
+        .context("the bot has no username")?;
     let offset_file = settings.state.join("telegram.json");
     let mut offset: Offset = load(&offset_file)?;
     let service = Arc::new(Service {
         bot: settings.bot,
+        username,
         accounts: settings.accounts,
         relay: Relay::new(),
-        identities: Mutex::new(load(&settings.state.join("identities.json"))?),
+        linked: Mutex::new(load(&settings.state.join("linked.json"))?),
         people: Mutex::new(load(&settings.state.join("people.json"))?),
         state: settings.state,
         chats: Mutex::new(HashMap::new()),
@@ -1306,7 +1550,7 @@ pub fn serve(settings: Settings) -> Result<()> {
         write_private(&offset_file, &serde_json::to_vec(&offset)?)?;
         let updates: Vec<Update> = match service.bot.get_updates_of(
             offset.offset,
-            &["message", "edited_message", "my_chat_member"],
+            &["message", "edited_message", "my_chat_member", "callback_query"],
         ) {
             Ok(updates) => {
                 delay = Duration::from_secs(1);
@@ -1338,6 +1582,9 @@ pub fn serve(settings: Settings) -> Result<()> {
             }
             if let Some(member) = &update.my_chat_member {
                 service.membership(member);
+            }
+            if let Some(query) = &update.callback_query {
+                service.pressed(query);
             }
         }
     }

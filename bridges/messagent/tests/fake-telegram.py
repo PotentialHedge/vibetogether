@@ -7,7 +7,8 @@ and for a file "file_name" and "mime_type".
 In a group: "chat" its id, with "title"; "member" instead makes the bot's own membership in it
 change to that status, such as "member" or "left"; "joined" a list of ids who joined it.
 "edited": true makes it an edit, "forward_origin" a forward, "is_bot" or "sender_chat" a sender
-that is no person. getChatMember says 99 is an admin, and getChatMemberCount a group has 4.
+that is no person. "press" instead presses a button carrying it, under "message_id" in the chat.
+getChatMember says 99 is an admin, and getChatMemberCount a group has 4.
 GET /calls returns every call of the bot so far, as [{"method": ..., "body": ...}];
 a file uploaded in a form is in the body as {"filename", "type", "size", "sha256"}.
 """
@@ -96,6 +97,24 @@ class Handler(BaseHTTPRequestHandler):
                         "chat": {"id": chat, "type": "supergroup", "title": body.get("title", "Team")},
                         "from": {"id": body["from"], "first_name": "Luis", "is_bot": False},
                         "new_chat_member": {"status": body["member"]},
+                    },
+                })
+                lock.notify_all()
+            self.answer({"message_id": 0})
+            return
+        if self.path == "/inject" and "press" in body:
+            with lock:
+                sender = body["from"]
+                chat = {"id": sender, "type": "private"}
+                if "chat" in body:
+                    chat = {"id": body["chat"], "type": "supergroup", "title": body.get("title", "Team")}
+                updates.append({
+                    "update_id": len(updates) + 1,
+                    "callback_query": {
+                        "id": f"press{len(updates) + 1}",
+                        "from": {"id": sender, "first_name": body.get("name", "Luis"), "is_bot": False},
+                        "message": {"message_id": body.get("message_id", 1), "date": 1793000000, "chat": chat},
+                        "data": body["press"],
                     },
                 })
                 lock.notify_all()

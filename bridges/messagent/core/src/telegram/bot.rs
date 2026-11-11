@@ -138,6 +138,19 @@ pub struct Update {
     pub edited_message: Option<Message>,
     /// The bot's own membership in a chat changed, such as the user blocking it.
     pub my_chat_member: Option<ChatMember>,
+    /// Someone pressed a button of the bot's.
+    pub callback_query: Option<CallbackQuery>,
+}
+
+/// A press of a button under one of the bot's messages.
+#[derive(Deserialize, Debug)]
+pub struct CallbackQuery {
+    pub id: String,
+    pub from: User,
+    /// The message the button is under, where Telegram still has it.
+    pub message: Option<Message>,
+    /// What the button carries, as the bot set it.
+    pub data: Option<String>,
 }
 
 /// A change of the bot's membership in a chat.
@@ -356,5 +369,39 @@ impl Bot {
     pub fn send_raw(&self, chat: i64, mut body: Map<String, Value>) -> Result<Message> {
         body.insert("chat_id".into(), chat.into());
         self.call("sendMessage", Value::Object(body))
+    }
+
+    /// Sends a text with a column of buttons under it, each a label and what it carries.
+    pub fn send_buttons(&self, chat: i64, text: &str, buttons: &[(String, String)]) -> Result<Message> {
+        let keyboard: Vec<Value> = buttons
+            .iter()
+            .map(|(label, data)| json!([{ "text": label, "callback_data": data }]))
+            .collect();
+        self.send_raw(
+            chat,
+            Map::from_iter([
+                ("text".into(), text.into()),
+                ("reply_markup".into(), json!({ "inline_keyboard": keyboard })),
+            ]),
+        )
+    }
+
+    /// Replaces a message's text, and takes its buttons away.
+    pub fn edit_text(&self, chat: i64, message: i64, text: &str) -> Result<()> {
+        self.call::<Value>(
+            "editMessageText",
+            json!({ "chat_id": chat, "message_id": message, "text": text }),
+        )?;
+        Ok(())
+    }
+
+    /// Answers a button's press, which ends its spinner, with a short notice where one is given.
+    pub fn answer_callback(&self, id: &str, text: Option<&str>) -> Result<()> {
+        let mut body = json!({ "callback_query_id": id });
+        if let Some(text) = text {
+            body["text"] = text.into();
+        }
+        self.call::<bool>("answerCallbackQuery", body)?;
+        Ok(())
     }
 }

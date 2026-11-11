@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # The Telegram bridge end to end: `messagent serve` between a fake Telegram, the account service
-# and a relay that asks it, with the members' approvals and the agents played by curl.
+# and a relay that asks it, with the people's approvals, their buttons and the agents played by curl.
 # Usage: tests/serve.sh <messagent binary> <relay binary> <accounts directory>
 # until_ evaluates its argument as it waits, so the argument is quoted to expand later.
 # shellcheck disable=SC2016
@@ -55,12 +55,17 @@ export ACCOUNTS_URL=$accounts ACCOUNTS_DATABASE=$work/accounts.db ACCOUNTS_SECRE
 pids+=($!)
 
 calls() { curl -sf "http://127.0.0.1:$telegram/calls"; }
-# The texts the bot sent to a chat, one per line.
-said() { calls | python3 -I -c 'import json,sys; [print(c["body"].get("text","").replace("\n"," ")) for c in json.load(sys.stdin) if c["method"]=="sendMessage" and c["body"]["chat_id"]==int(sys.argv[1])]' "$1"; }
+# The texts the bot sent to a chat, or edited in, one per line.
+said() { calls | python3 -I -c 'import json,sys; [print(c["body"].get("text","").replace("\n"," ")) for c in json.load(sys.stdin) if c["method"] in ("sendMessage","editMessageText") and c["body"]["chat_id"]==int(sys.argv[1])]' "$1"; }
+# The buttons of the last offer of sessions in a chat, as `label=data`, one per line.
+buttons() { calls | python3 -I -c 'import json,sys; o=[c["body"] for c in json.load(sys.stdin) if c["method"]=="sendMessage" and c["body"]["chat_id"]==int(sys.argv[1]) and "reply_markup" in c["body"]]; [print(b[0]["text"]+"="+b[0]["callback_data"]) for b in o[-1]["reply_markup"]["inline_keyboard"]] if o else None' "$1"; }
+# What the bot answered the last press of a button.
+answered() { calls | python3 -I -c 'import json,sys; a=[c["body"].get("text","") for c in json.load(sys.stdin) if c["method"]=="answerCallbackQuery"]; print(a[-1] if a else "")'; }
+offers() { said "$1" | grep -c "into which session" || true; }
 inject() { curl -s -d "$1" "http://127.0.0.1:$telegram/inject" >/dev/null; }
 field() { python3 -I -c 'import json,sys; print(json.loads(sys.stdin.read().splitlines()[0])[sys.argv[1]])' "$1"; }
 # The code of the last OTP the bot sent to a chat.
-code_of() { said "$1" | sed -n 's/.*shows the code \([A-Z0-9-]*\)\..*/\1/p' | tail -1; }
+code_of() { said "$1" | sed -n 's/.*approve the code \([A-Z0-9-]*\)\..*/\1/p' | tail -1; }
 
 if ! { until_ 'calls' && until_ "curl -sf $relay/" && until_ "curl -s $accounts/api/me"; }; then
   echo "the fake Telegram, the relay or the account service didn't start"
@@ -74,12 +79,17 @@ as_person() { curl -s -H "cookie: $cookie" -H "origin: $accounts" "$@"; }
 as_ben() { curl -s -H "cookie: $ben_cookie" -H "origin: $accounts" "$@"; }
 json() { printf '%s' "$1"; }
 post() { as_person -H 'content-type: application/json' -d "$2" "$accounts$1"; }
-# Approves the chat's last OTP into a session, as `as` (as_person or as_ben).
+# Approves the chat's last OTP, as `as` (as_person or as_ben).
 approve() {
   local code
   code=$(code_of "$1")
-  "$3" "$accounts/api/auth/device?user_code=$code" >/dev/null
-  "$3" -H 'content-type: application/json' -d "{\"userCode\":\"$code\",\"session\":\"$2\"}" "$accounts/api/auth/device/approve"
+  "$2" "$accounts/api/auth/device?user_code=$code" >/dev/null
+  "$2" -H 'content-type: application/json' -d "{\"userCode\":\"$code\"}" "$accounts/api/auth/device/approve"
+}
+# Presses the button for a session, as a Telegram user in a chat: press <user> <chat> <session>.
+press() {
+  if [ "$1" = "$2" ]; then inject "{\"from\":$1,\"press\":\"b:$3\"}"
+  else inject "{\"from\":$1,\"chat\":$2,\"press\":\"b:$3\"}"; fi
 }
 
 # Luis and Ben share the group Team, with the sessions "agents" and "chat"; Ben has one of his own.
@@ -100,20 +110,23 @@ export HOME=$work XDG_STATE_HOME=$work/state XDG_CONFIG_HOME=$work/config
   --accounts $accounts --telegram-api http://127.0.0.1:$telegram 2>"$work/serve.log" &
 pids+=($!)
 
-# A private chat.
+# A private chat: linking, then the sessions offered as buttons.
 inject '{"from":42,"username":"luiswirth","text":"hello?"}'
-until_ 'said 42 | grep -q "pick the session"' || true
-check "a private chat is asked to be bridged" "$(said 42 | grep -c 'pick the session')" 1
+until_ 'said 42 | grep -q "approve the code"' || true
+check "a private chat is asked to link" "$(said 42 | grep -c 'Link your Vibe Together account')" 1
 check "the bot sets its commands and descriptions" "$(calls | python3 -I -c 'import json,sys; print(sorted(c["method"] for c in json.load(sys.stdin) if c["method"].startswith("setMy")))')" "['setMyCommands', 'setMyDescription', 'setMyShortDescription']"
 page=$(as_person "$accounts/api/auth/device?user_code=$(code_of 42)")
 check "the page says a bridge asks" "$(json "$page" | field bridge)" True
-check "for which chat" "$(json "$page" | field for)" "Telegram private chat with Telegram id 42, @luiswirth, named Luis"
-check "and which Telegram account approving links" "$(json "$page" | field identity)" "Luis (@luiswirth)"
-approve 42 "$private_session" as_person >/dev/null
+check "and who, in its own words" "$(json "$page" | field for)" "Telegram id 42, @luiswirth, named Luis"
+approve 42 as_person >/dev/null
+until_ 'said 42 | grep -q "into which session"' || true
+check "approving links" "$(said 42 | grep -c 'Linked as luis\.')" 1
+check "and offers the person's sessions" "$(buttons 42 | cut -d= -f1 | sort | tr '\n' ' ')" "agents · work chat · work own · own "
+check "a grant is no token, and Vibe Together keeps no Telegram id" "$(as_person "$accounts/api/bridges" | python3 -I -c 'import json,sys; print([[b["bridge"], b["for"]] for b in json.load(sys.stdin)])') $(as_person $accounts/api/tokens)" "[['messagent', 'Telegram id 42, @luiswirth, named Luis']] []"
+press 42 42 "$private_session"
 until_ 'said 42 | grep -q "Bridged into"' || true
-check "approving bridges the chat into the session picked" "$(said 42 | grep -c 'Bridged into the session "agents" of Team, added by luis')" 1
-check "it is listed as the session's bridge, not a token" "$(as_person "$accounts/api/sessions/$private_session/bridges" | python3 -I -c 'import json,sys; print([b["bridge"] for b in json.load(sys.stdin)])') $(as_person $accounts/api/tokens)" "['messagent'] []"
-check "and the Telegram account is linked" "$(as_person "$accounts/api/identities" | python3 -I -c 'import json,sys; print([i["external"] for i in json.load(sys.stdin)])')" "['42']"
+check "pressing one bridges the chat into it" "$(said 42 | grep -c 'Bridged into "agents" (Team)')" 1
+check "it is the session's room" "$(as_person "$accounts/api/sessions/$private_session/bridges" | python3 -I -c 'import json,sys; print([[b["bridge"], b["by"]] for b in json.load(sys.stdin)])')" "[['messagent', 'luis']]"
 
 token=$(post /api/tokens '{"name":"laptop"}' | field token)
 address_of() { curl -s -H "authorization: Bearer $token" "$accounts/api/sessions" | python3 -I -c 'import json,sys; print([s["address"] for s in json.load(sys.stdin) if s["id"]==sys.argv[1]][0])' "$1"; }
@@ -127,7 +140,7 @@ until_ 'curl -s "$agent?after=0&wait=0" | grep -q "\"text\":\"hi\""' || true
 got=$(curl -s "$agent?after=0&wait=0")
 check "what the person writes arrives as theirs" "$(printf '%s\n' "$got" | grep -F '"from":"luis"' | grep -c '"text":"hi"')" 1
 check "verified as their account" "$(curl -s "$agent?after=0&wait=0&presence" | grep -c '"luis":{[^}]*"account":"luis"')" 1
-check "the session's info names the chat it reaches" "$(about_of "$private_session")" "[\"Luis (@luiswirth)'s private Telegram chat\"]"
+check "the session's info names the chat it reaches" "$(about_of "$private_session")" "[\"Luis's private Telegram chat\"]"
 check "the bridge is no participant, and says nothing in the session" "$(printf '%s\n' "$got" | grep -c 'messagent')" 0
 # A change of presence while the bridge is between receives is seen only at its next receive,
 # so the agent reads only once the bridge waits again.
@@ -140,29 +153,35 @@ curl -s --data-binary 'Hello, Luis.' "$agent" >/dev/null
 until_ 'said 42 | grep -qx "Hello, Luis."' || true
 check "the person's agent reaches the private chat without a name" "$(said 42 | grep -cx 'Hello, Luis.')" 1
 
-# Ben links his Telegram account in a private chat of his, into a session of his own.
+# Ben links his account in a private chat of his, and bridges it into a session of his own.
 inject '{"from":43,"name":"Ben","username":"ben","text":"/start"}'
-until_ 'said 43 | grep -q "pick the session"' || true
-check "a session of another group is no choice" "$(approve 43 "$own_session" as_ben | grep -c 'No such session')" 1
-approve 43 "$ben_session" as_ben >/dev/null
+until_ 'said 43 | grep -q "approve the code"' || true
+approve 43 as_ben >/dev/null
+until_ 'said 43 | grep -q "into which session"' || true
+press 43 43 "$own_session"
+until_ '[ -n "$(answered)" ]' || true
+check "a session of another's group is no choice" "$(answered)" "That session is gone, or not yours."
+press 43 43 "$ben_session"
 until_ 'said 43 | grep -q "Bridged into"' || true
-check "Ben's chat is bridged too" "$(said 43 | grep -c 'Bridged into the session "ben"')" 1
+check "Ben's chat is bridged too" "$(said 43 | grep -c 'Bridged into "ben"')" 1
 
 # A group.
 inject '{"from":42,"chat":-100,"member":"member"}'
 until_ 'said -100 | grep -q "leave in 10 minutes"' || true
 check "added to a group, the bot asks for /start" "$(said -100 | grep -c 'leave in 10 minutes')" 1
 inject '{"from":7,"chat":-100,"text":"anyone?"}'
+inject '{"from":7,"chat":-100,"name":"Eve","text":"/start"}'
+until_ 'said -100 | grep -q "link your account first"' || true
+check "/start by someone unlinked points them to their private chat" "$(said -100 | grep -c 'Eve: link your account first, at https://t.me/fakebot?start=link')" 1
 inject '{"from":42,"chat":-100,"text":"/start@fakebot"}'
-until_ 'said -100 | grep -q "pick the session"' || true
-check "/start in the group asks for its bridge" "$(said -100 | grep -c 'pick the session')" 1
-page=$(as_person "$accounts/api/auth/device?user_code=$(code_of -100)")
-check "naming the group, its people and who asked" "$(json "$page" | field for)" 'Telegram group "Team", id -100, 3 people; asked by Telegram id 42, no username, named Luis'
-check "linking no one's Telegram" "$(json "$page" | field identity)" None
-check "one bridge of luis's per session" "$(approve -100 "$private_session" as_person | grep -c 'already')" 1
-approve -100 "$group_session" as_person >/dev/null
+until_ 'said -100 | grep -q "into which session"' || true
+check "/start by a linked member offers their sessions" "$(offers -100)" 1
+press 7 -100 "$group_session"
+until_ '[ "$(answered)" = "Link your account first: /start in a private chat with me." ]' || true
+check "someone unlinked presses in vain" "$(answered)" "Link your account first: /start in a private chat with me."
+press 42 -100 "$group_session"
 until_ 'said -100 | grep -q "Bridged into"' || true
-check "the group is bridged" "$(said -100 | grep -c 'Bridged into the session "chat"')" 1
+check "the group is bridged" "$(said -100 | grep -c 'Bridged into "chat" (Team)')" 1
 member=$(curl -s -X POST -H "authorization: Bearer $token" "$(address_of "$group_session")/join?as=luis/claude" | field link)
 
 inject '{"from":42,"chat":-100,"text":"from luis"}'
@@ -192,11 +211,11 @@ check "and only what the group didn't say itself" "$(said -100 | grep -c 'from l
 check "the private chat's bridge gets nothing of the group's session" "$(said 42 | grep -c 'Hello, group.')" 0
 
 inject '{"from":7,"chat":-100,"text":"/stop"}'
-until_ 'said -100 | grep -q "Only whoever added"' || true
-check "a stranger can't end the bridge" "$(said -100 | grep -c 'Only whoever added')" 1
+until_ 'said -100 | grep -q "Only whoever bridged"' || true
+check "a stranger can't end the bridge" "$(said -100 | grep -c 'Only whoever bridged')" 1
 inject '{"from":99,"chat":-100,"text":"/stop"}'
-until_ 'said -100 | grep -q "The bridge ended"' || true
-check "an admin of the group can" "$(said -100 | grep -c 'The bridge ended')" 1
+until_ 'said -100 | grep -q "Bridge ended"' || true
+check "an admin of the group can" "$(said -100 | grep -c 'Bridge ended')" 1
 check "which removes it from the session" "$(as_person "$accounts/api/sessions/$group_session/bridges")" "[]"
 until_ 'curl -s "$member?after=0&wait=0" | grep -F "\"from\":\"telegram/eve\"" | grep -q leave' || true
 check "and the people it carried leave" "$(curl -s "$member?after=0&wait=0" | grep -F '"from":"telegram/eve"' | grep -c 'vnd.agentwire.leave')" 1
@@ -212,12 +231,18 @@ check "a bridge removed in Vibe Together ends in the chat" "$(said 42 | grep -c 
 
 # Bridged again, then the bot blocked.
 inject '{"from":42,"username":"luiswirth","text":"/start"}'
-until_ '[ "$(said 42 | grep -c "pick the session")" -ge 2 ]' || true
-approve 42 "$private_session" as_person >/dev/null
+until_ '[ "$(offers 42)" -ge 2 ]' || true
+press 42 42 "$private_session"
 until_ '[ "$(said 42 | grep -c "Bridged into")" -ge 2 ]' || true
 inject '{"from":42,"kicked":true}'
 until_ '[ "$(as_person "$accounts/api/sessions/$private_session/bridges")" = "[]" ]' || true
 check "blocking the bot removes the bridge" "$(as_person "$accounts/api/sessions/$private_session/bridges")" "[]"
+
+# Unlinking revokes the grant, and the chats the person bridged end.
+inject '{"from":43,"text":"/unlink"}'
+until_ 'said 43 | grep -q "Unlinked"' || true
+check "/unlink revokes the grant" "$(said 43 | grep -c 'Unlinked from ben\.') $(as_ben "$accounts/api/bridges")" "1 []"
+check "and ends the chats Ben bridged" "$(said 43 | grep -c 'no longer bridged')" 1
 
 if grep -qF "$secret" "$work/serve.log"; then
   check "the log holds no secret" leaked clean
