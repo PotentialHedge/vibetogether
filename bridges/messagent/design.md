@@ -81,9 +81,14 @@ A piece of Ag² (`~/dev/agentics`), in a public repository of its own, Luis's de
   - Every session is members only, and there is no tier without an account.
   - The plan, approved by ag2 (2026-11-10, its speech 236596 on vt-messagent's 236576): /start in a chat, private or a group, asks for an OTP with the scope `bridge`, saying what the chat is; a member approves signed in and picks one of their sessions; the bridge joins only that session, as `<member>/messagent` for now, while that member is in its group.
     Linking a Telegram account happens once, by the OTP from the person's private chat with the bot; everyone else's messages come from the bridge, named and marked unverified, and the bot tells the session its audience.
+    Superseded by the grant below: the OTP no longer picks a session, and Vibe Together keeps no Telegram account.
   - The bridge is no participant, Luis's decision (2026-11-11): "yeah please change to this model". It reads the session without joining it, with its credential, and speaks only as the people it carries: a linked person under their account's name, anyone else as `telegram/<name>`, unverified, which only the bridge's credential may join under, Luis's agreement (2026-11-11): "okay agreed". This supersedes `<member>/messagent` and the messages from the bridge above.
     Its notices, which chat the session reaches and how many are in it, are the session's info at the account service, not entries; it marks nothing read for the people it carries, since it can't tell what they read in Telegram, ag2's proposal agreed with the model.
     An image a Telegram message sends pings `telegram` alone, the messenger's name, which is no participant's.
+  - Vibe Together knows nothing of a bridge's messenger, Luis's decision (2026-11-11, Vibe Together's design): a person grants the bridge, once by OTP, to speak as their account, revocable as a token is, and messagent alone keeps which Telegram user is which account.
+    The bridge is managed in the bot, Luis: "the interface is the VT telegram bot!!! … embrace that!": /start links in the private chat, and once linked offers the person's sessions as buttons, where the one pressed gets the chat; /stop ends a chat's bridge, /unlink revokes the grant.
+    The account's settings show each bridge as one that speaks as the person, with Revoke, and no identities.
+    This supersedes picking the session on the approval page and linking a Telegram account in Vibe Together.
   - What is built on Vibe Together is one list, as Matrix keeps it, `ecosystem.md`, each marked by what it is, Luis's decision (2026-11-10): "let's do it like matrix."
 - The shared bot runs as one service of ours, on lwirth-cloud, Luis's agreement (2026-11-09): "sounds good. but we need to make sure everything is secure".
   Telegram gives a bot's updates to one receiver only, so it can't run on each person's machine; this replaces "it runs on the user's machine" for Telegram.

@@ -102,6 +102,11 @@ function DevicePage() {
 						? "What you write through it reaches your sessions as you."
 						: "An agent asks for your account with an OTP."
 				}
+				info={
+					claimed.bridge
+						? "You approve this once. Which chats it bridges, and into which sessions, you choose in the app itself. Revoke it any time in your settings, under Bridges."
+						: undefined
+				}
 			>
 				<div className="flex flex-col gap-4 rounded-2xl border bg-card/60 p-5">
 					{!claimed.bridge && (

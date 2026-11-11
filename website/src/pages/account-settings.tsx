@@ -27,6 +27,7 @@ import {
 } from "@/account/api";
 import { AddByName, Person, Row, Titled, useActions } from "@/account/parts";
 import { SignIn } from "@/account/sign-in";
+import { MoreInfo } from "@/components/more-info";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { page, render, Site } from "@/site";
@@ -317,7 +318,16 @@ function Settings({
 				{tab === "bridges" && (
 					<Pane
 						title="Bridges"
-						line="Apps that speak as you, such as Telegram."
+						line={
+							<>
+								Apps that speak as you, such as Telegram.
+								<MoreInfo label="About bridges">
+									A bridge mirrors a chat elsewhere and a session onto each
+									other. What you write there reaches the session as you.
+									Revoking it ends every chat it bridged for you.
+								</MoreInfo>
+							</>
+						}
 					>
 						<Rows
 							empty={

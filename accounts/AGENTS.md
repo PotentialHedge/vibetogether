@@ -14,5 +14,6 @@ Its interface is its operations, defined once in `src/api.ts` and served as an O
   The document (`/api/openapi.json`) is the only place an operation is defined: the MCP server's account tools and the reference (`/api/reference.md`, `src/reference.ts`) are generated from it.
   Each tag is a concept, whose paragraph opens its section of the reference and goes into the MCP server's instructions.
   An operation the MCP server should not offer, such as getting a token by OTP, carries `x-tool: false`.
+  Hono matches routes in the order they are declared, so a fixed path such as `/bridges/self` is declared before `/bridges/{id}`, which would take `self` as an id.
 - Served from lwirth-cloud (`~/dev/dotcloud`) through the root flake's `nixosModules.accounts`, under `vibetogether.potentialhedge.com/api/`.
 - `just ci` runs its own checks. `just dev` runs a local instance against the public relay, `just stack` one with a local relay that asks it, and `just seed <login>` and `just stack-seed <login>` sign a person in on them, since GitHub can't call back to them.
