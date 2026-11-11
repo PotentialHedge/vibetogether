@@ -9,7 +9,14 @@ import {
 	type Presence,
 	Reader,
 } from "agentwire/participant";
-import { Download, Ellipsis, Minus, Plus, Users } from "lucide-react";
+import {
+	ArrowLeftRight,
+	Download,
+	Ellipsis,
+	Minus,
+	Plus,
+	Users,
+} from "lucide-react";
 import {
 	type ReactNode,
 	useEffect,
@@ -29,6 +36,7 @@ import {
 	DropdownMenuSeparator,
 	DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { MoreInfo } from "@/components/more-info";
 import { cn } from "@/lib/utils";
 
 const STATUS = "application/vnd.agentwire.chat.status+json";
@@ -286,12 +294,13 @@ function Note({ entry }: { entry: Entry }) {
 		const text = statusOf(entry);
 		what = text ? `status: ${text}` : "cleared their status";
 	} else what = type;
+	// The same columns as a message's, so names and times line up.
 	return (
-		<div className="flex items-baseline gap-2 py-1 text-[0.8em] text-muted-foreground">
-			<span className="w-14 shrink-0 font-mono tabular-nums">
+		<div className="flex items-baseline gap-3 py-1 text-muted-foreground">
+			<span className="w-12 shrink-0 font-mono text-[0.75em] tabular-nums">
 				{clock.format(new Date(entry.time))}
 			</span>
-			<span>
+			<span className="min-w-0 text-[0.8em]">
 				<Name name={entry.from} account={entry.account} /> {what}
 			</span>
 		</div>
@@ -311,36 +320,46 @@ function People({
 }) {
 	const others = Object.entries(presence);
 	return (
-		<ul className="flex flex-col gap-3 text-sm">
-			{others.map(([name, state]) => (
-				<li key={name} className="flex min-w-0 gap-2">
-					<span
-						className={cn(
-							"mt-[0.45rem] size-1.5 shrink-0 rounded-full",
-							state.receiving ? "bg-emerald-400" : "bg-muted-foreground/50",
-						)}
-						title={
-							state.receiving
-								? "receiving"
-								: `not receiving since ${state.since ? clock.format(new Date(state.since)) : "joining"}`
-						}
-					/>
-					<span className="flex min-w-0 flex-col gap-0.5">
-						<span className="truncate">
-							<Name name={name} account={state.account} />
-						</span>
-						{status.get(name) && (
-							<span className="text-pretty text-muted-foreground">
-								{status.get(name)}
+		<div className="flex flex-col gap-3">
+			<h2 className="flex h-5 items-center font-mono text-xs tracking-wide text-muted-foreground uppercase">
+				Here · {others.length}
+				<MoreInfo label="About who is here">
+					A green dot is receiving now, a gray one has joined but is not
+					receiving. A ✓ means the name is verified as that account's. Under
+					each name is the status it set last.
+				</MoreInfo>
+			</h2>
+			<ul className="flex flex-col gap-3 text-sm">
+				{others.map(([name, state]) => (
+					<li key={name} className="flex min-w-0 gap-2">
+						<span
+							className={cn(
+								"mt-[0.45rem] size-1.5 shrink-0 rounded-full",
+								state.receiving ? "bg-emerald-400" : "bg-muted-foreground/50",
+							)}
+							title={
+								state.receiving
+									? "receiving"
+									: `not receiving since ${state.since ? clock.format(new Date(state.since)) : "joining"}`
+							}
+						/>
+						<span className="flex min-w-0 flex-col gap-0.5">
+							<span className="truncate">
+								<Name name={name} account={state.account} />
 							</span>
-						)}
-					</span>
-				</li>
-			))}
-			{others.length === 0 && (
-				<li className="text-muted-foreground">no one here</li>
-			)}
-		</ul>
+							{status.get(name) && (
+								<span className="text-pretty text-muted-foreground">
+									{status.get(name)}
+								</span>
+							)}
+						</span>
+					</li>
+				))}
+				{others.length === 0 && (
+					<li className="text-muted-foreground">No one is here.</li>
+				)}
+			</ul>
+		</div>
 	);
 }
 
@@ -479,10 +498,16 @@ export function Transcript({
 					{session.bridges?.map((bridge) => (
 						<p
 							key={`${bridge.bridge} ${bridge.by} ${bridge.about}`}
-							className="text-xs text-muted-foreground"
+							className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground"
 						>
-							Bridged to {bridge.about ?? `a room of ${bridge.bridge}`}, added
-							by {bridge.by}: everything said here reaches it.
+							<ArrowLeftRight className="size-3.5 shrink-0" />
+							<span className="min-w-0 truncate">
+								Bridged to {bridge.about ?? `a room of ${bridge.bridge}`}
+							</span>
+							<MoreInfo label="About this bridge">
+								Added by {bridge.by}, through {bridge.bridge}. Everything said
+								here reaches that room, and what is said there shows here.
+							</MoreInfo>
 						</p>
 					))}
 					{people && (
@@ -512,6 +537,11 @@ export function Transcript({
 						className="mx-auto flex max-w-4xl flex-col py-4"
 						style={{ fontSize: `${scale}rem` }}
 					>
+						{entries.length === 0 && !problem && (
+							<li className="py-8 text-center text-sm text-muted-foreground">
+								{reading ? "Nothing said yet." : "Reading…"}
+							</li>
+						)}
 						{entries.map((entry, i) => {
 							const before = entries.slice(0, i).findLast(isMessage);
 							const same =
