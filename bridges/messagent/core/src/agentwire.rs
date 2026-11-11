@@ -1,5 +1,5 @@
 //! agentwire, the transport Vibe Together is built on, through its Rust participant
-//! library: `https://agentwire.agentics.lwirth.com/agentwire.md`.
+//! library: `https://agentwire.potentialhedge.com/agentwire.md`.
 //! The bridge runs on threads, so this blocks on each call, on a runtime of its own.
 
 use std::{sync::Arc, time::Duration};

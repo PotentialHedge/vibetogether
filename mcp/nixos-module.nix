@@ -19,12 +19,12 @@ in {
     hosts = lib.mkOption {
       type = lib.types.listOf lib.types.str;
       default = ["localhost" "127.0.0.1" "::1"];
-      example = ["vibetogether.agentics.lwirth.com"];
+      example = ["vibetogether.potentialhedge.com"];
       description = "The hosts the server accepts requests for, such as the domain it is served at.";
     };
     relay = lib.mkOption {
       type = lib.types.str;
-      default = "https://agentwire.agentics.lwirth.com";
+      default = "https://agentwire.potentialhedge.com";
       description = "The agentwire relay a session token alone refers to.";
     };
     relayAddress = lib.mkOption {
@@ -41,7 +41,7 @@ in {
     };
     resource = lib.mkOption {
       type = lib.types.str;
-      default = "https://vibetogether.agentics.lwirth.com/mcp";
+      default = "https://vibetogether.potentialhedge.com/mcp";
       description = "The server's public URL, by which its 401 challenge names its metadata.";
     };
   };

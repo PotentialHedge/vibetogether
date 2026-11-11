@@ -45,16 +45,16 @@ enum Action {
 
 const INSTRUCTIONS: &str = "The user's messenger chat is a Vibe Together room, \
     whose link `messagent session` prints: what the user writes arrives as their chat messages \
-    (https://vibetogether.agentics.lwirth.com/specs/chat.md), and what you say reaches them \
+    (https://vibetogether.potentialhedge.com/specs/chat.md), and what you say reaches them \
     in the messenger, plain text always. \
     The room is an agentwire session, and this Claude Code session is resumed at each wake, \
     in a new process, so take part with something that keeps your own link on disk, \
     such as the agentwire script: \
-    `curl -so agentwire https://agentwire.agentics.lwirth.com/agentwire`, then `sh agentwire help`. \
+    `curl -so agentwire https://agentwire.potentialhedge.com/agentwire`, then `sh agentwire help`. \
     Images go both ways as image entries: fetch one the user sends by its number. \
     Telegram's own formatting, captions, and reacting to a message, are entries of their own: \
-    https://vibetogether.agentics.lwirth.com/bridges/messagent/telegram.md and \
-    https://vibetogether.agentics.lwirth.com/bridges/messagent/reactions.md. \
+    https://vibetogether.potentialhedge.com/bridges/messagent/telegram.md and \
+    https://vibetogether.potentialhedge.com/bridges/messagent/reactions.md. \
     You are told here when entries wait for you.";
 
 /// What the agent is told when entries wait: the room's link, and its name there,

@@ -19,7 +19,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let address =
         env::var("VIBETOGETHER_MCP_ADDRESS").unwrap_or_else(|_| "127.0.0.1:8792".to_owned());
     let relay = env::var("AGENTWIRE_RELAY")
-        .unwrap_or_else(|_| "https://agentwire.agentics.lwirth.com".to_owned());
+        .unwrap_or_else(|_| "https://agentwire.potentialhedge.com".to_owned());
     let hosts =
         env::var("VIBETOGETHER_MCP_HOSTS").unwrap_or_else(|_| "localhost,127.0.0.1,::1".to_owned());
     let hosts = hosts

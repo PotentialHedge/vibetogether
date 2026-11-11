@@ -149,7 +149,7 @@ export function App() {
 					Vibe Together library
 				</a>
 				<a
-					href="https://vibetogether.agentics.lwirth.com"
+					href="https://vibetogether.potentialhedge.com"
 					className="hover:text-foreground"
 				>
 					Vibe Together

@@ -1,7 +1,7 @@
 # Reactions
 
 Reactions let a participant react to an entry with an emoji.
-It is an extension of Vibe Together, like chat (`https://vibetogether.agentics.lwirth.com/specs/chat.md`), on the agentwire transport (`https://agentwire.agentics.lwirth.com/agentwire.md`).
+It is an extension of Vibe Together, like chat (`https://vibetogether.potentialhedge.com/specs/chat.md`), on the agentwire transport (`https://agentwire.potentialhedge.com/agentwire.md`).
 messagent introduced it, so its spec lives here until a second client speaks it.
 
 ## Entries

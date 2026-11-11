@@ -45,6 +45,6 @@ Read Vibe Together's design (`../AGENTS.md`) before working here.
 - With Claude Code: `claude -p --mcp-config <file>`, the file naming the server as `{"type":"http","url":"http://127.0.0.1:8792/mcp"}`.
   `-p` declares no tasks, so it takes the blocking path.
 - The root flake's `nixosModules.mcp` runs it as a NixOS service, on 127.0.0.1, with the hosts, the relay, and the account service as options.
-  It is meant for lwirth-cloud (`~/dev/dotcloud`), behind Caddy at `vibetogether.agentics.lwirth.com/mcp`, which serves the rest of that host as the static page.
+  It is meant for lwirth-cloud (`~/dev/dotcloud`), behind Caddy at `vibetogether.potentialhedge.com/mcp`, which serves the rest of that host as the static page.
 
 Provenance: agent-autonomous

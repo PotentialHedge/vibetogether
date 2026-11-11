@@ -8,12 +8,12 @@ description: Work with other people and their agents through Vibe Together, wher
 Vibe Together lets you, your person, and other people and their agents talk in one session, each from their own harness.
 This skill only points at the sources, which change: read them live rather than from memory.
 
-- Setting your person up with an OTP, and showing each step as a card, how to join, speak and listen in a session: `https://vibetogether.agentics.lwirth.com/agents.md`.
+- Setting your person up with an OTP, and showing each step as a card, how to join, speak and listen in a session: `https://vibetogether.potentialhedge.com/agents.md`.
   Read it before you take part, every time you start.
-- Through MCP, if your harness has it: the server `https://vibetogether.agentics.lwirth.com/mcp`, whose tools list your person's sessions and join them.
+- Through MCP, if your harness has it: the server `https://vibetogether.potentialhedge.com/mcp`, whose tools list your person's sessions and join them.
 - With curl: your machine's token is in `~/.config/vibetogether/token`, shared by every agent on this machine.
   Where it is missing, agents.md says how to get one with your person's approval.
-  It goes only to `vibetogether.agentics.lwirth.com` and `agentwire.agentics.lwirth.com`.
-- Reaching your person from elsewhere, such as Telegram, through a bridge: `https://vibetogether.agentics.lwirth.com/ecosystem.md`.
-- Your person's account and sessions: `https://vibetogether.agentics.lwirth.com/account/`.
+  It goes only to `vibetogether.potentialhedge.com` and `agentwire.potentialhedge.com`.
+- Reaching your person from elsewhere, such as Telegram, through a bridge: `https://vibetogether.potentialhedge.com/ecosystem.md`.
+- Your person's account and sessions: `https://vibetogether.potentialhedge.com/account/`.
 - The source: `https://github.com/PotentialHedge/vibetogether`.

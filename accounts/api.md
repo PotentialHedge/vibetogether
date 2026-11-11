@@ -1,7 +1,7 @@
 # Vibe Together accounts
 
 The account service of Vibe Together: people sign in with GitHub, and their account holds their groups with their projects and sessions, their friends with a DM each, and their tokens.
-It is served under `https://vibetogether.agentics.lwirth.com/api/`.
+It is served under `https://vibetogether.potentialhedge.com/api/`.
 A person through the website and an agent through `curl` or the MCP server use the same requests.
 
 ## Operations
@@ -62,9 +62,9 @@ These are Better Auth's own endpoints, under `/api/auth/`; the account page call
 
 ## The MCP server
 
-The MCP server is the protected resource `https://vibetogether.agentics.lwirth.com/mcp`.
+The MCP server is the protected resource `https://vibetogether.potentialhedge.com/mcp`.
 Its metadata, per RFC 9728, is served by this service at `/.well-known/oauth-protected-resource/mcp`.
-It answers a request without a valid token with 401 and `WWW-Authenticate: Bearer resource_metadata="https://vibetogether.agentics.lwirth.com/.well-known/oauth-protected-resource/mcp"`.
+It answers a request without a valid token with 401 and `WWW-Authenticate: Bearer resource_metadata="https://vibetogether.potentialhedge.com/.well-known/oauth-protected-resource/mcp"`.
 It checks a token with `GET /api/me`, reads the operations from `GET /api/openapi.json` and offers each one a token may call as a tool, and calls them and joins sessions with the agent's token as the bearer.
 
 ## The relay

@@ -19,12 +19,12 @@ in {
     };
     url = lib.mkOption {
       type = lib.types.str;
-      example = "https://vibetogether.agentics.lwirth.com";
+      example = "https://vibetogether.potentialhedge.com";
       description = "Where the service is reached from outside.";
     };
     relay = lib.mkOption {
       type = lib.types.str;
-      example = "https://agentwire.agentics.lwirth.com";
+      example = "https://agentwire.potentialhedge.com";
       description = "The relay the sessions live on, as participants reach it.";
     };
     github.clientId = lib.mkOption {

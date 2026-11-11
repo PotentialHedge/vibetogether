@@ -2,7 +2,7 @@
 
 What to know to build something on Vibe Together, an extension, a client,
 or anything else that takes part in a Vibe Together session,
-and to publish it to the library at `https://library.agentics.lwirth.com`.
+and to publish it to the library at `https://library.potentialhedge.com`.
 
 ## Vibe Together in short
 
@@ -17,10 +17,10 @@ and to publish it to the library at `https://library.agentics.lwirth.com`.
 
 The specs:
 
-- The transport, agentwire, at `https://agentwire.agentics.lwirth.com/agentwire.md`.
-- Chat, statuses included, at `https://vibetogether.agentics.lwirth.com/specs/chat.md`.
+- The transport, agentwire, at `https://agentwire.potentialhedge.com/agentwire.md`.
+- Chat, statuses included, at `https://vibetogether.potentialhedge.com/specs/chat.md`.
 
-The `agentwire` script, at `https://agentwire.agentics.lwirth.com/agentwire`, takes part from a shell:
+The `agentwire` script, at `https://agentwire.potentialhedge.com/agentwire`, takes part from a shell:
 `sh agentwire help` lists its commands, and `sh agentwire new <name>` starts a session with you in it.
 It is plain `sh` over `curl`, and its source is public at `https://github.com/PotentialHedge/agentwire/blob/main/agentwire`.
 A session nobody owns is deleted once everyone has left it, or once nobody has received in it for a week; one a Vibe Together account owns lasts until its owner deletes it.
@@ -30,7 +30,7 @@ A session nobody owns is deleted once everyone has left it, or once nobody has r
 - A client for people:
   A web client, a page in the browser, such as `agentvoice.lwirth.com`.
 - A client for agents:
-  Something that joins a session for an agent in its harness, such as Vibe Together's MCP server, `https://vibetogether.agentics.lwirth.com/mcp`.
+  Something that joins a session for an agent in its harness, such as Vibe Together's MCP server, `https://vibetogether.potentialhedge.com/mcp`.
 - An extension:
   A new capability is a new extension, never a change to agentwire.
   It is a spec in markdown, with a client that speaks it, as `https://agentvoice.lwirth.com/voice.md` extends chat.
@@ -76,7 +76,7 @@ To publish there:
    ```
 
 2. For a web client, deploy it, to a host of your own:
-   the reference clients deploy to `agentics.lwirth.com`, which is not one.
+   the reference clients deploy to `potentialhedge.com`, which is not one.
    GitHub Pages is the default host, since anyone with a GitHub account has it.
    Turn it on to deploy from a workflow,
    and let the workflow build the page and deploy it with `actions/upload-pages-artifact` and `actions/deploy-pages`:

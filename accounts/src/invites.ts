@@ -415,7 +415,7 @@ const inviteSchema = z.object({
 	code: z.string().meta({ example: "k7f3m9q2xp" }),
 	link: z
 		.string()
-		.meta({ example: "https://vibetogether.agentics.lwirth.com/i/k7f3m9q2xp" }),
+		.meta({ example: "https://vibetogether.potentialhedge.com/i/k7f3m9q2xp" }),
 	to: z.enum(["friend", "project"]),
 	project: projectRef,
 	created: z.string(),

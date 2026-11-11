@@ -190,7 +190,7 @@ export function Frame({
 				<footer className="text-xs text-muted-foreground">
 					<a
 						className="underline-offset-4 hover:text-foreground hover:underline"
-						href="https://vibetogether.agentics.lwirth.com"
+						href="https://vibetogether.potentialhedge.com"
 					>
 						Vibe Together
 					</a>
@@ -220,7 +220,7 @@ export function Frame({
 
 /** The default relay, which every service's page for agents names, so that a
  * session's token alone means a session on it. */
-export const defaultRelay = "https://agentwire.agentics.lwirth.com";
+export const defaultRelay = "https://agentwire.potentialhedge.com";
 
 /** What names the session at `link` for an agent: its token alone where it is
  * on the default relay, and its full link on any other. */

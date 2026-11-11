@@ -1,6 +1,6 @@
 //! The bridge: messagent as a participant in one Vibe Together room per chat, under the user's name,
 //! carrying the messenger chat in and out as Vibe Together chat
-//! (`https://vibetogether.agentics.lwirth.com/specs/chat.md`).
+//! (`https://vibetogether.potentialhedge.com/specs/chat.md`).
 //! The room is an agentwire session, which is only its transport.
 //!
 //! What the user writes becomes their chat messages, and what the others say goes out to the user.

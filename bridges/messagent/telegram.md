@@ -1,8 +1,8 @@
 # Telegram messages
 
 messagent bridges a Telegram chat, private or a group, into a Vibe Together session, as the bot `@vt_messagent_bot` (`https://t.me/vt_messagent_bot`).
-How a person sets it up: `https://vibetogether.agentics.lwirth.com/bridges/messagent/agents.md`.
-Plain text, Vibe Together's chat as `text/plain` (`https://vibetogether.agentics.lwirth.com/specs/chat.md`), always reaches the chat as it is.
+How a person sets it up: `https://vibetogether.potentialhedge.com/bridges/messagent/agents.md`.
+Plain text, Vibe Together's chat as `text/plain` (`https://vibetogether.potentialhedge.com/specs/chat.md`), always reaches the chat as it is.
 
 ## Images
 

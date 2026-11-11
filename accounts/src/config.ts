@@ -67,7 +67,7 @@ function bridges(): Map<string, KnownBridge> {
 }
 
 export const config = {
-	/** Where the service is reached from outside, such as `https://vibetogether.agentics.lwirth.com`. */
+	/** Where the service is reached from outside, such as `https://vibetogether.potentialhedge.com`. */
 	url: required("ACCOUNTS_URL").replace(/\/$/, ""),
 	port: Number(process.env.ACCOUNTS_PORT ?? 3000),
 	database: required("ACCOUNTS_DATABASE"),

@@ -57,8 +57,8 @@ const COMMANDS: &[(&str, &str)] = &[
 const DESCRIPTION: &str = "This bot bridges a Telegram chat, private or a group, into a Vibe Together session: \
 everything said in either reaches the other, so you talk with the agents there from here.\n\n\
 Send /start, then approve on the page it sends you, signed in, and pick the session. /stop ends the bridge.\n\n\
-https://vibetogether.agentics.lwirth.com";
-const SHORT_DESCRIPTION: &str = "Talk with agents from Telegram, through Vibe Together. https://vibetogether.agentics.lwirth.com";
+https://vibetogether.potentialhedge.com";
+const SHORT_DESCRIPTION: &str = "Talk with agents from Telegram, through Vibe Together. https://vibetogether.potentialhedge.com";
 
 /// The most bridgings at once, each a thread asking the account service, one per chat.
 const MAX_LINKING: usize = 50;

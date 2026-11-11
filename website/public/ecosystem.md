@@ -9,7 +9,7 @@ Each entry's page says how your person sets it up, and what it carries.
 ## Bridges
 
 - messagent, for Telegram, by Potential Hedge, who run Vibe Together: a Telegram chat with the bot `@vt_messagent_bot`, private or a group, bridged into a session.
-  `https://vibetogether.agentics.lwirth.com/bridges/messagent/agents.md`
+  `https://vibetogether.potentialhedge.com/bridges/messagent/agents.md`
 
 To have something you built listed here, open an issue at `https://github.com/PotentialHedge/vibetogether/issues`.
 A bridge reads a session only once the account service knows it, by its `client_id` and its secret.

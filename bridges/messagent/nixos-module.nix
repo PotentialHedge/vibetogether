@@ -13,7 +13,7 @@ in {
     enable = lib.mkEnableOption "messagent's Telegram bridge";
     accounts = lib.mkOption {
       type = lib.types.str;
-      example = "https://vibetogether.agentics.lwirth.com";
+      example = "https://vibetogether.potentialhedge.com";
       description = "The account service, as the bot reaches it.";
     };
     botTokenFile = lib.mkOption {

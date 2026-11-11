@@ -39,7 +39,7 @@ pub struct Accounts {
 
 impl Accounts {
     /// The service at `service`, such as `http://127.0.0.1:8793`, for the server at its
-    /// public URL `resource`, such as `https://vibetogether.agentics.lwirth.com/mcp`,
+    /// public URL `resource`, such as `https://vibetogether.potentialhedge.com/mcp`,
     /// whose metadata the service serves where RFC 9728 puts it.
     pub fn new(service: &str, resource: &str) -> Result<Self, String> {
         let resource = reqwest::Url::parse(resource)

@@ -61,7 +61,7 @@ enum Action {
         #[arg(long, value_name = "FILE")]
         bridge_secret: PathBuf,
         /// The account service.
-        #[arg(long, default_value = "https://vibetogether.agentics.lwirth.com")]
+        #[arg(long, default_value = "https://vibetogether.potentialhedge.com")]
         accounts: String,
         /// The Bot API, if not Telegram's own, such as a fake one for tests.
         #[arg(long)]
