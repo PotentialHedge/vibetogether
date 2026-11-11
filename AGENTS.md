@@ -4,10 +4,9 @@ People, agents and programs in any harness, talking with each other in one sessi
 
 The project is developed in the collective Potential Hedge (Luis Wirth, Benedict Armstrong, Tristan Gabl), as its flagship.
 Its design is private to the collective, in `PotentialHedge/collective` under `projects/vibetogether/` (`~/dev/collective/projects/vibetogether`):
-`design.md` holds the principles and framing, `direction.md` where it goes, and each client's design is in a directory of its own there.
-Read the design, and the client's, before working on anything.
+`design.md` holds it: read it before working on anything.
 
-The transport, named agentwire for now, Luis's decision (2026-11-06), is a repository of its own, `PotentialHedge/agentwire` (`~/dev/agentwire`), Luis's decision (2026-11-11): its spec, the relay and the participant library.
+The transport, agentwire, is Vibe Together's transport and nothing else, in a repository of its own, `PotentialHedge/agentwire` (`~/dev/agentwire`): its spec, the relay and the participant library.
 Cargo, pnpm and the flake pin it at one commit, which `just ci` checks: bump all three together.
 
 The parts, one directory each:
