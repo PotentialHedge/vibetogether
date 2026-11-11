@@ -76,7 +76,7 @@ The relay asks this service, as its access service, on the loopback only:
   A token, where one is given, must be valid, and the name one of that person's agents', `<name>/<agent>`, never the person's own; `account` is that person's name.
   A bridge's credential joins as Bridges says, and `account` is the name it joins as where that is a person, else `null`.
   A name under a bridge's messenger's, such as `telegram/<name>`, takes that bridge's credential alone.
-  For a session accounts own, the answer also gives `about`, `{"project":"<name>","repos":[…]}`, which the relay passes on in its join answer, so the participant learns its project's repositories.
+  For a session accounts own, the answer also gives `about`, `{"project":"<name>","repos":[…],"bridges":[…]}`, which the relay passes on in its join answer, so the participant learns its project's repositories, and whom what it says reaches through the session's bridges.
   With a token, the answer also gives `grant`, which the relay keeps and asks with in place of the token: it works only for that name in that session, only here, and only while the token does.
   A session accounts own takes only a token of one of its group's members, checked through its project to its group each time; a DM only a token of one of its two, while they are friends; a session no account owns, which is the relay's alone, takes anyone.
   The sessions accounts own are the relay's owned sessions, which this service creates with `POST <relay>/v2/s?owned`; an owned session no account owns any more was deleted, and takes no one.

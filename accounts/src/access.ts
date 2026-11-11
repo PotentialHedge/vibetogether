@@ -2,7 +2,7 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 import { Hono } from "hono";
 import { type Caller, callerOfCredential, callerOfToken } from "./caller.ts";
 import { config } from "./config.ts";
-import { areFriends, db, isMember } from "./db.ts";
+import { areFriends, bridgesOf, db, isMember } from "./db.ts";
 import { isAgentOf, isNamePart } from "./names.ts";
 import { reposOf } from "./repos.ts";
 
@@ -169,7 +169,7 @@ access.post("/join", async (c) => {
 			grant: grantOf(caller.credential, session, name),
 		}),
 		...(owned && {
-			about: { project: owned.projectName, repos: reposOf(owned.project) },
+			about: aboutOf(owned),
 		}),
 	});
 });
@@ -277,10 +277,23 @@ function bridgeJoin(
 			...(caller.credential && {
 				grant: grantOf(caller.credential, session, name),
 			}),
-			about: { project: owned.projectName, repos: reposOf(owned.project) },
+			about: aboutOf(owned),
 		},
 		200,
 	];
+}
+
+/**
+ * What a session's participants learn as they join: its project, the repositories where its
+ * context lives, and the rooms outside Vibe Together it is bridged to, so that an agent knows
+ * whom its words reach, as a bridge's notice told it before a bridge was no participant.
+ */
+function aboutOf(owned: Session) {
+	return {
+		project: owned.projectName,
+		repos: reposOf(owned.project),
+		bridges: bridgesOf(owned.id),
+	};
 }
 
 access.get("/sessions/:session", (c) =>

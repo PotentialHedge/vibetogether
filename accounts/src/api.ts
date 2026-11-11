@@ -6,7 +6,15 @@
  */
 import { auth } from "./auth.ts";
 import { config } from "./config.ts";
-import { areFriends, db, dmOf, isMember, newId, ownGroupOf } from "./db.ts";
+import {
+	areFriends,
+	bridgesOf,
+	db,
+	dmOf,
+	isMember,
+	newId,
+	ownGroupOf,
+} from "./db.ts";
 import { inviteOperations } from "./invites.ts";
 import { isNamePart } from "./names.ts";
 import { documentOf, newApi, operation, z } from "./openapi.ts";
@@ -351,17 +359,6 @@ async function sessionJson(
 		address,
 		bridges: bridgesOf(session.id),
 	};
-}
-
-/** A session's bridges, as its info shows them. */
-function bridgesOf(session: string): z.infer<typeof Session>["bridges"] {
-	return db
-		.prepare(
-			`SELECT b.agent AS bridge, u.login AS by, r.about FROM session b JOIN user u ON u.id = b.userId
-			 LEFT JOIN bridge_room r ON r.session = b.id
-			 WHERE b.bridge = ? AND b.expiresAt > ? ORDER BY b.createdAt`,
-		)
-		.all(session, Date.now()) as z.infer<typeof Session>["bridges"];
 }
 
 function friendsOf(me: string): z.infer<typeof Friend>[] {

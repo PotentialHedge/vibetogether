@@ -663,6 +663,7 @@ test("a project points at GitHub repos, which a join into its sessions tells", a
 	assert.deepEqual(joined.json.about, {
 		project: "formoniq",
 		repos: changed.json.repos,
+		bridges: [],
 	});
 	// Someone outside the group is refused, and learns nothing of the project.
 	const outsider = await call(null, "POST", "/agentwire/join", {
@@ -1388,6 +1389,15 @@ test("a bridge is added to one session by a member who approves its OTP, and rea
 			about: 'the Telegram group "Team" (3 people)',
 		},
 	]);
+	// An agent learns as it joins whom its words reach.
+	const agentJoins = await call(null, "POST", "/agentwire/join", {
+		session: secretOf(chat),
+		name: "ben/claude",
+		token: benToken,
+		owned: true,
+	});
+	assert.equal(agentJoins.status, 200, agentJoins.text);
+	assert.deepEqual(agentJoins.json.about.bridges, info.bridges);
 	// As a person only once they linked their identity on the bridge.
 	assert.equal((await join("luis", bridge)).status, 403);
 	const privateChat = await askAsBridge({

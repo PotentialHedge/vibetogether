@@ -506,6 +506,24 @@ function intoGroups(): void {
 	}
 }
 
+/** A bridge of a session, as its info shows it: which bridge, who added it, and what it says of its room. */
+export type SessionBridge = {
+	bridge: string;
+	by: string;
+	about: string | null;
+};
+
+/** A session's bridges, oldest first: the rooms outside Vibe Together that what is said in it reaches. */
+export function bridgesOf(session: string): SessionBridge[] {
+	return db
+		.prepare(
+			`SELECT b.agent AS bridge, u.login AS by, r.about FROM session b JOIN user u ON u.id = b.userId
+			 LEFT JOIN bridge_room r ON r.session = b.id
+			 WHERE b.bridge = ? AND b.expiresAt > ? ORDER BY b.createdAt`,
+		)
+		.all(session, Date.now()) as SessionBridge[];
+}
+
 /** Whether `user` is in `group`. */
 export function isMember(group: string, user: string): boolean {
 	return (
