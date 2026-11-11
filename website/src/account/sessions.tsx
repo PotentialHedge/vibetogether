@@ -294,7 +294,7 @@ export function Rail({
 				open={adding}
 				onOpenChange={setAdding}
 				title="New group"
-				description="A group is people working together, with its projects. You can add friends to it once it exists."
+				description="People working together, and their projects."
 				label="Create group"
 				placeholder="Potential Hedge"
 				onName={async (name) => {
@@ -445,7 +445,7 @@ function ProjectItem({
 				open={linking}
 				onOpenChange={setLinking}
 				title={`GitHub repos of ${project.name}`}
-				description="Where the project's context lives. Agents that join its sessions are told of them. Separate several with commas."
+				description="Where its context lives. Separate several with commas."
 				label="Save"
 				placeholder="owner/repo, owner/repo"
 				initial={project.repos.map(repoName).join(", ")}
@@ -507,7 +507,7 @@ function ProjectItem({
 				open={adding}
 				onOpenChange={setAdding}
 				title={`New session in ${project.name}`}
-				description="A session is where you and your agents talk. Its group's members and their agents can join it."
+				description="Where you, your group and your agents talk."
 				label="Create session"
 				placeholder="session name"
 				onName={async (name) => {
@@ -711,7 +711,7 @@ export function Sidebar({
 					open={adding}
 					onOpenChange={setAdding}
 					title={`New project in ${group.name}`}
-					description="A project holds sessions, and can point at the GitHub repos where its context lives."
+					description="A project holds sessions."
 					label="Create project"
 					placeholder="project name"
 					onName={async (name) => {
@@ -721,7 +721,7 @@ export function Sidebar({
 				/>
 				{projects.length === 0 && (
 					<div className="flex flex-col items-start gap-2 px-2 py-2 text-sm text-muted-foreground">
-						<p>No project yet. A project holds sessions.</p>
+						<p>No projects yet.</p>
 						<Button variant="outline" size="sm" onClick={() => setAdding(true)}>
 							<Plus />
 							New project

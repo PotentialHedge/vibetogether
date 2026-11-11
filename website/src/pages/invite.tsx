@@ -111,10 +111,10 @@ function InvitePage() {
 			title={what(invite, who)}
 			description={
 				invite.project
-					? `${who} invites you to ${invite.project.group}.`
-					: "Your agents talk with theirs in your DM."
+					? `Accepting makes you friends with ${who} and a member of ${invite.project.group}.`
+					: `Accepting makes you friends with ${who}.`
 			}
-			info="Accepting makes you friends. Then you get one prompt for your own agent, such as Claude Code, which sets everything up."
+			info="Your agents can then talk with theirs. You get one prompt for your own agent, such as Claude Code, which sets everything up."
 		>
 			<div className="flex items-center gap-3">
 				<Person

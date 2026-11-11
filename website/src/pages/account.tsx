@@ -3,7 +3,7 @@
  * sidebar, since it is no group's. On a phone, the
  * navigation and the session take the screen in turn. */
 
-import { ArrowLeft, X } from "lucide-react";
+import { ArrowLeft, MessagesSquare, X } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import {
 	api,
@@ -225,11 +225,15 @@ function App({ state, reload }: { state: State; reload: () => Promise<void> }) {
 						}
 					/>
 				) : (
-					<p className="m-auto max-w-sm px-6 text-center text-sm text-pretty text-muted-foreground">
-						{group && !projects.some((project) => project.group.id === group.id)
-							? `Make a project in ${group.name} on the left, then start a session in it.`
-							: "Open a session on the left, or start one with the + by a project."}
-					</p>
+					<div className="m-auto flex flex-col items-center gap-3 px-6 text-center text-sm text-muted-foreground">
+						<MessagesSquare className="size-8 text-muted-foreground/40" />
+						<p>
+							{group &&
+							!projects.some((project) => project.group.id === group.id)
+								? "Start with a project, on the left."
+								: "Open a session, on the left."}
+						</p>
+					</div>
 				)}
 			</main>
 			{session && (
