@@ -72,8 +72,16 @@ A piece of Ag² (`~/dev/agentics`), in a public repository of its own, Luis's de
   One approval and nothing typed back: the bot shows the code in the chat, and the page shows it with the asking Telegram id and @username, so the person checks they match.
   The link's credential lasts until it is unlinked, with no expiry, Luis's agreement (2026-11-09).
 - One conversation in an app is one session, such as a Telegram chat, private or a group, or a Discord channel, Luis's agreement (2026-11-09).
-  Linking creates a members-only session for the private chat, owned by the person, which their agents find in their list of sessions and join.
-  A group gets a session of its own by the same rule, its people verified where they linked.
+  Superseded where messagent owns the session, by the bridge below: linking created a members-only session for the private chat, owned by the person.
+
+- messagent is a bridge, Luis's decisions (2026-11-10, Vibe Together's design): it mirrors a messenger chat and a Vibe Together session onto each other, owns no session, and is added to one, as a client joins one.
+  This supersedes "messagent wants to act as you" and the app's own sessions above.
+  - A bridge passes everything both ways, so the bot's group privacy mode is off, which Luis switched off in BotFather.
+  - A person's Telegram messages show as them once they have linked their Telegram account by OTP.
+  - Every session is members only, and there is no tier without an account.
+  - The plan, approved by ag2 (2026-11-10, its speech 236596 on vt-messagent's 236576): /start in a chat, private or a group, asks for an OTP with the scope `bridge`, saying what the chat is; a member approves signed in and picks one of their sessions; the bridge joins only that session, as `<member>/messagent` for now, while that member is in its group.
+    Linking a Telegram account happens once, by the OTP from the person's private chat with the bot; everyone else's messages come from the bridge, named and marked unverified, and the bot tells the session its audience.
+  - What is built on Vibe Together is one list, as Matrix keeps it, `ecosystem.md`, each marked by what it is, Luis's decision (2026-11-10): "let's do it like matrix."
 - The shared bot runs as one service of ours, on lwirth-cloud, Luis's agreement (2026-11-09): "sounds good. but we need to make sure everything is secure".
   Telegram gives a bot's updates to one receiver only, so it can't run on each person's machine; this replaces "it runs on the user's machine" for Telegram.
   Its security is designed with vibetogether-security from the start, not only reviewed before deploy.
@@ -109,19 +117,10 @@ A piece of Ag² (`~/dev/agentics`), in a public repository of its own, Luis's de
 
 ## Open
 
-- Groups with the shared bot, proposal of vt-messagent, 2026-11-10, passed by vibetogether-security as a design, not reviewed by Luis.
-  Waits for Luis, since who gets through and the bot's group privacy mode are his calls.
-  - A person whose private chat is linked sends /start in a group with the bot: the group becomes a session in their app's project, owned by their app grant, keyed on the chat id.
-    Its name is the group's title as a label, one line of at most 60 characters, since anyone in the group sets it.
-  - Only the members of the Vibe Together group whose project holds the session get through, each as themselves by their own grant; in the owner's own group that is the owner alone. The app never adds members, and never moves the session to another group.
-    Everyone else's messages are dropped unread, never stored or logged, and so are those from a bot, a channel or an anonymous admin, and service messages: the sender is the human `from.id` alone.
-    A reply or a forward brings in no quoted text of a non-member, and a forward is marked with its origin.
-    An edit counts as its sender's message does.
-  - The agents know their audience: what they say reaches the whole group, members or not, so the session says so, and the bot posts a notice as it starts and as the group grows.
-  - The bot reads every message of a group only with its privacy mode off, in BotFather.
-    So anyone can add it anywhere: it leaves a group nobody linked within 10 minutes, ignores such a group's messages until then, and caps the linked groups per person and in all.
-  - /stop in the group by its owner, removing the bot, unlinking the owner's private chat or revoking the app ends the group's session.
-    A migration to a supergroup moves the link only on the linked group's own `migrate_to_chat_id`.
+- Groups, as built with the bridge (2026-11-10), with security's points from vt-messagent's proposal, which security passed as a design and Luis has not reviewed:
+  the sender is the human `from.id` alone, never a bot, a channel or an anonymous admin; a forward is marked with its origin, and no quoted text comes in; an edit is marked and counts as its sender's message;
+  the group's title is a one-line label of at most 60 characters; the session is told who reads it as the bridge starts and as the group changes;
+  a group nobody bridges is left after 10 minutes; /stop by whoever added the bridge or a group admin, removing the bot, or removing the bridge in Vibe Together ends it; a migration to a supergroup moves the bridge.
 
 - Handing over the phone, for the future, Luis's decision: the messagent puts another agent on the chat, which answers through the same bot until it hands back.
 
