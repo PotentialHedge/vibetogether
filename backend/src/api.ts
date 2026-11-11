@@ -491,11 +491,15 @@ api.openapi(
 		if (!group) return c.text("No such group.", 404);
 		if (group.person) return c.text("Your own group holds you alone.", 403);
 		const person = personByLogin(name);
-		if (!person) return c.text("No such person.", 404);
+		if (!person)
+			return c.text(
+				"No such person on Vibe Together: an invite to one of the group's projects (`create_invite` with `project`) reaches someone new.",
+				404,
+			);
 		if (isMember(group.id, person.id)) return c.json(groupJson(group), 200);
 		if (!areFriends(c.var.caller.id, person.id))
 			return c.text(
-				"Only a friend of yours becomes a member through you.",
+				"Only a friend of yours becomes a member through you: an invite to one of the group's projects (`create_invite` with `project`) makes them both.",
 				403,
 			);
 		if (
@@ -706,7 +710,11 @@ api.openapi(
 	(c) => {
 		const me = c.var.caller.id;
 		const person = personByLogin(c.req.valid("param").name);
-		if (!person) return c.text("No such person.", 404);
+		if (!person)
+			return c.text(
+				"No such person on Vibe Together: an invite (`create_invite`) reaches someone new.",
+				404,
+			);
 		if (person.id === me)
 			return c.text("You can't add yourself as a friend.", 400);
 		db.prepare(
