@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Frame } from "ui/onboard";
+import { Frame } from "@/components/frame";
 import { api } from "@/account/api";
 import { SignIn, useMe } from "@/account/sign-in";
 import { Button } from "@/components/ui/button";

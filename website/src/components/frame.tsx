@@ -1,12 +1,7 @@
-/** The look every page of a person's onboarding shares. Styled with Tailwind
- * and shadcn's theme variables, so it takes on each client's theme; the
- * client adds this directory to Tailwind's sources, as
- * `@source "../node_modules/ui/onboard"`. */
-
 import type { ReactNode } from "react";
 
-/** A page's title and description above its content, inside a site's own
- * header and footer, which name the service. */
+/** The look the pages of signing in and onboarding share: a title and a
+ * description above the page's content, inside the site's header and footer. */
 export function Frame({
 	title,
 	description,

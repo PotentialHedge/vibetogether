@@ -1,7 +1,7 @@
 /** Where signing up from the greeting page lands: the prompt for the person's
  * agent, which sets everything up and shows what comes next. */
 
-import { Frame } from "ui/onboard";
+import { Frame } from "@/components/frame";
 import { SignIn, useMe } from "@/account/sign-in";
 import { AgentPrompt } from "@/onboard";
 import { page, render, Site } from "@/site";

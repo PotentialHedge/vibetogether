@@ -1,4 +1,4 @@
-import { Frame } from "ui/onboard";
+import { Frame } from "@/components/frame";
 import { SignIn } from "@/account/sign-in";
 import { page, render, Site } from "@/site";
 

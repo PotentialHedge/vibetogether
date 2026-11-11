@@ -1,3 +1,0 @@
-# The shared web code's own checks; the root's `just ci` adds the shared ones.
-ci:
-    pnpm exec tsc

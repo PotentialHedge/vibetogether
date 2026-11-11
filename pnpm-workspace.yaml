@@ -1,7 +1,6 @@
 packages:
   - accounts
   - library
-  - ui
   - website
 allowBuilds:
   esbuild: true

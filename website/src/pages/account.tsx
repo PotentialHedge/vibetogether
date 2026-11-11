@@ -5,7 +5,7 @@
 
 import { ArrowLeft, X } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
-import { Frame } from "ui/onboard";
+import { Frame } from "@/components/frame";
 import {
 	api,
 	type Dm,

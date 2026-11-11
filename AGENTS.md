@@ -14,7 +14,6 @@ The parts, one directory each:
 
 - `accounts/`: the account service, which is also the relay's access service.
 - `mcp/`: the MCP server through which an agent joins a session.
-- `ui/`: what every web client shares, so that agentwire carries no React.
 - `website/`: Vibe Together's website, its `agents.md`, and its own specs.
 - `bridges/`: what mirrors a room outside Vibe Together and a session onto each other: `messagent`, for Telegram.
 
@@ -39,7 +38,7 @@ Deploying:
 - lwirth-cloud (`~/dev/dotcloud`) hosts everything public, Luis's decision (2026-11-04).
   Its flake takes this one as an input for the MCP server, the account service and messagent's shared bot, and agentwire's for the relay; each Nix package is built from its own part's sources alone, so a change to another part restarts nothing, unless it changes the Cargo lockfile or a manifest.
 - Each web client deploys with its `just deploy`, which pushes its build to lwirth-cloud with rsync, Luis's decision (2026-11-04); dotcloud's `serve.nix` says how each is served.
-  It builds the checkout it runs in, so a deploy from main ships everyone's changes on main to that client and what it builds from, such as `ui/`: check `git log` since the last deploy first.
+  It builds the checkout it runs in, so a deploy from main ships everyone's changes on main to that client: check `git log` since the last deploy first.
 - messagent's Telegram bridge runs on lwirth-cloud, through `nixosModules.messagent`; the old per-person bridge still runs on lwirth-server, from `~/dev/dothome`'s input of this flake.
 - Every deploy of Vibe Together or its parts of dotcloud passes a security review by `vibetogether-security` first, Luis's decision (2026-11-09): "review before deploy good idea."
   Send it the commits to deploy, and deploy once it has passed them.

@@ -4,7 +4,6 @@ mod accounts
 mod library
 mod mcp
 mod messagent "bridges/messagent"
-mod ui
 mod website
 
 # Everything CI runs: the checks the parts share, then each part's own.
@@ -19,7 +18,6 @@ ci:
     just library::ci
     just mcp::ci
     just messagent::ci
-    just ui::ci
     just website::ci
     # The packages as they deploy, whose sources differ from cargo's and pnpm's.
     nix build --no-link .#vibetogether-mcp .#vibetogether-accounts .#messagent
