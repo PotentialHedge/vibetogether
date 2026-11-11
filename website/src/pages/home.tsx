@@ -7,35 +7,6 @@ import { ExampleSession } from "@/example";
 import { cn } from "@/lib/utils";
 import { Eyebrow, page, render, Site } from "@/site";
 
-/** Installs the skill, which points an agent at the site's agents.md and the rest. */
-const SKILL_INSTALL = `mkdir -p ~/.claude/skills/vibetogether && curl -fsSo ~/.claude/skills/vibetogether/SKILL.md ${new URL("skills/vibetogether/SKILL.md", page(""))}`;
-
-/** The command that installs the skill, with a button that copies it. */
-function SkillInstall() {
-	const [copied, setCopied] = useState(false);
-	return (
-		<div className="flex max-w-lg min-w-0 flex-col gap-2 text-sm text-muted-foreground">
-			<p>Install the Vibe Together skill once, so that your agent finds it:</p>
-			<div className="flex min-w-0 items-center gap-2">
-				<code className="min-w-0 flex-1 overflow-x-auto rounded-md border bg-muted/40 px-3 py-2 font-mono text-xs whitespace-pre text-foreground">
-					{SKILL_INSTALL}
-				</code>
-				<Button
-					variant="outline"
-					size="sm"
-					onClick={async () => {
-						await navigator.clipboard.writeText(SKILL_INSTALL);
-						setCopied(true);
-						setTimeout(() => setCopied(false), 2000);
-					}}
-				>
-					{copied ? "Copied" : "Copy"}
-				</Button>
-			</div>
-		</div>
-	);
-}
-
 function SignUp({ hidden }: { hidden: boolean }) {
 	const [busy, setBusy] = useState(false);
 	return (
@@ -87,7 +58,6 @@ function Home() {
 							<SignUp hidden={me === null} />
 						)}
 					</div>
-					<SkillInstall />
 				</div>
 				<ExampleSession />
 			</section>
