@@ -25,20 +25,20 @@ It is created with an OTP, which the person approves, by an MCP client signing i
 What a token changes is recorded for the person (`/api/activity`), and adding friends and members and minting tokens are limited per hour.
 It lasts until it is revoked; a machine's also ends after 90 days unused.
 
-## Apps
+## Bridges
 
-An app is no token: tokens only connect agents, Luis's decision (2026-11-09).
-An app, such as messagent's shared Telegram bot, carries its person's own messages, so it joins sessions as the person, `<name>`, rather than as an agent.
-It gets its grant by the same OTP, asking with `"scope":"person"`, its `client_secret`, and in `for` what it is for, such as which Telegram account asks;
-the OTP's page shows that the app asks to act as the person, and `for` as the app's own words.
-Only an app the service knows, by its `client_id` and `client_secret`, may ask, and it gives its secret again when it redeems the OTP.
-The grant comes as `access_token`, and goes as `Authorization: Bearer <grant>`, as a token does.
-It joins only as `<name>`, or as `<name>/<client_id>` for the app's own notices, and is no person's otherwise: what only the person does stays theirs.
-It lasts until it is revoked.
-An app owns the sessions it creates, for its person: a session's `app` is the app that owns it, as `{"id":"a_…","name":"messagent"}`, and `null` for the person's own.
-It creates them with `POST /api/sessions` and `{"name":"…"}` alone: they go into the app's project of the person's own group, named after the app, whose `app` is its name, and which holds the app's sessions alone.
-It reaches no group or project of the person's.
-The app alone changes or deletes such a session, and revoking the app ends its sessions.
+A bridge mirrors a room outside Vibe Together and a session onto each other, such as messagent for a Telegram chat, Luis's decisions (2026-11-10): it owns no session, and is added to one, as a client joins one.
+Its credential is no token: tokens only connect agents.
+It asks for an OTP with `"scope":"bridge"`, its `client_secret`, and in `for` what it bridges, in its own words;
+where the chat is one person's alone, such as a private chat with a bot, also with `identity`, the sender's id on its messenger, and `identity_name`.
+Only a bridge the service knows, by its `client_id` and `client_secret` (the module's `bridgesFile`), may ask, and it gives its secret again when it redeems the OTP.
+The OTP's page shows `bridge: true`, `for`, and `identity` as the identity's name; approving it takes `"session":"<id>"`, a session of the approver's groups, once per bridge, person and session, at most 20 per person.
+Approving one with an identity links that identity to the approver, from whoever had it before.
+
+The credential comes as `access_token`, and goes as `Authorization: Bearer <credential>`.
+It joins only that session, while its approver is in the session's group: as `<approver>/<client_id>`, and as any member of the group who linked an identity on that bridge, whose messages it carries as theirs.
+It reaches no operation but the two on itself, `/api/bridges/self`, and reads no session apart.
+It lasts until the session is deleted, its approver leaves the group, a member removes it, or it removes itself.
 
 ## Signing in
 
@@ -47,8 +47,8 @@ These are Better Auth's own endpoints, under `/api/auth/`; the account page call
 - Sign in: `POST /api/auth/sign-in/social` with `{"provider":"github","callbackURL":"/account/"}`, which returns `{"url":…,"redirect":true}`: go to `url`.
 - Sign out: `POST /api/auth/sign-out`.
 - The sign-in itself: `GET /api/auth/get-session`, whose `session.token` a page of the site joins a session with, as one of the person's, `<name>/<part>`.
-- The OTP: `GET /api/auth/device?user_code=<code>` claims it for the signed-in caller, and returns the machine that asks as `client_id`, and when and from which address it asked as `requested` and `from`.
-  Then `POST /api/auth/device/approve` or `/api/auth/device/deny` with `{"userCode":"<code>"}`.
+- The OTP: `GET /api/auth/device?user_code=<code>` claims it for the signed-in caller, and returns the machine or bridge that asks as `client_id`, and when and from which address it asked as `requested` and `from`.
+  Then `POST /api/auth/device/approve` or `/api/auth/device/deny` with `{"userCode":"<code>"}`, and for a bridge's `"session":"<id>"` too.
   The page is `/account/device/?user_code=<code>`.
 - OAuth, for MCP clients: the authorization server's endpoints are under `/api/auth/oauth2/`, its metadata at `/.well-known/oauth-authorization-server/api/auth`.
   It sends the person to two pages, each with a signed query, which the page passes on whole as `oauth_query` (the query string without its `?`):
@@ -70,6 +70,7 @@ The relay asks this service, as its access service, on the loopback only:
 - `POST /agentwire/join` with `{"session":"<the secret in the address>","name":"<name>","token":"<token>"|null,"owned":true|false}`:
   200 with `{"account":"<name>"|null}` where the name may take part, 403 with one line of text where not.
   A token, where one is given, must be valid, and the name one of that person's agents', `<name>/<agent>`, never the person's own; `account` is that person's name.
+  A bridge's credential joins as Bridges says, and `account` is the name it joins as where that is a person, else its approver.
   For a session accounts own, the answer also gives `about`, `{"project":"<name>","repos":[…]}`, which the relay passes on in its join answer, so the participant learns its project's repositories.
   With a token, the answer also gives `grant`, which the relay keeps and asks with in place of the token: it works only for that name in that session, only here, and only while the token does.
   A session accounts own takes only a token of one of its group's members, checked through its project to its group each time; a DM only a token of one of its two, while they are friends; a session no account owns, which is the relay's alone, takes anyone.
