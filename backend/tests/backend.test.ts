@@ -546,3 +546,21 @@ test("an overview with its version waits until it changes", async () => {
 	);
 	assert.equal(again.json.version, next.version);
 });
+
+test("accepting an invite makes friends with a DM, and joins its project's group", async () => {
+	const tristan = await person("tristan");
+	const invite = (
+		await call(luis.machine, "POST", "/api/invites", { project: project.id })
+	).json;
+	const accepted = await call(
+		tristan.browser,
+		"POST",
+		`/api/invites/${invite.code}/accept`,
+	);
+	assert.equal(accepted.status, 200, accepted.text);
+	assert.equal(accepted.json.project.id, project.id);
+	const overview = (await call(tristan.machine, "GET", "/api/overview")).json;
+	assert.ok(overview.friends.some((f: any) => f.name === "luis"));
+	assert.ok(overview.dms.some((d: any) => d.id === accepted.json.dm));
+	assert.ok(overview.groups.some((g: any) => g.id === group.id));
+});

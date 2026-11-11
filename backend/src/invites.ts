@@ -9,7 +9,7 @@ import { randomInt } from "node:crypto";
 import type { Context } from "hono";
 import { callerOf } from "./caller.ts";
 import { config } from "./config.ts";
-import { db, dmOf, isMember } from "./db.ts";
+import { db, dmOf, isMember, transaction } from "./db.ts";
 import { type Env, type newApi, operation, z } from "./openapi.ts";
 import { json, Login, path } from "./schemas.ts";
 
@@ -194,8 +194,7 @@ function showInvite(code: string, user: string | undefined) {
 }
 
 function acceptInvite(code: string, user: string) {
-	db.exec("BEGIN IMMEDIATE");
-	try {
+	return transaction(() => {
 		const row = inviteByCode(code);
 		const now = new Date().toISOString();
 		if (
@@ -231,12 +230,8 @@ function acceptInvite(code: string, user: string) {
 		db.prepare(
 			"UPDATE invite SET accepted_by = ?, accepted = coalesce(accepted, ?) WHERE code = ?",
 		).run(user, now, row.code);
-		db.exec("COMMIT");
 		return { inviter: faceOf(row.inviter), dm, project: projectRef(project) };
-	} catch (error) {
-		db.exec("ROLLBACK");
-		throw error;
-	}
+	});
 }
 
 /** At most `max` lookups a minute from one address, for the operation anyone calls. */

@@ -15,8 +15,9 @@ export function newId(prefix: string): string {
 	return `${prefix}_${randomBytes(12).toString("base64url")}`;
 }
 
-/** Runs `work` in one transaction. */
+/** Runs `work` in one transaction, or in the one already open, since SQLite doesn't nest them. */
 export function transaction<T>(work: () => T): T {
+	if (db.isTransaction) return work();
 	db.exec("BEGIN");
 	try {
 		const result = work();

@@ -1,4 +1,4 @@
-import { db } from "./db.ts";
+import { db, transaction } from "./db.ts";
 
 /** The most repositories one project points at. */
 export const maxRepos = 20;
@@ -49,19 +49,14 @@ export function reposOf(project: string): string[] {
 
 /** Points `project` at `repos`, in place of the ones before. */
 export function setRepos(project: string, repos: string[]): void {
-	db.exec("BEGIN");
-	try {
+	transaction(() => {
 		db.prepare("DELETE FROM project_repo WHERE project = ?").run(project);
 		const insert = db.prepare(
 			"INSERT INTO project_repo (project, position, repo) VALUES (?, ?, ?)",
 		);
 		for (const [position, repo] of repos.entries())
 			insert.run(project, position, repo);
-		db.exec("COMMIT");
-	} catch (error) {
-		db.exec("ROLLBACK");
-		throw error;
-	}
+	});
 }
 
 export const reposHelp = `"repos" is a list of at most ${maxRepos} GitHub repositories, each as "owner/name" or its URL`;
