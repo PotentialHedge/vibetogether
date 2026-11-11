@@ -243,58 +243,43 @@ impl Client {
 
     /// Receives, as `receive` asks.
     pub async fn receive(&self, me: &str, receive: &Receive) -> Result<Received> {
-        let mut query: Vec<(&str, String)> = Vec::new();
-        if let Some(after) = receive.after {
-            query.push(("after", after.to_string()));
-        }
-        if let Some(read) = receive.read {
-            query.push(("read", read.to_string()));
-        }
-        if let Some(wait) = receive.wait {
-            query.push(("wait", wait.as_secs_f64().to_string()));
-        }
-        if receive.own {
-            query.push(("own", "1".into()));
-        }
-        if receive.presence {
-            query.push(("presence", "1".into()));
-        }
-        query.extend(receive.only.iter().map(|only| ("only", only.clone())));
-        query.extend(receive.skip.iter().map(|skip| ("skip", skip.clone())));
-        let mut request = self.get(me).query(&query);
+        let mut request = self.get(me).query(&query_of(receive));
         if let Some(wait) = receive.wait {
             request = request.timeout(wait + SLACK);
         }
         Ok(Received::parse(&text(request).await?)?)
     }
 
+    /// Reads the session at `link` without joining it, as `receive` asks, with `token` where
+    /// the relay's access service wants one; a receive's `read` and `own` don't apply.
+    pub async fn read(
+        &self,
+        link: &str,
+        receive: &Receive,
+        token: Option<&str>,
+    ) -> Result<Received> {
+        let mut request = self.get(format!("{link}/log")).query(&query_of(receive));
+        if let Some(token) = token {
+            request = request.bearer_auth(token);
+        }
+        if let Some(wait) = receive.wait {
+            request = request.timeout(wait + SLACK);
+        }
+        Ok(Received::parse(&text(request).await?)?)
+    }
+
+    /// The payload of entry `n` of the session at `link`, read without joining it.
+    pub async fn fetch_read(&self, link: &str, n: u64, token: Option<&str>) -> Result<Payload> {
+        let mut request = self.get(format!("{link}/log/{n}"));
+        if let Some(token) = token {
+            request = request.bearer_auth(token);
+        }
+        payload(request).await
+    }
+
     /// The payload of entry `n`, with its type and, where it has one, its file name.
     pub async fn fetch(&self, me: &str, n: u64) -> Result<Payload> {
-        let request = self.get(format!("{me}/{n}")).timeout(REQUEST);
-        let mut response = checked(request.send().await?).await?;
-        let header = |name: &str| {
-            response
-                .headers()
-                .get(name)
-                .and_then(|value| value.to_str().ok())
-                .map(str::to_owned)
-        };
-        let kind = header("content-type").unwrap_or_else(|| "application/octet-stream".into());
-        let filename = header("content-disposition").and_then(|value| filename(&value));
-        let mut bytes = Vec::new();
-        while let Some(chunk) = response.chunk().await? {
-            bytes.extend_from_slice(&chunk);
-            if bytes.len() as u64 > MAX_PAYLOAD {
-                return Err(Error::Unexpected(format!(
-                    "a payload larger than {MAX_PAYLOAD} bytes"
-                )));
-            }
-        }
-        Ok(Payload {
-            kind,
-            filename,
-            bytes,
-        })
+        payload(self.get(format!("{me}/{n}"))).await
     }
 
     /// Leaves, and returns the leave entry's number.
@@ -354,6 +339,58 @@ fn filename(disposition: &str) -> Option<String> {
         }
     }
     String::from_utf8(bytes).ok()
+}
+
+/// A receive's query, which a read takes too.
+fn query_of(receive: &Receive) -> Vec<(&'static str, String)> {
+    let mut query: Vec<(&'static str, String)> = Vec::new();
+    if let Some(after) = receive.after {
+        query.push(("after", after.to_string()));
+    }
+    if let Some(read) = receive.read {
+        query.push(("read", read.to_string()));
+    }
+    if let Some(wait) = receive.wait {
+        query.push(("wait", wait.as_secs_f64().to_string()));
+    }
+    if receive.own {
+        query.push(("own", "1".into()));
+    }
+    if receive.presence {
+        query.push(("presence", "1".into()));
+    }
+    query.extend(receive.only.iter().map(|only| ("only", only.clone())));
+    query.extend(receive.skip.iter().map(|skip| ("skip", skip.clone())));
+    query
+}
+
+/// A fetch's answer: the payload, with its type and, where it has one, its file name.
+async fn payload(request: RequestBuilder) -> Result<Payload> {
+    let request = request.timeout(REQUEST);
+    let mut response = checked(request.send().await?).await?;
+    let header = |name: &str| {
+        response
+            .headers()
+            .get(name)
+            .and_then(|value| value.to_str().ok())
+            .map(str::to_owned)
+    };
+    let kind = header("content-type").unwrap_or_else(|| "application/octet-stream".into());
+    let filename = header("content-disposition").and_then(|value| filename(&value));
+    let mut bytes = Vec::new();
+    while let Some(chunk) = response.chunk().await? {
+        bytes.extend_from_slice(&chunk);
+        if bytes.len() as u64 > MAX_PAYLOAD {
+            return Err(Error::Unexpected(format!(
+                "a payload larger than {MAX_PAYLOAD} bytes"
+            )));
+        }
+    }
+    Ok(Payload {
+        kind,
+        filename,
+        bytes,
+    })
 }
 
 #[cfg(test)]

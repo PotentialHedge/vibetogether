@@ -116,6 +116,19 @@ async fn join(State(stub): State<Arc<Stub>>, Json(join): Json<Join>) -> (StatusC
     }
 }
 
+#[derive(Deserialize)]
+struct Read {
+    token: Option<String>,
+}
+
+/// Lets luis read, and no one else.
+async fn read(Json(read): Json<Read>) -> (StatusCode, String) {
+    match read.token.as_deref() {
+        Some("t-luis") => (StatusCode::OK, r#"{"account":"luis"}"#.into()),
+        _ => (StatusCode::FORBIDDEN, "members only\n".into()),
+    }
+}
+
 async fn session(
     State(stub): State<Arc<Stub>>,
     Path(id): Path<String>,
@@ -150,6 +163,7 @@ async fn world() -> World {
             .route("/api/sessions", get(sessions))
             .route("/api/sessions/{id}", axum::routing::patch(rename))
             .route("/agentwire/join", post(join))
+            .route("/agentwire/read", post(read))
             .route("/agentwire/sessions/{id}", get(session))
             .with_state(stub.clone()),
     )
@@ -358,4 +372,26 @@ async fn the_account_operations_are_tools_that_ask_to_sign_in_first() {
         .await
         .unwrap();
     assert_eq!(text(&renamed), r#"{"id":"s_1/../x","name":"hedge"}"#);
+}
+
+#[tokio::test]
+async fn a_member_reads_a_session_without_joining_it() {
+    let world = world().await;
+    let client = client(&world.mcp, Some("t-luis")).await;
+    let joined = join_as(&client, &world.session, "luis/claude").await;
+    assert_ne!(joined.is_error, Some(true), "{joined:?}");
+    let read = |session: &str| {
+        CallToolRequestParams::new("read").with_arguments(object!({ "session": session }))
+    };
+    let said = text(&client.call_tool(read(&world.session)).await.unwrap());
+    assert!(
+        said.contains(r#""from":"luis/claude","verified":true,"joined":true"#),
+        "{said}"
+    );
+    let refused = client.call_tool(read(&world.plain)).await.unwrap();
+    assert_eq!(refused.is_error, Some(true));
+    assert!(
+        text(&refused).contains("no Vibe Together session"),
+        "{refused:?}"
+    );
 }

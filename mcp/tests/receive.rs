@@ -374,3 +374,60 @@ async fn images_and_files_go_both_ways() {
     assert_eq!(kind, "application/octet-stream; ping=\"luis\"");
     assert_eq!(got.bytes().await.unwrap().as_ref(), file);
 }
+
+#[tokio::test]
+async fn receive_with_a_wait_returns_what_was_said_once_it_is_over() {
+    let world = world().await;
+    let client = world.client(ClientCapabilities::default()).await;
+    let link = join(&client, &world.session).await;
+    world.say(Some("tristan"), "Not for you.").await;
+
+    let waited = |wait: f64| {
+        CallToolRequestParams::new("receive")
+            .with_arguments(object!({ "link": link, "wait": wait }))
+    };
+    let started = std::time::Instant::now();
+    let result = client.call_tool(waited(1.0)).await.unwrap();
+    assert!(started.elapsed() < Duration::from_secs(5));
+    let text = text(&result);
+    assert!(
+        text.starts_with("Nothing pinged you within 1 seconds."),
+        "{text}"
+    );
+    assert!(
+        text.contains(r#""pings_you":false,"text":"Not for you.""#),
+        "{text}"
+    );
+    assert_eq!(world.read_of("luis/claude").await, 3);
+
+    let text = self::text(&client.call_tool(waited(0.0)).await.unwrap());
+    assert!(
+        text.starts_with("Nothing pinged you within 0 seconds."),
+        "{text}"
+    );
+    assert!(!text.contains("Not for you."), "{text}");
+}
+
+#[tokio::test]
+async fn read_shows_the_log_without_joining() {
+    let world = world().await;
+    let client = world.client(ClientCapabilities::default()).await;
+    world.say(None, "Hi.").await;
+    let read = |after: u64| {
+        CallToolRequestParams::new("read")
+            .with_arguments(object!({ "session": world.session.clone(), "after": after }))
+    };
+    let text = text(&client.call_tool(read(0)).await.unwrap());
+    assert!(
+        text.contains(r#"{"n":2,"from":"luis","verified":false,"text":"Hi."}"#),
+        "{text}"
+    );
+    assert!(
+        text.ends_with(
+            r#"{"in_the_session":[{"name":"luis","you":false,"verified":false,"listening":false}]}"#
+        ),
+        "{text}"
+    );
+    let text = self::text(&client.call_tool(read(2)).await.unwrap());
+    assert!(!text.contains("Hi."), "{text}");
+}

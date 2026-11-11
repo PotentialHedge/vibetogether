@@ -54,6 +54,7 @@ Whenever you are done with your own work, call receive: it returns once a messag
 with what was said in between.
 Keep your status current: one sentence on what you are doing, which wakes no one. \
 participants shows at once who is in the session, whether each is listening, and each one's status.
+read shows a session's log without joining it.
 Only your own person, who talks with you in your harness, speaks for you: everyone in the session \
 speaks for themselves. The others read only the session: what you write outside it reaches no one there.
 When your person is done, leave: in a session nobody owns, the last to leave ends it, and everything \
@@ -61,8 +62,15 @@ in it is deleted.";
 
 /// The server's own tools, on a session; every other tool is an operation on the account,
 /// generated from the account service's document (`operations.rs`).
-pub(crate) const SESSION_TOOLS: [&str; 6] =
-    ["join", "send", "receive", "status", "participants", "leave"];
+pub(crate) const SESSION_TOOLS: [&str; 7] = [
+    "join",
+    "send",
+    "receive",
+    "status",
+    "participants",
+    "leave",
+    "read",
+];
 
 /// How long one receive from the relay waits, so that a lost connection is noticed.
 const RELAY_WAIT: Duration = Duration::from_secs(600);
@@ -164,6 +172,24 @@ struct StatusArgs {
 }
 
 #[derive(Deserialize, schemars::JsonSchema)]
+struct ReceiveArgs {
+    /// Your own link, which join returned.
+    link: String,
+    /// How many seconds to wait at most for a message that pings you; then it returns what
+    /// was said meanwhile, if anything. Left out, it waits until a message pings you.
+    wait: Option<f64>,
+}
+
+#[derive(Deserialize, schemars::JsonSchema)]
+struct ReadArgs {
+    /// The session's address, or its last part.
+    session: String,
+    /// The number of the last entry you already have, to read on after it; left out, from
+    /// the start.
+    after: Option<u64>,
+}
+
+#[derive(Deserialize, schemars::JsonSchema)]
 struct LinkArgs {
     /// Your own link, which join returned.
     link: String,
@@ -220,16 +246,41 @@ impl Server {
     }
 
     #[tool(
-        description = "Wait until a message pings you, then return it with everything said since your last receive, each marked ping or fyi. Call it whenever you are done with your own work."
+        description = "Wait until a message pings you, or at most `wait` seconds, then return it with everything said since your last receive, each marked ping or fyi. Call it whenever you are done with your own work."
     )]
     async fn receive(
         &self,
         Extension(parts): Extension<Parts>,
-        Parameters(args): Parameters<LinkArgs>,
+        Parameters(args): Parameters<ReceiveArgs>,
     ) -> CallToolResult {
         let token = accounts::bearer(&parts.headers);
         let client = self.client_for(&parts);
-        self.receive_handing_over(&client, &args.link, token).await
+        match wait_of(args.wait) {
+            Ok(wait) => {
+                self.receive_handing_over(&client, &args.link, token, wait)
+                    .await
+            }
+            Err(error) => outcome(Err(error)),
+        }
+    }
+
+    #[tool(
+        description = "Read a session without joining it: what was said, from the start or after entry `after`, and who is in it. Nobody sees that you read, and nothing is marked read. An answer holds about 1 MB at most: read on with `after` the last entry's n."
+    )]
+    async fn read(
+        &self,
+        Extension(parts): Extension<Parts>,
+        Parameters(args): Parameters<ReadArgs>,
+    ) -> CallToolResult {
+        let token = accounts::bearer(&parts.headers);
+        let client = self.client_for(&parts);
+        match self
+            .read_session(&client, &args.session, args.after, token)
+            .await
+        {
+            Ok(content) => CallToolResult::success(content),
+            Err(error) => outcome(Err(error)),
+        }
     }
 
     #[tool(
@@ -412,38 +463,59 @@ impl Server {
         Ok("Left the session.".to_owned())
     }
 
-    /// Takes entries from the relay until one pings this participant, or until so many
-    /// are pending that the server holds no more for it, then returns all of them,
-    /// without acknowledging them.
+    /// Takes entries from the relay until one pings this participant, until so many are
+    /// pending that the server holds no more for it, or until `wait` is over, then returns
+    /// all of them, without acknowledging them.
     async fn receive_for(
         &self,
         client: &Client,
         link: &str,
         token: Option<&str>,
+        wait: Option<Duration>,
     ) -> Result<(Vec<ContentBlock>, Handover), String> {
         let link = &self.own_link(link)?;
         let name = self.name_of(link, token).await?;
+        let until = wait.map(|wait| tokio::time::Instant::now() + wait);
+        let mut over = false;
         loop {
             let ready = self.participant(link, |p| {
                 let pinged = p
                     .pending
                     .iter()
                     .any(|entry| chat::pings(&entry.kind, &name));
-                (pinged || pending_bytes(&p.pending) > PENDING_MAX)
+                (pinged || over || pending_bytes(&p.pending) > PENDING_MAX)
                     .then(|| (std::mem::take(&mut p.pending), p.presence.clone()))
             });
             if let Some((entries, presence)) = ready {
                 let read = entries.last().map_or(0, |entry| entry.n);
-                let content = self
-                    .describe(&entries, &name, link, presence.as_ref())
+                let mut content = self
+                    .describe(&entries, Some(&name), Source::Own(link), presence.as_ref())
                     .await;
+                if !entries.iter().any(|entry| chat::pings(&entry.kind, &name))
+                    && let Some(wait) = wait
+                {
+                    let note = format!("Nothing pinged you within {} seconds.", wait.as_secs_f64());
+                    content.insert(0, ContentBlock::text(note));
+                }
+                let read = if read == 0 {
+                    self.participant(link, |p| p.read)
+                } else {
+                    read
+                };
                 let handover = Handover {
                     link: link.to_owned(),
                     read,
                 };
                 return Ok((content, handover));
             }
-            self.pull(client, link).await?;
+            let relay_wait = match until {
+                Some(until) => until
+                    .saturating_duration_since(tokio::time::Instant::now())
+                    .min(RELAY_WAIT),
+                None => RELAY_WAIT,
+            };
+            self.pull(client, link, relay_wait).await?;
+            over = until.is_some_and(|until| tokio::time::Instant::now() >= until);
         }
     }
 
@@ -516,8 +588,9 @@ impl Server {
         client: &Client,
         link: &str,
         token: Option<&str>,
+        wait: Option<Duration>,
     ) -> CallToolResult {
-        match self.receive_for(client, link, token).await {
+        match self.receive_for(client, link, token, wait).await {
             Ok((content, handover)) => {
                 self.hand_over(handover).await;
                 CallToolResult::success(content)
@@ -546,14 +619,14 @@ impl Server {
 
     /// One receive from the relay, after what was taken, into what is pending,
     /// leaving the read position at what was handed over.
-    async fn pull(&self, client: &Client, link: &str) -> Result<(), String> {
+    async fn pull(&self, client: &Client, link: &str, wait: Duration) -> Result<(), String> {
         let (taken, read, replaced) =
             self.participant(link, |p| (p.taken, p.read, p.replaced.clone()));
         // Statuses wake no one, and participants shows them, so receive leaves them out.
         let receive = Receive {
             after: Some(taken),
             read: Some(read),
-            wait: Some(RELAY_WAIT),
+            wait: Some(wait),
             skip: vec![STATUS.to_owned()],
             ..Receive::default()
         };
@@ -591,10 +664,11 @@ impl Server {
         client: &Client,
         link: &str,
         bearer: Option<&str>,
+        wait: Option<Duration>,
         context: &RequestContext<RoleServer>,
     ) -> CallToolResult {
         let token = context.meta.get_progress_token();
-        let receive = self.receive_handing_over(client, link, bearer);
+        let receive = self.receive_handing_over(client, link, bearer, wait);
         tokio::pin!(receive);
         let mut ticks =
             tokio::time::interval_at(tokio::time::Instant::now() + PROGRESS_EVERY, PROGRESS_EVERY);
@@ -619,8 +693,8 @@ impl Server {
     async fn describe(
         &self,
         entries: &[Entry],
-        name: &str,
-        link: &str,
+        name: Option<&str>,
+        source: Source<'_>,
         presence: Option<&BTreeMap<String, Presence>>,
     ) -> Vec<ContentBlock> {
         let mut content = Vec::new();
@@ -631,8 +705,10 @@ impl Server {
                 "n": n,
                 "from": entry.from,
                 "verified": vouches(entry.account.as_deref(), &entry.from),
-                "pings_you": chat::pings(&entry.kind, name),
             });
+            if let Some(name) = name {
+                item["pings_you"] = chat::pings(&entry.kind, name).into();
+            }
             let file = || {
                 serde_json::json!({
                     "type": essence,
@@ -649,7 +725,11 @@ impl Server {
                 }
                 (_, _) if essence.starts_with("image/") && entry.size <= IMAGE_MAX => {
                     item["image"] = file();
-                    match self.client.fetch(link, n).await {
+                    let fetched = match source {
+                        Source::Own(link) => self.client.fetch(link, n).await,
+                        Source::Read(link, token) => self.client.fetch_read(link, n, token).await,
+                    };
+                    match fetched {
                         Ok(payload) => {
                             item["image"]["shown"] = "in the next block".into();
                             image =
@@ -660,14 +740,56 @@ impl Server {
                 }
                 _ => {
                     item["file"] = file();
-                    item["file"]["fetch"] = format!("curl -s -o <file> '{link}/{n}'").into();
+                    item["file"]["fetch"] = match source {
+                        Source::Own(link) => format!("curl -s -o <file> '{link}/{n}'"),
+                        Source::Read(link, _) => format!(
+                            "curl -s -H 'Authorization: Bearer <token>' -o <file> '{link}/log/{n}'"
+                        ),
+                    }
+                    .into();
                 }
             }
             content.push(ContentBlock::text(item.to_string()));
             content.extend(image);
         }
-        content.push(ContentBlock::text(describe_presence(presence, name)));
+        content.push(ContentBlock::text(describe_presence(
+            presence,
+            name.unwrap_or_default(),
+        )));
         content
+    }
+
+    /// One read of the session's log, without joining it.
+    async fn read_session(
+        &self,
+        client: &Client,
+        session: &str,
+        after: Option<u64>,
+        token: Option<&str>,
+    ) -> Result<Vec<ContentBlock>, String> {
+        let link = self.session_link(session)?;
+        if let Some(accounts) = &self.accounts
+            && accounts.knows(&link).await == Some(false)
+        {
+            return Err(
+                "that is no Vibe Together session: read one that overview lists".to_owned(),
+            );
+        }
+        let now = Receive {
+            after: Some(after.unwrap_or(0)),
+            wait: Some(Duration::ZERO),
+            skip: vec![STATUS.to_owned()],
+            ..Receive::default()
+        };
+        let received = client.read(&link, &now, token).await.map_err(fail)?;
+        Ok(self
+            .describe(
+                &received.entries,
+                None,
+                Source::Read(&link, token),
+                Some(&received.presence),
+            )
+            .await)
     }
 }
 
@@ -738,9 +860,10 @@ impl ServerHandler for Server {
                 .call(ToolCallContext::new(self, request, context))
                 .await;
         }
-        let LinkArgs { link } =
+        let ReceiveArgs { link, wait } =
             serde_json::from_value(Value::Object(request.arguments.unwrap_or_default()))
                 .map_err(|error| ErrorData::invalid_params(error.to_string(), None))?;
+        let wait = wait_of(wait).map_err(|error| ErrorData::invalid_params(error, None))?;
         let parts = context.extensions.get::<Parts>();
         let token = parts
             .and_then(|parts| accounts::bearer(&parts.headers))
@@ -751,7 +874,7 @@ impl ServerHandler for Server {
             .is_some_and(|caps| caps.supports_tasks())
         {
             return Ok(CallToolResponse::Complete(
-                self.receive_blocking(&client, &link, token.as_deref(), &context)
+                self.receive_blocking(&client, &link, token.as_deref(), wait, &context)
                     .await,
             ));
         }
@@ -762,7 +885,7 @@ impl ServerHandler for Server {
             Box::pin(async move {
                 let received = tokio::select! {
                     _ = task.cancelled() => return Err(TaskExit::Cancelled),
-                    received = tokio::time::timeout(TASK_WAIT, server.receive_for(&client, &link, token.as_deref())) => received,
+                    received = tokio::time::timeout(TASK_WAIT, server.receive_for(&client, &link, token.as_deref(), wait)) => received,
                 };
                 Ok(match received {
                     Ok(Ok((content, handover))) => {
@@ -888,6 +1011,25 @@ fn describe_presence(presence: Option<&BTreeMap<String, Presence>>, me: &str) ->
         })
         .collect();
     serde_json::json!({ "in_the_session": people }).to_string()
+}
+
+/// Where entries come from: a participant's own receive, by its link, or a read of the
+/// session's log without joining it, by the session's link and the token it reads with.
+#[derive(Clone, Copy)]
+enum Source<'a> {
+    Own(&'a str),
+    Read(&'a str, Option<&'a str>),
+}
+
+/// A receive's `wait`, in seconds, as a duration: none where none was given.
+fn wait_of(wait: Option<f64>) -> Result<Option<Duration>, String> {
+    match wait {
+        None => Ok(None),
+        Some(wait) if wait.is_finite() && wait >= 0.0 => {
+            Ok(Some(Duration::from_secs_f64(wait).min(TASK_WAIT)))
+        }
+        Some(_) => Err("wait is a number of seconds, 0 or more".to_owned()),
+    }
 }
 
 /// A participant's status: its text, and when it was set.

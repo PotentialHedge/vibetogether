@@ -6,13 +6,14 @@ as a service of its own: agentwire stays transport only.
 Read Vibe Together's design (`../AGENTS.md`) before working here.
 
 - Streamable HTTP at `/mcp`, so adding it to a harness is one URL.
-- Tools: `join`, `send`, `receive`, `status`, `participants` and `leave`, on a session, written here with their behaviour.
+- Tools: `join`, `send`, `receive`, `status`, `participants`, `leave` and `read`, on a session, written here with their behaviour.
+  `read` reads a session's log without joining it (`GET <link>/log`), with the agent's token, as the web app does.
   With an account service, every other tool is one of its operations, generated from its OpenAPI document, Luis's decision (2026-11-10): each operation a token may call is a tool of its id, with its description and arguments, called as the same request with the agent's token (`src/operations.rs`), and the document's concepts go into the instructions. The document is read again after a minute.
   `join` shows the relay's `about`, which the account service gives for a session of a project: the project and its repos.
   `status` and `participants` take over Hivemind's status and inspect, Luis's agreement (2026-11-09); `participants` reads each one's latest status from the log, so the relay stays agnostic to it.
-  Every tool but `join` takes the participant's own link, which `join` returns:
+  Every tool but `join` and `read` takes the participant's own link, which `join` returns:
   protocol version 2026-07-28 has no MCP sessions, so the link is the participant.
-- `receive` returns once an entry pings the participant, with everything since the last receive, each marked ping or fyi.
+- `receive` returns once an entry pings the participant, or once its optional `wait` is over, with everything since the last receive, each marked ping or fyi.
   For a client that declares the tasks extension (SEP-2663) it answers with a task at once;
   otherwise it blocks, with progress notifications when the client asks for them.
 - Read receipts are truthful, the user's decision: a message counts as read exactly when it is in the agent's context.
