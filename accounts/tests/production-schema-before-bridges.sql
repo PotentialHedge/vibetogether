@@ -41,14 +41,6 @@ CREATE TABLE friend (
 			created TEXT NOT NULL,
 			PRIMARY KEY ("from", "to")
 		);
-CREATE TABLE "group" (
-			id TEXT PRIMARY KEY,
-			name TEXT NOT NULL,
-			owner TEXT NOT NULL REFERENCES user(id) ON DELETE CASCADE,
-			own INTEGER NOT NULL DEFAULT 0,
-			created TEXT NOT NULL
-		);
-CREATE UNIQUE INDEX group_own ON "group" (owner) WHERE own = 1;
 CREATE TABLE group_member (
 			"group" TEXT NOT NULL REFERENCES "group"(id) ON DELETE CASCADE,
 			user TEXT NOT NULL REFERENCES user(id) ON DELETE CASCADE,
@@ -69,7 +61,6 @@ CREATE TABLE "owned_session" (
 				creator TEXT REFERENCES user(id) ON DELETE SET NULL,
 				secret TEXT UNIQUE,
 				created TEXT NOT NULL,
-				open TEXT NOT NULL DEFAULT 'members' CHECK (open IN ('members', 'link')),
 				app_grant TEXT
 			);
 CREATE TABLE dm (
@@ -88,3 +79,38 @@ CREATE TABLE project_repo (
 			PRIMARY KEY (project, position),
 			UNIQUE (project, repo)
 		);
+CREATE TABLE minted (
+			session TEXT PRIMARY KEY REFERENCES session(id) ON DELETE CASCADE,
+			by TEXT NOT NULL
+		);
+CREATE TABLE activity (
+			id INTEGER PRIMARY KEY,
+			user TEXT NOT NULL REFERENCES user(id) ON DELETE CASCADE,
+			token TEXT NOT NULL,
+			agent TEXT NOT NULL,
+			operation TEXT NOT NULL,
+			arguments TEXT NOT NULL,
+			created TEXT NOT NULL
+		);
+CREATE INDEX activity_of ON activity (user, created);
+CREATE TABLE invite (
+			code TEXT PRIMARY KEY,
+			inviter TEXT NOT NULL REFERENCES user(id) ON DELETE CASCADE,
+			project TEXT REFERENCES project(id) ON DELETE CASCADE,
+			created TEXT NOT NULL,
+			expires TEXT NOT NULL,
+			accepted_by TEXT REFERENCES user(id) ON DELETE CASCADE,
+			accepted TEXT
+		);
+CREATE TABLE person_otp (
+			code TEXT PRIMARY KEY,
+			user TEXT NOT NULL REFERENCES user(id) ON DELETE CASCADE,
+			created TEXT NOT NULL,
+			expires TEXT NOT NULL
+		);
+CREATE TABLE "group" (
+				id TEXT PRIMARY KEY,
+				name TEXT NOT NULL,
+				person TEXT UNIQUE REFERENCES user(id) ON DELETE CASCADE,
+				created TEXT NOT NULL
+			);

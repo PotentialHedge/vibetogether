@@ -6,7 +6,7 @@ import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
 
 // A database in production's schema from before bridges (`production-schema-before-bridges.sql`,
-// copied from lwirth-cloud on 2026-11-10), as production has it: messagent's grant of Luis's, the
+// copied from lwirth-cloud on 2026-11-11, after `members` and `owner`), as production has it: messagent's grant of Luis's, the
 // app's project with its Telegram session, an agent's token, and an OTP asked for.
 const database = join(
 	mkdtempSync(join(tmpdir(), "vibetogether-accounts-")),
@@ -26,13 +26,13 @@ old.exec(`
 	INSERT INTO session (id, expiresAt, token, createdAt, updatedAt, userId, agent, person, claim) VALUES
 		('grant', 9e15, 'tok-grant', 0, 0, 'u-luis', 'messagent', 1, 'Telegram id 9118774471, no username, named Luis'),
 		('laptop', 9e15, 'tok-laptop', 0, 0, 'u-luis', 'laptop', NULL, NULL);
-	INSERT INTO "group" VALUES ('g_luis', 'luiswirth', 'u-luis', 1, '2026-11-09T00:00:00Z');
+	INSERT INTO "group" VALUES ('g_luis', 'luiswirth', 'u-luis', '2026-11-09T00:00:00Z');
 	INSERT INTO group_member VALUES ('g_luis', 'u-luis');
 	INSERT INTO project VALUES ('p_tg', 'messagent', 'g_luis', 'messagent', '2026-11-09T00:00:00Z');
 	INSERT INTO project VALUES ('p_vt', 'vibetogether', 'g_luis', NULL, '2026-11-09T00:00:00Z');
 	INSERT INTO owned_session VALUES
-		('s_tg', 'Telegram', 'p_tg', 'u-luis', 'x1', '2026-11-09T00:00:00Z', 'members', 'grant'),
-		('s_vt', 'agents', 'p_vt', 'u-luis', 'x2', '2026-11-09T00:00:00Z', 'link', NULL);
+		('s_tg', 'Telegram', 'p_tg', 'u-luis', 'x1', '2026-11-09T00:00:00Z', 'grant'),
+		('s_vt', 'agents', 'p_vt', 'u-luis', 'x2', '2026-11-09T00:00:00Z', NULL);
 	INSERT INTO device_request VALUES ('ABCDEFGH', '2026-11-10T00:00:00Z', '192.0.2.1', 'hash', 1, 'a claim');
 `);
 old.close();
