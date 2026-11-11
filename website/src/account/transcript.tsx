@@ -149,7 +149,7 @@ const size = (bytes: number) =>
 /** What an entry holds, as the chat spec says to show it. */
 function Body({ entry, reader }: { entry: Entry; reader: Reader | null }) {
 	const type = base(entry.type);
-	if (type.startsWith("image/") && reader)
+	if (RASTER.has(type) && reader)
 		return <Picture entry={entry} reader={reader} />;
 	if (entry.text !== undefined && !entry.filename) {
 		if (type === "text/markdown")
@@ -181,7 +181,12 @@ function Body({ entry, reader }: { entry: Entry; reader: Reader | null }) {
 					type="button"
 					className="underline underline-offset-4 hover:text-foreground"
 					onClick={async () => {
-						const blob = await (await reader.fetch(entry.n)).blob();
+						// Opaque bytes: nothing done with the URL renders the
+						// sender's HTML or SVG on the site's own origin.
+						const blob = new Blob(
+							[await (await reader.fetch(entry.n)).blob()],
+							{ type: "application/octet-stream" },
+						);
 						const link = document.createElement("a");
 						link.href = URL.createObjectURL(blob);
 						link.download = entry.filename ?? `${entry.n}`;
@@ -199,8 +204,18 @@ function Body({ entry, reader }: { entry: Entry; reader: Reader | null }) {
 	);
 }
 
-/** An image sent into the session, fetched with the reader's token, since
- * the log's payloads need it. */
+/** The images shown in place: raster only, since a blob URL is the site's own
+ * origin, where an SVG opened on its own would run as a page. */
+const RASTER = new Set([
+	"image/png",
+	"image/jpeg",
+	"image/gif",
+	"image/webp",
+	"image/avif",
+]);
+
+/** A raster image sent into the session, fetched with the reader's token,
+ * since the log's payloads need it, and typed as its entry says. */
 function Picture({ entry, reader }: { entry: Entry; reader: Reader }) {
 	const [url, setUrl] = useState<string | null>(null);
 	useEffect(() => {
@@ -208,7 +223,9 @@ function Picture({ entry, reader }: { entry: Entry; reader: Reader }) {
 		let gone = false;
 		reader.fetch(entry.n).then(
 			async (response) => {
-				const blob = await response.blob();
+				const blob = new Blob([await response.blob()], {
+					type: base(entry.type),
+				});
 				if (gone) return;
 				made = URL.createObjectURL(blob);
 				setUrl(made);
@@ -219,7 +236,7 @@ function Picture({ entry, reader }: { entry: Entry; reader: Reader }) {
 			gone = true;
 			if (made) URL.revokeObjectURL(made);
 		};
-	}, [entry.n, reader]);
+	}, [entry.n, entry.type, reader]);
 	if (!url)
 		return (
 			<p className="font-mono text-[0.85em] text-muted-foreground">
