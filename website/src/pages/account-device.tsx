@@ -46,7 +46,8 @@ function DevicePage() {
 		return (
 			<Frame
 				title="Connect your agent"
-				description="An agent asks for your account with an OTP. Sign in first, then decide."
+				description="Sign in, then approve or deny it."
+				info="An agent asks for your account with an OTP."
 			>
 				<SignIn back={location.href} />
 			</Frame>
@@ -66,8 +67,15 @@ function DevicePage() {
 					outcome === "denied"
 						? `The ${claimed?.bridge ? "bridge" : "agent"} got no access. You can close this page.`
 						: claimed?.bridge
-							? "Back to the chat. Revoke it any time in your settings."
-							: "You can close this page: your agent goes on by itself. You see it, and can revoke it, on your account page."
+							? "Back to the chat."
+							: "You can close this page."
+				}
+				info={
+					outcome === "denied"
+						? undefined
+						: claimed?.bridge
+							? "Revoke it any time in your settings, under Bridges."
+							: "Your agent goes on by itself. Revoke it any time in your settings, under Tokens."
 				}
 			>
 				<a
@@ -99,26 +107,16 @@ function DevicePage() {
 				}
 				description={
 					claimed.bridge
-						? "What you write through it reaches your sessions as you."
-						: "An agent asks for your account with an OTP."
+						? "Only if this is you, and your chat shows this code."
+						: "Only if your own agent just gave you this code."
 				}
 				info={
 					claimed.bridge
-						? "You approve this once. Which chats it bridges, and into which sessions, you choose in the app itself. Revoke it any time in your settings, under Bridges."
-						: undefined
+						? "What you write through it reaches your sessions as you. You approve this once. Which chats it bridges, and into which sessions, you choose in the app itself. Revoke it any time in your settings, under Bridges."
+						: "Every agent on this machine can then join your sessions as your agent, until you revoke it. If someone sent you this link, deny it."
 				}
 			>
 				<div className="flex flex-col gap-4 rounded-2xl border bg-card/60 p-5">
-					{!claimed.bridge && (
-						<p className="text-muted-foreground">
-							The machine{" "}
-							<span className="font-mono whitespace-nowrap text-foreground">
-								{claimed.client_id}
-							</span>{" "}
-							asks to connect to your account. Every agent on it can then join
-							your sessions as your agent, until you revoke it.
-						</p>
-					)}
 					{claimed.bridge && (
 						<p className="text-center font-mono text-3xl tracking-widest text-foreground">
 							{claimed.user_code}
@@ -133,6 +131,8 @@ function DevicePage() {
 						)}
 						{!claimed.bridge && (
 							<>
+								<dt className="text-muted-foreground">machine</dt>
+								<dd className="break-words">{claimed.client_id}</dd>
 								<dt className="text-muted-foreground">code</dt>
 								<dd>{claimed.user_code}</dd>
 							</>
@@ -142,11 +142,6 @@ function DevicePage() {
 						<dt className="text-muted-foreground">from</dt>
 						<dd>{claimed.from ?? "unknown"}</dd>
 					</dl>
-					<p className="text-sm text-muted-foreground">
-						{claimed.bridge
-							? "Approve only if this is you, and your chat shows the same code."
-							: "Approve only if your own agent gave you this code just now. If someone sent you this link, deny it."}
-					</p>
 					<div className="flex gap-3">
 						<Button size="xl" onClick={() => act(true)}>
 							Approve
