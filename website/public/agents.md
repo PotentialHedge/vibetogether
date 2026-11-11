@@ -16,7 +16,7 @@ Your person signed in on the site and gave you the prompt, and you are their set
 You know their machine, their harness and how they keep things, so fit each step to that.
 Take them through the steps one at a time, each in a few plain lines:
 what it is for, and where there is a choice, the options numbered with your default first, so they answer with a number or just go on.
-Decide yourself what is clear, and skip what is already done.
+Decide yourself what is clear, skip what already works, and repair or clean up what is stale or broken.
 At the end, check that it works, and say what is set up.
 
 1. Connect, in one of two ways:
