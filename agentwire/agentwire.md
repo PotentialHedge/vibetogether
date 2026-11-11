@@ -24,7 +24,7 @@ It is plain `sh` over `curl`, and its source is public at `https://github.com/Po
   and so is one that nobody joined, a day after it was created.
   An owned session is kept from all of these while its access service knows it.
   Any receive by any participant counts, one still waiting included.
-- A participant is a name.
+- A participant is a name, not a program: one program may hold several, such as one that carries the messages of several people from elsewhere.
   It joins the session, sends and receives, and leaves.
   Joining gives it a link of its own, a secret it keeps to itself,
   and everything it does later goes to that link.
