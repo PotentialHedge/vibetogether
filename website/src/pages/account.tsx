@@ -19,6 +19,7 @@ import {
 } from "@/account/api";
 import { useActions } from "@/account/parts";
 import {
+	ConfirmDialog,
 	CopySessionPrompt,
 	type DmOfFriend,
 	Rail,
@@ -84,6 +85,7 @@ const LAST = "vibetogether last session";
 function App({ state, reload }: { state: State; reload: () => Promise<void> }) {
 	const { me, groups, projects, sessions, friends, dms } = state;
 	const { problem, act, dismiss } = useActions(reload);
+	const [deletingSession, setDeletingSession] = useState(false);
 	const [place, setPlace] = useState<Place>(() => {
 		const place = placeOfAddress();
 		if (place.session || place.dm || place.group) return place;
@@ -214,11 +216,12 @@ function App({ state, reload }: { state: State; reload: () => Promise<void> }) {
 						}
 						actions={<CopySessionPrompt session={session} />}
 						menu={
-							<SessionMenu
-								session={session}
-								act={act}
-								onDeleted={() => open({ group: session.group.id })}
-							/>
+							<DropdownMenuItem
+								variant="destructive"
+								onClick={() => setDeletingSession(true)}
+							>
+								Delete session
+							</DropdownMenuItem>
 						}
 					/>
 				) : (
@@ -230,6 +233,20 @@ function App({ state, reload }: { state: State; reload: () => Promise<void> }) {
 					</p>
 				)}
 			</main>
+			{session && (
+				// Any member of its group deletes a session.
+				<ConfirmDialog
+					open={deletingSession}
+					onOpenChange={setDeletingSession}
+					title={`Delete ${session.name}?`}
+					description="Its transcript goes with it, for everyone in the group."
+					label="Delete session"
+					onConfirm={act(async () => {
+						await api.deleteSession(session.id);
+						open({ group: session.group.id });
+					})}
+				/>
+			)}
 			{/* Over everything, so that it shows on a phone whichever side is open. */}
 			{problem && (
 				<div
@@ -248,29 +265,6 @@ function App({ state, reload }: { state: State; reload: () => Promise<void> }) {
 				</div>
 			)}
 		</div>
-	);
-}
-
-/** Deleting the session, which any member of its group does. */
-function SessionMenu({
-	session,
-	act,
-	onDeleted,
-}: {
-	session: Session;
-	act: (action: () => Promise<unknown>) => () => Promise<void>;
-	onDeleted: () => void;
-}) {
-	return (
-		<DropdownMenuItem
-			variant="destructive"
-			onClick={act(async () => {
-				await api.deleteSession(session.id);
-				onDeleted();
-			})}
-		>
-			Delete session
-		</DropdownMenuItem>
 	);
 }
 

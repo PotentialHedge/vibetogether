@@ -147,6 +147,56 @@ function NameDialog({
 	);
 }
 
+/** Asking before something is deleted for good, since nothing brings it back. */
+export function ConfirmDialog({
+	open,
+	onOpenChange,
+	title,
+	description,
+	label,
+	onConfirm,
+}: {
+	open: boolean;
+	onOpenChange: (open: boolean) => void;
+	title: string;
+	description: ReactNode;
+	/** What the button says, such as "Delete project". */
+	label: string;
+	onConfirm: () => Promise<void>;
+}) {
+	const [busy, setBusy] = useState(false);
+	return (
+		<Dialog open={open} onOpenChange={onOpenChange}>
+			<DialogContent>
+				<DialogHeader>
+					<DialogTitle>{title}</DialogTitle>
+					<DialogDescription>{description}</DialogDescription>
+				</DialogHeader>
+				<DialogFooter>
+					<DialogClose render={<Button variant="ghost" type="button" />}>
+						Cancel
+					</DialogClose>
+					<Button
+						variant="destructive"
+						disabled={busy}
+						onClick={async () => {
+							setBusy(true);
+							try {
+								await onConfirm();
+							} finally {
+								setBusy(false);
+								onOpenChange(false);
+							}
+						}}
+					>
+						{label}
+					</Button>
+				</DialogFooter>
+			</DialogContent>
+		</Dialog>
+	);
+}
+
 /** A group's face in the rail: the start of its name, by characters rather
  * than UTF-16 units, so that an emoji stays whole. */
 function GroupFace({ group }: { group: Group }) {
@@ -335,6 +385,7 @@ function ProjectItem({
 }) {
 	const [adding, setAdding] = useState(false);
 	const [linking, setLinking] = useState(false);
+	const [deleting, setDeleting] = useState(false);
 	return (
 		<li className="flex flex-col">
 			<div className="group/project flex h-8 items-center gap-1.5 rounded-md pr-1 pl-2">
@@ -371,13 +422,25 @@ function ProjectItem({
 						</DropdownMenuItem>
 						<DropdownMenuItem
 							variant="destructive"
-							onClick={act(() => api.deleteProject(project.id))}
+							onClick={() => setDeleting(true)}
 						>
 							Delete project
 						</DropdownMenuItem>
 					</DropdownMenuContent>
 				</DropdownMenu>
 			</div>
+			<ConfirmDialog
+				open={deleting}
+				onOpenChange={setDeleting}
+				title={`Delete ${project.name}?`}
+				description={
+					sessions.length === 0
+						? "It has no sessions."
+						: `${sessions.length === 1 ? "Its session goes" : `Its ${sessions.length} sessions go`} with it, for everyone in the group.`
+				}
+				label="Delete project"
+				onConfirm={act(() => api.deleteProject(project.id))}
+			/>
 			<NameDialog
 				open={linking}
 				onOpenChange={setLinking}
@@ -572,6 +635,7 @@ export function Sidebar({
 	// Groups are flat: any member deletes the group, and the last one leaves only by deleting it.
 	const last = group.members.length <= 1;
 	const [adding, setAdding] = useState(false);
+	const [deleting, setDeleting] = useState(false);
 	return (
 		<div className="flex min-h-0 min-w-0 flex-1 flex-col bg-card/20 md:w-64 md:flex-none md:shrink-0 md:border-r">
 			<header className="flex h-14 shrink-0 items-center gap-2 border-b px-4">
@@ -604,7 +668,7 @@ export function Sidebar({
 							)}
 							<DropdownMenuItem
 								variant="destructive"
-								onClick={act(() => api.deleteGroup(group.id))}
+								onClick={() => setDeleting(true)}
 							>
 								Delete group
 							</DropdownMenuItem>
@@ -665,6 +729,14 @@ export function Sidebar({
 					</div>
 				)}
 			</div>
+			<ConfirmDialog
+				open={deleting}
+				onOpenChange={setDeleting}
+				title={`Delete ${group.name}?`}
+				description="Its projects and their sessions go with it, for every member."
+				label="Delete group"
+				onConfirm={act(() => api.deleteGroup(group.id))}
+			/>
 			<Members me={me} group={group} friends={friends} act={act} />
 		</div>
 	);
