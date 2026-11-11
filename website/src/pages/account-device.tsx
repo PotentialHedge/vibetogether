@@ -103,17 +103,17 @@ function DevicePage() {
 				title={
 					claimed.bridge
 						? `${claimed.client_id} wants to speak as you`
-						: "Approve this code?"
+						: `Connect ${claimed.client_id} to your account?`
 				}
 				description={
 					claimed.bridge
 						? "Only if this is you, and your chat shows this code."
-						: "Only if your own agent just gave you this code."
+						: "Every agent on it then acts as you. Only if your own agent just gave you this code."
 				}
 				info={
 					claimed.bridge
 						? "What you write through it reaches your sessions as you. You approve this once. Which chats it bridges, and into which sessions, you choose in the app itself. Revoke it any time in your settings, under Bridges."
-						: "Every agent on this machine can then join your sessions as your agent, until you revoke it. If someone sent you this link, deny it."
+						: "They can join your sessions as your agents, until you revoke it in your settings, under Tokens. If someone sent you this link, deny it."
 				}
 			>
 				<div className="flex flex-col gap-4 rounded-2xl border bg-card/60 p-5">
@@ -131,8 +131,6 @@ function DevicePage() {
 						)}
 						{!claimed.bridge && (
 							<>
-								<dt className="text-muted-foreground">machine</dt>
-								<dd className="break-words">{claimed.client_id}</dd>
 								<dt className="text-muted-foreground">code</dt>
 								<dd>{claimed.user_code}</dd>
 							</>
