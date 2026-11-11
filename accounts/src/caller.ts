@@ -2,15 +2,14 @@ import { auth, oauthAccessTokenPrefix, tokenHash } from "./auth.ts";
 import { db } from "./db.ts";
 
 /**
- * An account, as a request is from it. `bridge` is set for a bridge's credential, which a person
- * approved for one session of theirs: the bridge's `client_id`, which only a bridge the service
- * knows gets, and the session's id. `token` is the id of the token or bridge it carries, as
- * `/api/tokens` or a session's bridges list it.
+ * An account, as a request is from it. `bridge` is set for a bridge's grant, by which a person let
+ * the bridge speak as them: the bridge's `client_id`, which only a bridge the service knows gets.
+ * `token` is the id of the token or grant it carries, as `/api/tokens` or `/api/bridges` list it.
  */
 export type Caller = {
 	id: string;
 	login: string;
-	bridge?: { name: string; session: string };
+	bridge?: { name: string };
 	token?: string;
 	/** What a bearer acts by, a Better Auth session as `b_<id>` or an OAuth grant as `o_…`, which
 	 * the relay's grant names in place of the bearer itself (`callerOfCredential`). */
@@ -56,7 +55,7 @@ export async function callerOf(headers: Headers): Promise<Caller | undefined> {
 	return {
 		id: session.user.id,
 		login: (session.user as { login: string }).login,
-		...(bridge && agent && { bridge: { name: agent, session: bridge } }),
+		...(bridge && { bridge: { name: bridge } }),
 		...(agent && {
 			token: `${bridge ? "b" : "t"}_${session.session.id}`,
 		}),
@@ -87,8 +86,7 @@ export function callerOfCredential(credential: string): Caller | undefined {
 		return {
 			id: row.id,
 			login: row.login,
-			...(row.bridge &&
-				row.agent && { bridge: { name: row.agent, session: row.bridge } }),
+			...(row.bridge && { bridge: { name: row.bridge } }),
 			...(row.agent && {
 				token: `${row.bridge ? "b" : "t"}_${credential.slice(2)}`,
 			}),

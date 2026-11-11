@@ -3,9 +3,8 @@ import { Hono } from "hono";
 import { access } from "./access.ts";
 import { api } from "./api.ts";
 import { auth, bridgeHeader, bridgeMark, tokenHash } from "./auth.ts";
-import { callerOf } from "./caller.ts";
 import { config } from "./config.ts";
-import { db, isMember, newId } from "./db.ts";
+import { db } from "./db.ts";
 
 export const app = new Hono();
 
@@ -45,8 +44,6 @@ app.on(["GET", "POST"], ["/api/auth/*", "/.well-known/*"], async (c) => {
 		return withBridge(unmarked(c.req.raw));
 	if (c.req.path === "/api/auth/device" && c.req.method === "GET")
 		return withRequestOf(c.req.raw);
-	if (c.req.path === "/api/auth/device/approve" && c.req.method === "POST")
-		return withSession(c.req.raw);
 	return auth.handler(c.req.raw);
 });
 
@@ -123,10 +120,9 @@ function line(value: unknown, most: number): string | null {
 
 /**
  * Asks for an OTP, and keeps when and from where, which the OTP's page shows.
- * The scope `bridge` asks to add a bridge to a session the person picks, which only a bridge may,
- * saying what it bridges in `for`. Where the chat is the sender's alone, such as a private chat
- * with a bot, `identity` is the sender's id on the messenger and `identity_name` their name
- * there, which approving links to the person.
+ * The scope `bridge` asks for a bridge's grant, to speak as the person, which only a bridge may,
+ * saying in `for` who asks, in its own words, such as a Telegram user: the person checks it, and
+ * Vibe Together keeps it only as the grant's label.
  */
 async function withRequester(request: Request): Promise<Response> {
 	const from = addressOf(request);
@@ -146,9 +142,8 @@ async function withRequester(request: Request): Promise<Response> {
 		db.prepare("DELETE FROM device_request WHERE requested < ?").run(
 			new Date(Date.now() - 86400_000).toISOString(),
 		);
-		const identity = asks ? line(params.identity, 64) : null;
 		db.prepare(
-			'INSERT OR REPLACE INTO device_request (user_code, requested, "from", device_code, bridge, claim, identity, identity_name) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+			'INSERT OR REPLACE INTO device_request (user_code, requested, "from", device_code, bridge, claim) VALUES (?, ?, ?, ?, ?, ?)',
 		).run(
 			body.user_code,
 			new Date().toISOString(),
@@ -156,8 +151,6 @@ async function withRequester(request: Request): Promise<Response> {
 			tokenHash(body.device_code),
 			asks ? String(params.client_id) : null,
 			asks ? line(params.for, 200) : null,
-			identity,
-			identity && (line(params.identity_name, 100) ?? identity),
 		);
 	}
 	return response;
@@ -181,8 +174,6 @@ type Asked = {
 	from: string;
 	bridge: string | null;
 	claim: string | null;
-	identity: string | null;
-	identity_name: string | null;
 };
 
 function askedOf(userCode: unknown): Asked | undefined {
@@ -192,7 +183,7 @@ function askedOf(userCode: unknown): Asked | undefined {
 			: "";
 	return db
 		.prepare(
-			'SELECT requested, "from", bridge, claim, identity, identity_name FROM device_request WHERE user_code = ?',
+			'SELECT requested, "from", bridge, claim FROM device_request WHERE user_code = ?',
 		)
 		.get(code) as Asked | undefined;
 }
@@ -209,108 +200,12 @@ async function withRequestOf(request: Request): Promise<Response> {
 		requested: asked.requested,
 		from: asked.from,
 		bridge: asked.bridge !== null,
-		...(asked.bridge !== null && {
-			for: asked.claim,
-			identity: asked.identity_name,
-		}),
+		...(asked.bridge !== null && { for: asked.claim }),
 	};
 	return new Response(JSON.stringify({ ...body, ...requestOf }), {
 		status: response.status,
 		headers,
 	});
-}
-
-/** The most bridges one person adds, over all their sessions. */
-const maxBridges = 20;
-
-/**
- * Approves an OTP. A bridge's needs `session`, the id of a session of the person's groups, which
- * the bridge is added to, once in each session per person; approving it also links the sender's
- * identity where the bridge named one, from whoever had it linked before.
- */
-async function withSession(request: Request): Promise<Response> {
-	const params = await paramsOf(request);
-	const asked = askedOf(params.userCode);
-	if (!asked?.bridge) return auth.handler(request);
-	if (params.session === undefined)
-		return Response.json(
-			{
-				error: "invalid_request",
-				error_description: "session: pick the session the bridge is added to.",
-			},
-			{ status: 400 },
-		);
-	const caller = await callerOf(request.headers);
-	if (!caller) return auth.handler(request);
-	const session = db
-		.prepare(
-			`SELECT s.id, p."group" AS "group" FROM owned_session s JOIN project p ON p.id = s.project WHERE s.id = ?`,
-		)
-		.get(String(params.session)) as { id: string; group: string } | undefined;
-	if (!session || !isMember(session.group, caller.id))
-		return Response.json(
-			{ error: "invalid_request", error_description: "No such session." },
-			{ status: 404 },
-		);
-	const bridges = db
-		.prepare(
-			"SELECT bridge FROM session WHERE userId = ? AND bridge IS NOT NULL AND agent = ?",
-		)
-		.all(caller.id, asked.bridge) as { bridge: string }[];
-	if (bridges.some((b) => b.bridge === session.id))
-		return Response.json(
-			{
-				error: "invalid_request",
-				error_description: `You added ${asked.bridge} to this session already: remove it from the session first, or pick another.`,
-			},
-			{ status: 409 },
-		);
-	if (
-		(
-			db
-				.prepare(
-					"SELECT count(*) AS n FROM session WHERE userId = ? AND bridge IS NOT NULL",
-				)
-				.get(caller.id) as { n: number }
-		).n >= maxBridges
-	)
-		return Response.json(
-			{
-				error: "invalid_request",
-				error_description: `A person adds at most ${maxBridges} bridges: remove one first.`,
-			},
-			{ status: 403 },
-		);
-	const code = String(params.userCode)
-		.replace(/[^A-Za-z0-9]/g, "")
-		.toUpperCase();
-	db.prepare("UPDATE device_request SET session = ? WHERE user_code = ?").run(
-		session.id,
-		code,
-	);
-	const headers = new Headers(request.headers);
-	headers.set("content-type", "application/json");
-	headers.delete("content-length");
-	const response = await auth.handler(
-		new Request(request.url, {
-			method: "POST",
-			headers,
-			body: JSON.stringify({ userCode: params.userCode }),
-		}),
-	);
-	if (response.ok && asked.identity)
-		db.prepare(
-			`INSERT INTO identity (id, bridge, external, user, name, created) VALUES (?, ?, ?, ?, ?, ?)
-			 ON CONFLICT (bridge, external) DO UPDATE SET user = excluded.user, name = excluded.name, created = excluded.created`,
-		).run(
-			newId("i"),
-			asked.bridge,
-			asked.identity,
-			caller.id,
-			asked.identity_name ?? asked.identity,
-			new Date().toISOString(),
-		);
-	return response;
 }
 
 app.route("/api", api);

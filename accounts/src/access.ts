@@ -199,15 +199,11 @@ access.post("/read", async (c) => {
 			403,
 		);
 	if (caller?.bridge) {
-		const owned = sessionBySecret(session);
-		if (!owned || owned.id !== caller.bridge.session)
-			return c.text("This bridge was added to another session.", 403);
-		if (!isMember(owned.group, caller.id))
-			return c.text(
-				`${caller.login} is no member of this session's group.`,
-				403,
-			);
-		return c.json({ account: caller.login });
+		const refused = bridgeRefusal(
+			{ ...caller, bridge: caller.bridge },
+			sessionBySecret(session),
+		);
+		return refused ? c.text(refused, 403) : c.json({ account: caller.login });
 	}
 	const dm = dmBySecret(session);
 	if (dm) {
@@ -229,11 +225,31 @@ access.post("/read", async (c) => {
 });
 
 /**
- * Whether a bridge's credential lets it in, which only its own session does, while the person who
- * added it is a member of the session's group. A bridge is no participant: it reads the session
- * apart, and joins only as the people it carries, Luis's decision (2026-11-11). Each is a member of
- * the group who linked their identity on the bridge's messenger, under their own name, or anyone
- * else there, unverified, under the messenger's, such as `telegram/<name>`. As a JSON body and status.
+ * Why a bridge's grant doesn't reach a session, or nothing where it does: only a session the bridge
+ * mirrors a room onto, added by any member of its group, while the grant's person is a member too.
+ */
+function bridgeRefusal(
+	caller: Caller & { bridge: NonNullable<Caller["bridge"]> },
+	owned: Session | undefined,
+): string | undefined {
+	if (
+		!owned ||
+		!db
+			.prepare("SELECT 1 FROM bridge_room WHERE session = ? AND bridge = ?")
+			.get(owned.id, caller.bridge.name)
+	)
+		return `${caller.bridge.name} mirrors no room onto this session.`;
+	if (!isMember(owned.group, caller.id))
+		return `${caller.login} is no member of this session's group.`;
+	return undefined;
+}
+
+/**
+ * Whether a bridge's grant lets it in. A bridge is no participant: it reads the session apart, and
+ * joins only as the people it carries, Luis's decision (2026-11-11): the grant's person under their
+ * own name, or anyone else on its messenger, unverified, under the messenger's, such as
+ * `telegram/<name>`. Which messenger user is which account the bridge alone knows, Luis's decision
+ * (2026-11-11). As a JSON body and status.
  */
 function bridgeJoin(
 	caller: Caller & { bridge: NonNullable<Caller["bridge"]> },
@@ -241,39 +257,26 @@ function bridgeJoin(
 	name: string,
 ): [object | string, 200 | 403] {
 	const owned = sessionBySecret(session);
-	if (!owned || owned.id !== caller.bridge.session)
-		return ["This bridge was added to another session.", 403];
-	if (!isMember(owned.group, caller.id))
-		return [`${caller.login} is no member of this session's group.`, 403];
+	const refused = bridgeRefusal(caller, owned);
+	if (refused || !owned) return [refused ?? "No such session.", 403];
 	const messenger = config.bridges.get(caller.bridge.name)?.messenger;
 	const [first, second, ...rest] = name.split("/");
-	let account: string | null;
-	if (
+	const unverified =
 		messenger &&
 		first === messenger &&
 		second !== undefined &&
 		isNamePart(second) &&
-		!rest.length
-	)
-		account = null;
-	else {
-		const person = db
-			.prepare(
-				"SELECT u.id FROM identity i JOIN user u ON u.id = i.user WHERE i.bridge = ? AND u.login = ?",
-			)
-			.get(caller.bridge.name, name) as { id: string } | undefined;
-		if (!person || !isMember(owned.group, person.id))
-			return [
-				`This bridge joins as a member of the session's group who linked their identity on it${
-					messenger ? `, or as ${messenger}/<name>` : ""
-				}.`,
-				403,
-			];
-		account = name;
-	}
+		!rest.length;
+	if (!unverified && name !== caller.login)
+		return [
+			`A bridge joins as the person whose grant it uses, ${caller.login}${
+				messenger ? `, or as ${messenger}/<name>` : ""
+			}.`,
+			403,
+		];
 	return [
 		{
-			account,
+			account: unverified ? null : name,
 			...(caller.credential && {
 				grant: grantOf(caller.credential, session, name),
 			}),

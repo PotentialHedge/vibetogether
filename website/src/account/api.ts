@@ -94,31 +94,15 @@ export type Token = {
 	created: string;
 };
 
-/** A bridge added to a session, such as messagent for a Telegram chat, by a
- * member who approved its OTP. */
+/** A bridge the person let speak as them, such as messagent for Telegram, by
+ * approving its OTP, with the rooms it mirrors onto sessions by it. */
 export type Bridge = {
 	id: string;
 	/** Which bridge, such as `messagent`. */
 	bridge: string;
-	/** Who added it. */
-	by: string;
-	/** What the bridge said it bridges as it asked to be added, in its own words. */
+	/** Who the bridge said asked, in its own words. */
 	for: string | null;
-	/** What the bridge says of its room now. */
-	about: string | null;
-	session: Named;
-	created: string;
-};
-
-/** The person's account on a bridge's messenger, such as their Telegram
- * account, which the bridges carry as them. */
-export type Identity = {
-	id: string;
-	bridge: string;
-	/** Its id there, such as a Telegram id. */
-	external: string;
-	/** What it was called as it was linked. */
-	name: string;
+	rooms: { id: string; session: Named; about: string | null }[];
 	created: string;
 };
 
@@ -136,14 +120,11 @@ export type Device = {
 	requested?: string;
 	/** Where it was asked from: an IP address or a country. */
 	from?: string;
-	/** Whether a bridge asks to be added to a session, rather than a machine
+	/** Whether a bridge asks to speak as the person, rather than a machine
 	 * for its agents. */
 	bridge?: boolean;
-	/** What the bridge says it bridges, in its own words. */
+	/** Who the bridge says asks, in its own words. */
 	for?: string | null;
-	/** The sender's account on the bridge's messenger, where the chat is theirs
-	 * alone, which approving links to the person. */
-	identity?: string | null;
 };
 
 export class Unauthorized extends Error {}
@@ -237,19 +218,9 @@ const live = {
 	mint: (name: string) => call<Minted>("POST", "api/tokens", { name }),
 	revoke: (id: string) =>
 		call<void>("DELETE", `api/tokens/${encodeURIComponent(id)}`),
-	bridges: (session: string) =>
-		call<Bridge[]>(
-			"GET",
-			`api/sessions/${encodeURIComponent(session)}/bridges`,
-		),
-	removeBridge: (session: string, id: string) =>
-		call<void>(
-			"DELETE",
-			`api/sessions/${encodeURIComponent(session)}/bridges/${encodeURIComponent(id)}`,
-		),
-	identities: () => call<Identity[]>("GET", "api/identities"),
-	unlinkIdentity: (id: string) =>
-		call<void>("DELETE", `api/identities/${encodeURIComponent(id)}`),
+	bridges: () => call<Bridge[]>("GET", "api/bridges"),
+	revokeBridge: (id: string) =>
+		call<void>("DELETE", `api/bridges/${encodeURIComponent(id)}`),
 	/** Returns the address to go to, GitHub's. `oauthQuery` is the signed
 	 * query an MCP client's authorization sent the person here with, so that
 	 * it goes on after GitHub. */
@@ -277,12 +248,8 @@ const live = {
 			"GET",
 			`api/auth/device?user_code=${encodeURIComponent(code)}`,
 		),
-	/** Approves an OTP; a bridge's goes into `session`. */
-	approve: (code: string, session?: string) =>
-		call<void>("POST", "api/auth/device/approve", {
-			userCode: code,
-			...(session && { session }),
-		}),
+	approve: (code: string) =>
+		call<void>("POST", "api/auth/device/approve", { userCode: code }),
 	deny: (code: string) =>
 		call<void>("POST", "api/auth/device/deny", { userCode: code }),
 	/** Answers an MCP client's request for access, by the signed query the
@@ -403,19 +370,14 @@ function mock(): Api {
 		{
 			id: "b_1",
 			bridge: "messagent",
-			by: "luiswirth",
-			for: "Telegram private chat with 123456789, @luiswirth, named Luis",
-			about: "Luis Wirth's private Telegram chat",
-			session: { id: "s_0", name: "Telegram" },
-			created: "2026-11-09T21:40:00Z",
-		},
-	];
-	let identities: Identity[] = [
-		{
-			id: "i_1",
-			bridge: "messagent",
-			external: "123456789",
-			name: "@luiswirth, Luis",
+			for: "Telegram user 123456789, @luiswirth, named Luis",
+			rooms: [
+				{
+					id: "r_1",
+					session: { id: "s_0", name: "Telegram" },
+					about: "Luis Wirth's private Telegram chat",
+				},
+			],
 			created: "2026-11-09T21:40:00Z",
 		},
 	];
@@ -590,14 +552,9 @@ function mock(): Api {
 		revoke: async (id) => {
 			tokens = tokens.filter((token) => token.id !== id);
 		},
-		bridges: async (session) =>
-			bridges.filter((bridge) => bridge.session.id === session),
-		removeBridge: async (_session, id) => {
+		bridges: async () => bridges,
+		revokeBridge: async (id) => {
 			bridges = bridges.filter((bridge) => bridge.id !== id);
-		},
-		identities: async () => identities,
-		unlinkIdentity: async (id) => {
-			identities = identities.filter((identity) => identity.id !== id);
 		},
 		signIn: async () => `${page("account/")}#demo`,
 		signOut: done,

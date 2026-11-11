@@ -1,5 +1,6 @@
-/** The account's settings, one tab each: friends, tokens, bridges, linked
- * identities, what agents changed, and signing out and deleting the account. */
+/** The account's settings, one tab each: friends, tokens, the bridges that
+ * speak as the person, what agents changed, and signing out and deleting the
+ * account. */
 
 import {
 	ArrowLeft,
@@ -10,7 +11,6 @@ import {
 	LogOut,
 	Monitor,
 	Plug,
-	UserCheck,
 	Users,
 } from "lucide-react";
 import { type ReactNode, useCallback, useEffect, useState } from "react";
@@ -20,7 +20,6 @@ import {
 	type Bridge,
 	demo,
 	type Friend,
-	type Identity,
 	type Me,
 	type Minted,
 	type Token,
@@ -37,24 +36,18 @@ type State = {
 	friends: Friend[];
 	tokens: Token[];
 	bridges: Bridge[];
-	identities: Identity[];
 	activity: Activity[];
 };
 
 async function load(): Promise<State> {
-	const [me, sessions, friends, tokens, identities, activity] =
-		await Promise.all([
-			api.me(),
-			api.sessions(),
-			api.friends(),
-			api.tokens(),
-			api.identities(),
-			api.activity(),
-		]);
-	const bridges = (
-		await Promise.all(sessions.map((session) => api.bridges(session.id)))
-	).flat();
-	return { me, friends, tokens, bridges, identities, activity };
+	const [me, friends, tokens, bridges, activity] = await Promise.all([
+		api.me(),
+		api.friends(),
+		api.tokens(),
+		api.bridges(),
+		api.activity(),
+	]);
+	return { me, friends, tokens, bridges, activity };
 }
 
 const date = new Intl.DateTimeFormat(undefined, { dateStyle: "medium" });
@@ -79,7 +72,6 @@ const TABS = [
 	{ id: "friends", label: "Friends", icon: Users },
 	{ id: "tokens", label: "Tokens", icon: KeyRound },
 	{ id: "bridges", label: "Bridges", icon: Cable },
-	{ id: "identities", label: "Linked identities", icon: UserCheck },
 	{ id: "activity", label: "Activity", icon: History },
 	{ id: "account", label: "Account", icon: CircleUser },
 ] as const;
@@ -145,7 +137,7 @@ function Settings({
 	state: State;
 	reload: () => Promise<void>;
 }) {
-	const { me, friends, tokens, bridges, identities, activity } = state;
+	const { me, friends, tokens, bridges, activity } = state;
 	const { problem, act } = useActions(reload);
 	const [minted, setMinted] = useState<Minted | null>(null);
 	const [tab, setTab] = useState<Tab>(tabOfAddress);
@@ -325,19 +317,19 @@ function Settings({
 				{tab === "bridges" && (
 					<Pane
 						title="Bridges"
-						line="Chats outside Vibe Together, such as on Telegram, mirrored into your sessions."
+						line="Apps that speak as you, such as Telegram."
 					>
 						<Rows
 							empty={
 								<>
-									None yet. Your agent sets one up from{" "}
+									None yet. Message{" "}
 									<a
 										className="text-foreground underline underline-offset-4"
-										href={page("ecosystem.md")}
+										href="https://t.me/vt_messagent_bot"
 									>
-										ecosystem.md
-									</a>
-									.
+										@vt_messagent_bot
+									</a>{" "}
+									on Telegram.
 								</>
 							}
 						>
@@ -348,11 +340,9 @@ function Settings({
 										<Button
 											variant="ghost"
 											size="sm"
-											onClick={act(() =>
-												api.removeBridge(bridge.session.id, bridge.id),
-											)}
+											onClick={act(() => api.revokeBridge(bridge.id))}
 										>
-											Remove
+											Revoke
 										</Button>
 									}
 								>
@@ -361,49 +351,12 @@ function Settings({
 										className="size-4 shrink-0 text-muted-foreground"
 									/>
 									<Titled
-										title={`${bridge.bridge} in ${bridge.session.name}`}
+										title={`${bridge.bridge} speaks as you`}
 										detail={
-											<>
-												{(bridge.about ?? bridge.for) && (
-													<>{bridge.about ?? bridge.for} · </>
-												)}
-												added by {bridge.by} · since{" "}
-												{date.format(new Date(bridge.created))}
-											</>
+											bridge.rooms.length
+												? `in ${bridge.rooms.map((room) => room.session.name).join(", ")}`
+												: `since ${date.format(new Date(bridge.created))}`
 										}
-									/>
-								</Row>
-							))}
-						</Rows>
-					</Pane>
-				)}
-
-				{tab === "identities" && (
-					<Pane
-						title="Linked identities"
-						line="Your accounts on messengers, which bridges carry as you."
-					>
-						<Rows empty="None yet. Send /start to messagent on Telegram to link yours.">
-							{identities.map((identity) => (
-								<Row
-									key={identity.id}
-									actions={
-										<Button
-											variant="ghost"
-											size="sm"
-											onClick={act(() => api.unlinkIdentity(identity.id))}
-										>
-											Unlink
-										</Button>
-									}
-								>
-									<UserCheck
-										aria-hidden
-										className="size-4 shrink-0 text-muted-foreground"
-									/>
-									<Titled
-										title={identity.name}
-										detail={`id ${identity.external}, through ${identity.bridge} · since ${date.format(new Date(identity.created))}`}
 									/>
 								</Row>
 							))}

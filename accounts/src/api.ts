@@ -2,7 +2,7 @@
  * The service's operations under `/api/`, each declared once (`openapi.ts`).
  * An agent with its person's token does everything the person does on the website, Luis's
  * decision (2026-11-10), but deleting the account; signing in and approving an OTP are Better
- * Auth's, outside these. A bridge's credential reaches only the operations on itself.
+ * Auth's, outside these. A bridge's grant reaches only the operations on itself.
  */
 import { auth } from "./auth.ts";
 import { config } from "./config.ts";
@@ -103,10 +103,10 @@ const Session = z
 					bridge: z
 						.string()
 						.meta({ description: "Which bridge, such as `messagent`." }),
-					by: Login.meta({ description: "Who added it." }),
+					by: Login.meta({ description: "Who had the bridge add it." }),
 					about: z.string().nullable().meta({
 						description:
-							"What the bridge says of the room it bridges, such as a Telegram group and how many are in it: everything said in the session reaches them.",
+							"What the bridge says of the room, such as a Telegram group and how many are in it: everything said in the session reaches them.",
 					}),
 				}),
 			)
@@ -159,35 +159,41 @@ const Bridge = z
 		bridge: z
 			.string()
 			.meta({ description: "Which bridge, such as `messagent`." }),
-		by: Login.meta({ description: "Who added it." }),
 		for: z.string().nullable().meta({
 			description:
-				"What the bridge said it bridges as it asked to be added, in its own words, such as a Telegram chat.",
+				"Who the bridge said asked as the person approved it, in its own words, such as a Telegram user.",
 		}),
-		about: z.string().nullable().meta({
-			description:
-				"What the bridge says of its room now, such as a Telegram group and how many are in it.",
-		}),
-		session: Named("s", "session"),
+		rooms: z
+			.array(
+				z.object({
+					id: Id("r", "room"),
+					session: Named("s", "session"),
+					about: z.string().nullable(),
+				}),
+			)
+			.meta({
+				description:
+					"The rooms it mirrors onto sessions by this grant, oldest first.",
+			}),
 		created: z.string(),
 	})
 	.openapi("Bridge");
 
-const Identity = z
+const Room = z
 	.object({
-		id: Id("i", "identity"),
+		id: Id("r", "room"),
 		bridge: z
 			.string()
 			.meta({ description: "Which bridge, such as `messagent`." }),
-		external: z.string().meta({
-			description: "Its id on the bridge's messenger, such as a Telegram id.",
+		by: Login.meta({ description: "Who had the bridge add it." }),
+		about: z.string().nullable().meta({
+			description:
+				"What the bridge says of the room, such as a Telegram group and how many are in it.",
 		}),
-		name: z
-			.string()
-			.meta({ description: "What it was called as it was linked." }),
+		session: Named("s", "session"),
 		created: z.string(),
 	})
-	.openapi("Identity");
+	.openapi("Room");
 
 const Activity = z
 	.object({
@@ -527,7 +533,7 @@ api.openapi(
 		path: "/me",
 		summary: "Delete the account",
 		description:
-			"Deletes the account with its tokens, the bridges it added, its linked identities and its DMs, and every group it is the last member of, with their projects and sessions; it leaves the other groups.",
+			"Deletes the account with its tokens, its bridges and the rooms they mirror, and its DMs, and every group it is the last member of, with their projects and sessions; it leaves the other groups.",
 		responses: done,
 	}),
 	(c) => {
@@ -1279,37 +1285,92 @@ api.openapi(
 	},
 );
 
-// Bridges: each a credential of Better Auth's, which a member approved with an OTP for one
-// session, and which the session's deletion, the member leaving its group, or removing it ends.
-// An identity is a person's account on a bridge's messenger, linked by an OTP from a chat of
-// theirs alone, through which the bridge carries what they write as them.
+// Bridges: a person's grant to a bridge to speak as them, Better Auth's session row with its
+// `bridge` set, made once by an OTP and revoked like a token; and the rooms the bridge mirrors
+// onto sessions by it. Which messenger user is which account the bridge alone keeps, Luis's
+// decision (2026-11-11), so nothing of the messenger is stored here but the bridge's own words.
 
-type BridgeRow = {
+/** The most rooms one person has bridges mirror, over all their sessions. */
+const maxRooms = 20;
+
+type GrantRow = {
 	id: string;
-	agent: string;
 	bridge: string;
 	claim: string | null;
-	about: string | null;
 	createdAt: string | number;
-	login: string;
-	sessionName: string;
 };
 
-const bridges = `SELECT b.id, b.agent, b.bridge, b.claim, b.createdAt, u.login, s.name AS sessionName, r.about
-	FROM session b JOIN user u ON u.id = b.userId JOIN owned_session s ON s.id = b.bridge
-	LEFT JOIN bridge_room r ON r.session = b.id
-	WHERE b.bridge IS NOT NULL AND b.expiresAt > ?`;
+type RoomRow = {
+	id: string;
+	bridge: string;
+	login: string;
+	about: string | null;
+	session: string;
+	sessionName: string;
+	created: string;
+};
 
-function bridgeJson(row: BridgeRow): z.infer<typeof Bridge> {
+const rooms = `SELECT r.id, r.bridge, u.login, r.about, r.session, s.name AS sessionName, r.created
+	FROM bridge_room r JOIN user u ON u.id = r.user JOIN owned_session s ON s.id = r.session`;
+
+function roomJson(row: RoomRow): z.infer<typeof Room> {
+	return {
+		id: row.id,
+		bridge: row.bridge,
+		by: row.login,
+		about: row.about,
+		session: { id: row.session, name: row.sessionName },
+		created: row.created,
+	};
+}
+
+function grantJson(user: string, row: GrantRow): z.infer<typeof Bridge> {
+	const own = db
+		.prepare(
+			`${rooms} WHERE r.user = ? AND r.bridge = ? ORDER BY r.created, r.rowid`,
+		)
+		.all(user, row.bridge) as RoomRow[];
 	return {
 		id: `b_${row.id}`,
-		bridge: row.agent,
-		by: row.login,
+		bridge: row.bridge,
 		for: row.claim,
-		about: row.about,
-		session: { id: row.bridge, name: row.sessionName },
+		rooms: own.map((r) => ({
+			id: r.id,
+			session: { id: r.session, name: r.sessionName },
+			about: r.about,
+		})),
 		created: iso(row.createdAt),
 	};
+}
+
+function grantsOf(user: string): GrantRow[] {
+	return db
+		.prepare(
+			"SELECT id, bridge, claim, createdAt FROM session WHERE userId = ? AND bridge IS NOT NULL ORDER BY createdAt",
+		)
+		.all(user) as GrantRow[];
+}
+
+/** The caller's own grant, as its credential names it. */
+function ownGrant(caller: {
+	id: string;
+	token?: string;
+}): GrantRow | undefined {
+	return db
+		.prepare(
+			"SELECT id, bridge, claim, createdAt FROM session WHERE id = ? AND userId = ? AND bridge IS NOT NULL",
+		)
+		.get(caller.token?.slice(2) ?? "", caller.id) as GrantRow | undefined;
+}
+
+/** A room the caller's bridge mirrors by the caller's grant. */
+function ownRoom(
+	caller: { id: string; bridge?: { name: string } },
+	id: string,
+): RoomRow | undefined {
+	return db
+		.prepare(`${rooms} WHERE r.id = ? AND r.user = ? AND r.bridge = ?`)
+		.get(id, caller.id, caller.bridge?.name ?? "") as RoomRow | undefined;
 }
 
 api.openapi(
@@ -1318,45 +1379,64 @@ api.openapi(
 		tag: "Bridges",
 		who: "account",
 		method: "get",
-		path: "/sessions/{id}/bridges",
-		summary: "List a session's bridges",
-		description: "The bridges added to a session, oldest first.",
-		request: path({ id: Id("s", "session") }),
+		path: "/bridges",
+		summary: "List the bridges that speak as the person",
+		description:
+			"The bridges the person let speak as them, each with the rooms it mirrors by it, oldest first.",
 		responses: { 200: json(z.array(Bridge), "The bridges.") },
+	}),
+	(c) =>
+		c.json(
+			grantsOf(c.var.caller.id).map((row) => grantJson(c.var.caller.id, row)),
+			200,
+		),
+);
+
+api.openapi(
+	operation({
+		id: "list_session_bridges",
+		tag: "Bridges",
+		who: "account",
+		method: "get",
+		path: "/sessions/{id}/bridges",
+		summary: "List a session's bridged rooms",
+		description:
+			"The rooms outside Vibe Together that bridges mirror onto a session, oldest first.",
+		request: path({ id: Id("s", "session") }),
+		responses: { 200: json(z.array(Room), "The rooms.") },
 	}),
 	(c) => {
 		const session = sessionFor(c.req.valid("param").id, c.var.caller.id);
 		if (!session) return c.text("No such session.", 404);
 		const rows = db
-			.prepare(`${bridges} AND b.bridge = ? ORDER BY b.createdAt`)
-			.all(Date.now(), session.id) as BridgeRow[];
-		return c.json(rows.map(bridgeJson), 200);
+			.prepare(`${rooms} WHERE r.session = ? ORDER BY r.created, r.rowid`)
+			.all(session.id) as RoomRow[];
+		return c.json(rows.map(roomJson), 200);
 	},
 );
 
 api.openapi(
 	operation({
-		id: "remove_bridge",
+		id: "remove_session_bridge",
 		tag: "Bridges",
 		who: "account",
 		method: "delete",
-		path: "/sessions/{id}/bridges/{bridge}",
-		summary: "Remove a bridge from a session",
+		path: "/sessions/{id}/bridges/{room}",
+		summary: "Remove a bridged room from a session",
 		description:
-			"Removes a bridge from a session: the relay cuts it off within a few seconds, and it leaves the room it bridged. Any member of the session's group does this.",
-		request: path({ id: Id("s", "session"), bridge: Id("b", "bridge") }),
+			"Stops a bridge mirroring a room onto a session: the relay cuts it off within a few seconds, and it leaves the room. Any member of the session's group does this.",
+		request: path({ id: Id("s", "session"), room: Id("r", "room") }),
 		responses: done,
 	}),
 	(c) => {
-		const { id, bridge } = c.req.valid("param");
+		const { id, room } = c.req.valid("param");
 		const session = sessionFor(id, c.var.caller.id);
 		if (!session) return c.text("No such session.", 404);
-		const removed = db
-			.prepare("DELETE FROM session WHERE id = ? AND bridge = ?")
-			.run(bridge.slice(2), session.id).changes;
-		return bridge.startsWith("b_") && removed
+		return db
+			.prepare("DELETE FROM bridge_room WHERE id = ? AND session = ?")
+			.run(room, session.id).changes
 			? c.body(null, 204)
-			: c.text("No such bridge.", 404);
+			: c.text("No such room.", 404);
 	},
 );
 
@@ -1367,25 +1447,24 @@ api.openapi(
 		who: "bridge",
 		method: "get",
 		path: "/bridges/self",
-		summary: "Show the bridge in use",
+		summary: "Show the grant in use",
 		description:
-			"The bridge whose credential the request carries, with the session it was added to and its address. For bridges only.",
+			"The grant the request carries: whose it is, and the rooms the bridge mirrors by it. For bridges only.",
 		responses: {
 			200: json(
-				Bridge.extend({ session: Session }),
-				"The bridge and its session.",
+				Bridge.extend({ account: Login }),
+				"The grant, with its person.",
 			),
 		},
 	}),
-	async (c) => {
-		const { id, token, bridge } = c.var.caller;
-		const row = db
-			.prepare(`${bridges} AND b.id = ?`)
-			.get(Date.now(), token?.slice(2) ?? "") as BridgeRow | undefined;
-		const session = bridge && sessionFor(bridge.session, id);
-		if (!row || !session) return c.text("No such bridge.", 404);
+	(c) => {
+		const grant = ownGrant(c.var.caller);
+		if (!grant) return c.text("No such bridge.", 404);
 		return c.json(
-			{ ...bridgeJson(row), session: await sessionJson(session) },
+			{
+				...grantJson(c.var.caller.id, grant),
+				account: c.var.caller.login,
+			},
 			200,
 		);
 	},
@@ -1393,106 +1472,198 @@ api.openapi(
 
 api.openapi(
 	operation({
-		id: "describe_own_bridge",
+		id: "revoke_own_bridge",
 		tag: "Bridges",
 		who: "bridge",
-		method: "patch",
+		method: "delete",
 		path: "/bridges/self",
-		summary: "Say what the bridge's room is",
+		summary: "Revoke the grant in use",
 		description:
-			"Sets what the bridge in use says of the room it bridges, such as a Telegram group and how many are in it, which its session's info shows in place of a message in the session. For bridges only.",
-		request: body(z.object({ about: z.string().min(1).max(500) })),
+			"Revokes the grant the request carries, with the rooms the bridge mirrors by it, as a bridge does when its person unlinks there. For bridges only.",
 		responses: done,
 	}),
 	(c) => {
-		const { id, token } = c.var.caller;
-		const bridge = token?.slice(2) ?? "";
-		const own = db
-			.prepare(
-				"SELECT 1 FROM session WHERE id = ? AND userId = ? AND bridge IS NOT NULL",
-			)
-			.get(bridge, id);
-		if (!own) return c.text("No such bridge.", 404);
-		db.prepare(
-			"INSERT INTO bridge_room (session, about) VALUES (?, ?) ON CONFLICT (session) DO UPDATE SET about = excluded.about",
-		).run(bridge, c.req.valid("json").about);
+		const grant = ownGrant(c.var.caller);
+		if (!grant) return c.text("No such bridge.", 404);
+		db.prepare("DELETE FROM session WHERE id = ?").run(grant.id);
 		return c.body(null, 204);
 	},
 );
 
 api.openapi(
 	operation({
-		id: "remove_own_bridge",
+		id: "list_own_sessions",
 		tag: "Bridges",
 		who: "bridge",
-		method: "delete",
-		path: "/bridges/self",
-		summary: "Remove the bridge in use",
-		description:
-			"Removes the bridge whose credential the request carries from its session, as a bridge does once its room is gone or asks it to stop. For bridges only.",
-		responses: done,
-	}),
-	(c) => {
-		const { id, token } = c.var.caller;
-		const removed = db
-			.prepare(
-				"DELETE FROM session WHERE id = ? AND userId = ? AND bridge IS NOT NULL",
-			)
-			.run(token?.slice(2) ?? "", id).changes;
-		return removed ? c.body(null, 204) : c.text("No such bridge.", 404);
-	},
-);
-
-type IdentityRow = {
-	id: string;
-	bridge: string;
-	external: string;
-	name: string;
-	created: string;
-};
-
-api.openapi(
-	operation({
-		id: "list_identities",
-		tag: "Bridges",
-		who: "account",
 		method: "get",
-		path: "/identities",
-		summary: "List the linked identities",
+		path: "/bridges/self/sessions",
+		summary: "List the sessions the person may bridge",
 		description:
-			"The person's accounts on bridges' messengers, such as their Telegram account, which the bridges carry as them, oldest first.",
-		responses: { 200: json(z.array(Identity), "The identities.") },
+			"The sessions of the person's groups, which a room may be mirrored onto. For bridges only.",
+		responses: { 200: json(z.array(Session), "The sessions.") },
 	}),
-	(c) =>
+	async (c) =>
 		c.json(
-			db
-				.prepare(
-					"SELECT id, bridge, external, name, created FROM identity WHERE user = ? ORDER BY created",
-				)
-				.all(c.var.caller.id) as IdentityRow[],
+			await Promise.all(sessionsOf(c.var.caller.id).map(sessionJson)),
 			200,
 		),
 );
 
+const OwnRoom = Room.extend({ session: Session });
+
+async function ownRoomJson(
+	caller: { id: string },
+	row: RoomRow,
+): Promise<z.infer<typeof OwnRoom> | undefined> {
+	const session = sessionFor(row.session, caller.id);
+	return session && { ...roomJson(row), session: await sessionJson(session) };
+}
+
 api.openapi(
 	operation({
-		id: "unlink_identity",
+		id: "add_room",
+		tag: "Bridges",
+		who: "bridge",
+		method: "post",
+		path: "/bridges/self/rooms",
+		summary: "Mirror a room onto a session",
+		description:
+			"Has the bridge mirror a room of its own, such as a Telegram chat, onto a session of the person's groups, which the person picked in the room, while they stay a member of its group. For bridges only.",
+		request: body(
+			z.object({
+				session: Id("s", "session"),
+				about: z.string().min(1).max(500).optional(),
+			}),
+		),
+		responses: { 201: json(OwnRoom, "The room, with its session.") },
+	}),
+	async (c) => {
+		const caller = c.var.caller;
+		const input = c.req.valid("json");
+		const session = sessionFor(input.session, caller.id);
+		if (!session) return c.text("No such session.", 404);
+		if (
+			count(
+				"SELECT count(*) AS n FROM bridge_room WHERE user = ?",
+				caller.id,
+			) >= maxRooms
+		)
+			return c.text(
+				`A person has bridges mirror at most ${maxRooms} rooms: remove one first.`,
+				403,
+			);
+		const id = newId("r");
+		db.prepare(
+			"INSERT INTO bridge_room (id, session, bridge, user, about, created) VALUES (?, ?, ?, ?, ?, ?)",
+		).run(
+			id,
+			session.id,
+			caller.bridge?.name ?? "",
+			caller.id,
+			input.about ?? null,
+			new Date().toISOString(),
+		);
+		const row = ownRoom(caller, id) as RoomRow;
+		return c.json(
+			(await ownRoomJson(caller, row)) as z.infer<typeof OwnRoom>,
+			201,
+		);
+	},
+);
+
+api.openapi(
+	operation({
+		id: "show_room",
+		tag: "Bridges",
+		who: "bridge",
+		method: "get",
+		path: "/bridges/self/rooms/{id}",
+		summary: "Show a room",
+		description:
+			"A room the bridge mirrors by the grant in use, with its session and its address, while it still does. For bridges only.",
+		request: path({ id: Id("r", "room") }),
+		responses: { 200: json(OwnRoom, "The room, with its session.") },
+	}),
+	async (c) => {
+		const row = ownRoom(c.var.caller, c.req.valid("param").id);
+		const room = row && (await ownRoomJson(c.var.caller, row));
+		return room ? c.json(room, 200) : c.text("No such room.", 404);
+	},
+);
+
+api.openapi(
+	operation({
+		id: "describe_room",
+		tag: "Bridges",
+		who: "bridge",
+		method: "patch",
+		path: "/bridges/self/rooms/{id}",
+		summary: "Say what a room is",
+		description:
+			"Sets what the bridge says of a room, such as a Telegram group and how many are in it, which its session's info shows in place of a message in the session. For bridges only.",
+		request: {
+			...path({ id: Id("r", "room") }),
+			...body(z.object({ about: z.string().min(1).max(500) })),
+		},
+		responses: done,
+	}),
+	(c) => {
+		const row = ownRoom(c.var.caller, c.req.valid("param").id);
+		if (!row) return c.text("No such room.", 404);
+		db.prepare("UPDATE bridge_room SET about = ? WHERE id = ?").run(
+			c.req.valid("json").about,
+			row.id,
+		);
+		return c.body(null, 204);
+	},
+);
+
+api.openapi(
+	operation({
+		id: "remove_room",
+		tag: "Bridges",
+		who: "bridge",
+		method: "delete",
+		path: "/bridges/self/rooms/{id}",
+		summary: "Stop mirroring a room",
+		description:
+			"Stops the bridge mirroring a room onto its session, as a bridge does once the room is gone or asks it to stop. For bridges only.",
+		request: path({ id: Id("r", "room") }),
+		responses: done,
+	}),
+	(c) => {
+		const row = ownRoom(c.var.caller, c.req.valid("param").id);
+		if (!row) return c.text("No such room.", 404);
+		db.prepare("DELETE FROM bridge_room WHERE id = ?").run(row.id);
+		return c.body(null, 204);
+	},
+);
+
+// After `/bridges/self`, which `{id}` would match.
+api.openapi(
+	operation({
+		id: "revoke_bridge",
 		tag: "Bridges",
 		who: "account",
 		method: "delete",
-		path: "/identities/{id}",
-		summary: "Unlink an identity",
+		path: "/bridges/{id}",
+		summary: "Revoke a bridge",
 		description:
-			"Unlinks one of the person's accounts on a bridge's messenger: the bridges carry what it writes as anyone else's, unverified, from then on.",
-		request: path({ id: Id("i", "identity") }),
+			"Revokes a bridge's grant to speak as the person: the rooms it mirrors by it go, and the relay cuts off what it carries as them within a few seconds. The bridge carries what they write from then on as anyone else's, unverified.",
+		request: path({ id: Id("b", "bridge") }),
 		responses: done,
 	}),
-	(c) =>
-		db
-			.prepare("DELETE FROM identity WHERE id = ? AND user = ?")
-			.run(c.req.valid("param").id, c.var.caller.id).changes
+	(c) => {
+		const id = c.req.valid("param").id;
+		return id.startsWith("b_") &&
+			db
+				.prepare(
+					"DELETE FROM session WHERE id = ? AND userId = ? AND bridge IS NOT NULL",
+				)
+				.run(id.slice(2), c.var.caller.id).changes
 			? c.body(null, 204)
-			: c.text("No such identity.", 404),
+			: c.text("No such bridge.", 404);
+	},
 );
 
 inviteOperations(api, config.url);

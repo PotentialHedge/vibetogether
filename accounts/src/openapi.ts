@@ -26,7 +26,7 @@ export type Env = { Variables: { caller: Caller; bridgeOnly?: boolean } };
  * - `anyone`, without signing in;
  * - `account`, the account, by a token or the person signed in in the browser;
  * - `browser`, the person alone, signed in in the browser, by the cookie: a token gets 403;
- * - `bridge`, a bridge, by its credential, which reaches nothing else.
+ * - `bridge`, a bridge, by a person's grant, which reaches nothing else.
  * It sets both the operation's security in the document and the check, so the two can't differ.
  */
 export type Who = "anyone" | "account" | "browser" | "bridge";
@@ -53,13 +53,13 @@ const signedIn: MiddlewareHandler<Env> = async (c, next) => {
 			"Sign in, or send a token as Authorization: Bearer <token>.",
 			401,
 		);
-	// A bridge's credential is for its own session, which it reaches through the relay, and for
-	// the operations on itself alone.
+	// A bridge's grant is for the sessions it mirrors rooms onto, which it reaches through the
+	// relay, and for the operations on itself alone.
 	if (Boolean(caller.bridge) !== bridge)
 		return bridge
-			? c.text("The request carries no bridge's credential.", 404)
+			? c.text("The request carries no bridge's grant.", 404)
 			: c.text(
-					"A bridge reaches only its own session, through the relay.",
+					"A bridge reaches only its rooms' sessions, through the relay, and /api/bridges/self.",
 					403,
 				);
 	c.set("caller", caller);
@@ -164,7 +164,7 @@ export const tags = {
 	"Getting a token":
 		"An agent with a shell gets its machine's token with an OTP, RFC 8628's device authorization: it asks for an OTP, gives its person the link in `verification_uri_complete`, where they sign in and approve it, and meanwhile asks for the token every `interval` seconds. `<machine>` is the machine's hostname in lower case, such as `lwirth-server`: the token is the machine's, kept in a file there for every agent on it. An MCP client gets its token on its own, by OAuth.",
 	Bridges:
-		"A bridge mirrors a room outside Vibe Together and a session onto each other, such as messagent, which bridges a Telegram chat: what is said in either reaches the other. A member adds one to a session by approving its OTP, signed in, and picking the session. It joins as `<name>/<bridge>`, such as `luiswirth/messagent`, and reaches only that session, while that member is in its group; any member removes it. A person who linked their identity on the bridge's messenger, by an OTP from a chat of theirs alone, speaks through it as themselves; everyone else's messages come from the bridge, marked unverified.",
+		"A bridge mirrors rooms outside Vibe Together and sessions onto each other, such as messagent, which bridges Telegram chats: what is said in either reaches the other. A person lets a bridge speak as them once, by approving its OTP, signed in; the bridge alone keeps which of its messenger's users they are, and they manage it there, such as in messagent's Telegram bot. By that grant the bridge mirrors a room onto a session of the person's groups, while they are a member of it; any member removes the room. The people it carries speak as themselves, under their names, and everyone else in the room under the messenger's name, such as `telegram/<name>`, unverified. The person revokes the grant on the account page, as a token is revoked.",
 } as const;
 
 /** A request's body that isn't what the operation takes: one sentence for each thing wrong. */
@@ -193,7 +193,7 @@ export function documentOf(api: OpenAPIHono<Env>) {
 		type: "http",
 		scheme: "bearer",
 		description:
-			"A bridge's credential, which a person approved for one session, as `Authorization: Bearer <credential>`.",
+			"A person's grant to a bridge, which they approved by an OTP, as `Authorization: Bearer <grant>`.",
 	});
 	api.openAPIRegistry.registerComponent("securitySchemes", "browser", {
 		type: "apiKey",

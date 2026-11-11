@@ -27,22 +27,20 @@ It lasts until it is revoked; a machine's also ends after 90 days unused.
 
 ## Bridges
 
-A bridge mirrors a room outside Vibe Together and a session onto each other, such as messagent for a Telegram chat, Luis's decisions (2026-11-10): it owns no session, and is added to one, as a client joins one.
-Its credential is no token: tokens only connect agents.
-It asks for an OTP with `"scope":"bridge"`, its `client_secret`, and in `for` what it bridges, in its own words;
-where the chat is one person's alone, such as a private chat with a bot, also with `identity`, the sender's id on its messenger, and `identity_name`.
+A bridge mirrors rooms outside Vibe Together and sessions onto each other, such as messagent for Telegram chats, Luis's decisions (2026-11-10): it owns no session, and is added to one, as a client joins one.
+Vibe Together knows nothing of a bridge's messenger, Luis's decision (2026-11-11): a person grants a bridge to speak as them, once by OTP, and the bridge alone keeps which of its messenger's users is which account.
+A grant is no token: tokens only connect agents.
+The bridge asks for an OTP with `"scope":"bridge"`, its `client_secret`, and in `for` who asks, in its own words, such as a Telegram user, which the grant keeps only as its label.
 Only a bridge the service knows, by its `client_id` and `client_secret` (the module's `bridgesFile`), may ask, and it gives its secret again when it redeems the OTP.
-The OTP's page shows `bridge: true`, `for`, and `identity` as the identity's name; approving it takes `"session":"<id>"`, a session of the approver's groups, once per bridge, person and session, at most 20 per person.
-Approving one with an identity links that identity to the approver, from whoever had it before.
+The OTP's page shows `bridge: true` and `for`; approving it is as for any OTP.
+A person holds one grant per bridge: a new one replaces the one before, and keeps its rooms.
 
-The credential comes as `access_token`, and goes as `Authorization: Bearer <credential>`.
-It reads only that session, while its approver is in the session's group, and is no participant there: it joins only as the people it carries, Luis's decision (2026-11-11).
-Each is a member of the group who linked an identity on that bridge, under their own name, or anyone else it carries, under its messenger's name, such as `telegram/<name>`, unverified.
+The grant comes as `access_token`, and goes as `Authorization: Bearer <grant>`, to `/api/bridges/self` and what is under it alone.
+By it the bridge lists the person's sessions and mirrors a room onto one of them (`POST /api/bridges/self/rooms`), at most 20 rooms per person; a room's `about`, what the bridge says of it, such as a Telegram group and how many are in it, is the session's info, shown in the session's `bridges`, not an entry.
+A room lasts until its session is deleted, its person leaves the session's group or revokes the grant, a member removes it, or the bridge removes it.
+The bridge reads a session it mirrors a room onto with the grant of any member who has one, and is no participant there: it joins only as the people it carries, Luis's decision (2026-11-11): the grant's person under their own name, or anyone else it carries under its messenger's name, such as `telegram/<name>`, unverified.
 No other caller joins under a bridge's messenger's name, so that no account passes as a person a bridge carries.
 A bridge's messenger is the third field of its line in `bridgesFile`, `<client_id> <sha256 of the secret> <messenger>`.
-What it says of its room, such as a Telegram group and how many are in it, is the session's info, set with `PATCH /api/bridges/self` and shown in the session's `bridges`, not an entry.
-It reaches no operation but those on itself, `/api/bridges/self`.
-It lasts until the session is deleted, its approver leaves the group, a member removes it, or it removes itself.
 
 ## Signing in
 
@@ -52,7 +50,7 @@ These are Better Auth's own endpoints, under `/api/auth/`; the account page call
 - Sign out: `POST /api/auth/sign-out`.
 - The sign-in itself: `GET /api/auth/get-session`, whose `session.token` a page of the site joins a session with, as one of the person's, `<name>/<part>`.
 - The OTP: `GET /api/auth/device?user_code=<code>` claims it for the signed-in caller, and returns the machine or bridge that asks as `client_id`, and when and from which address it asked as `requested` and `from`.
-  Then `POST /api/auth/device/approve` or `/api/auth/device/deny` with `{"userCode":"<code>"}`, and for a bridge's `"session":"<id>"` too.
+  Then `POST /api/auth/device/approve` or `/api/auth/device/deny` with `{"userCode":"<code>"}`.
   The page is `/account/device/?user_code=<code>`.
 - OAuth, for MCP clients: the authorization server's endpoints are under `/api/auth/oauth2/`, its metadata at `/.well-known/oauth-authorization-server/api/auth`.
   It sends the person to two pages, each with a signed query, which the page passes on whole as `oauth_query` (the query string without its `?`):
@@ -74,8 +72,8 @@ The relay asks this service, as its access service, on the loopback only:
 - `POST /agentwire/join` with `{"session":"<the secret in the address>","name":"<name>","token":"<token>"|null,"owned":true|false}`:
   200 with `{"account":"<name>"|null}` where the name may take part, 403 with one line of text where not.
   A token, where one is given, must be valid, and the name one of that person's agents', `<name>/<agent>`, never the person's own; `account` is that person's name.
-  A bridge's credential joins as Bridges says, and `account` is the name it joins as where that is a person, else `null`.
-  A name under a bridge's messenger's, such as `telegram/<name>`, takes that bridge's credential alone.
+  A bridge's grant joins as Bridges says, and `account` is the name it joins as where that is a person, else `null`.
+  A name under a bridge's messenger's, such as `telegram/<name>`, takes that bridge's grants alone.
   For a session accounts own, the answer also gives `about`, `{"project":"<name>","repos":[…],"bridges":[…]}`, which the relay passes on in its join answer, so the participant learns its project's repositories, and whom what it says reaches through the session's bridges.
   With a token, the answer also gives `grant`, which the relay keeps and asks with in place of the token: it works only for that name in that session, only here, and only while the token does.
   A session accounts own takes only a token of one of its group's members, checked through its project to its group each time; a DM only a token of one of its two, while they are friends; a session no account owns, which is the relay's alone, takes anyone.

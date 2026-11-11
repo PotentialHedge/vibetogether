@@ -82,8 +82,8 @@ const options = {
 		updateAge: day,
 		additionalFields: {
 			agent: { type: "string", required: false, input: false },
-			// A bridge's credential: the session it was added to, by its id, and what the bridge
-			// said it bridges, such as a Telegram chat.
+			// A bridge's grant: the bridge it lets speak as the person, by its client_id, and who
+			// the bridge said asked, in its own words, such as a Telegram user.
 			bridge: { type: "string", required: false, input: false },
 			claim: { type: "string", required: false, input: false },
 		},
@@ -95,30 +95,32 @@ const options = {
 					if (ctx?.path !== "/device/token") return;
 					const asked = db
 						.prepare(
-							"SELECT bridge, session, claim FROM device_request WHERE device_code = ?",
+							"SELECT bridge, claim FROM device_request WHERE device_code = ?",
 						)
 						.get(tokenHash(String(ctx.body.device_code))) as
-						| {
-								bridge: string | null;
-								session: string | null;
-								claim: string | null;
-						  }
+						| { bridge: string | null; claim: string | null }
 						| undefined;
 					if (!asked?.bridge)
 						return { data: { ...session, agent: ctx.body.client_id } };
-					// Approved without a session picked, which only the service's own approval
-					// prevents: such a bridge gets nothing.
-					if (!asked.session) return false;
-					// It lasts until it is removed, as a link lasted, Luis's agreement (2026-11-09).
+					// A grant lasts until it is revoked, as a link lasted, Luis's agreement (2026-11-09).
 					return {
 						data: {
 							...session,
-							agent: ctx.body.client_id,
-							bridge: asked.session,
+							agent: asked.bridge,
+							bridge: asked.bridge,
 							claim: asked.claim,
 							expiresAt: new Date("9999-12-31T00:00:00Z"),
 						},
 					};
+				},
+				// One grant per person and bridge: a new one replaces the one before, whose rooms it
+				// keeps, so that a person who links again stays where they were.
+				after: async (session) => {
+					const { bridge } = session as { bridge?: string | null };
+					if (bridge)
+						db.prepare(
+							"DELETE FROM session WHERE userId = ? AND bridge = ? AND id != ?",
+						).run(session.userId, bridge, session.id);
 				},
 			},
 		},

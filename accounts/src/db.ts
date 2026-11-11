@@ -47,6 +47,19 @@ export function migrate(): void {
 	// Databases from before bridges: an OTP lasts 15 minutes, so the ones asked for go.
 	if (hasTable("device_request") && !hasColumn("device_request", "bridge"))
 		db.exec("DROP TABLE device_request");
+	// Databases from before grants, Luis's decision (2026-11-11): a bridge's credential was for one
+	// session, and a person's account on its messenger was linked here. Both go, with the OTPs
+	// asked for, which last 15 minutes; a bridge now holds a grant, and the messenger's side alone.
+	if (hasTable("identity")) {
+		db.exec(`
+			DROP TRIGGER IF EXISTS bridge_with_session;
+			DROP TRIGGER IF EXISTS bridge_with_member;
+			DROP TABLE IF EXISTS bridge_room;
+			DROP TABLE identity;
+			DROP TABLE IF EXISTS device_request;
+			DELETE FROM session WHERE bridge IS NOT NULL;
+		`);
+	}
 	// Databases from before Vibe Together said session for room: the rows move over, their ids
 	// from r_ to s_, and the secret in each address stays, so that every address still works.
 	// They move into sessions with members of their own, which become groups below.
@@ -124,40 +137,29 @@ export function migrate(): void {
 		);
 		-- Who asked for an OTP, for the person to judge before approving it.
 		-- "device_code" is the SHA-256 of the OTP's device code, by which its token is made.
-		-- "bridge" is the bridge that asked to be added to a session, by its client_id, "claim"
-		-- what it says it bridges, and "session" the session the person picked as they approved.
-		-- "identity" is the sender's account on the bridge's messenger, such as a Telegram id, where
-		-- the chat is theirs alone, which approving links to the person; "identity_name" its name there.
+		-- "bridge" is the bridge that asked to speak as the person, by its client_id, and "claim"
+		-- who it says asks, in its own words, such as a Telegram user.
 		CREATE TABLE IF NOT EXISTS device_request (
 			user_code TEXT PRIMARY KEY,
 			requested TEXT NOT NULL,
 			"from" TEXT NOT NULL,
 			device_code TEXT,
 			bridge TEXT,
-			claim TEXT,
-			identity TEXT,
-			identity_name TEXT,
-			session TEXT
+			claim TEXT
 		);
-		-- A person's account on a bridge's messenger, linked to theirs by an OTP they approved, so
-		-- that the bridge carries what they write there as them. "external" is its id there, such as
-		-- a Telegram id, and "name" what it was called as it was linked. It is one person's.
-		CREATE TABLE IF NOT EXISTS identity (
-			id TEXT PRIMARY KEY,
-			bridge TEXT NOT NULL,
-			external TEXT NOT NULL,
-			user TEXT NOT NULL REFERENCES user(id) ON DELETE CASCADE,
-			name TEXT NOT NULL,
-			created TEXT NOT NULL,
-			UNIQUE (bridge, external)
-		);
-		-- What a bridge says of the room it bridges, such as a Telegram group and how many are in
-		-- it, which its session's info shows: a bridge is no participant, so it says nothing in the
-		-- session itself. "session" is the bridge's, Better Auth's session row of its credential.
+		-- A room outside Vibe Together that a bridge mirrors onto a session, such as a Telegram chat,
+		-- added by "user" through the bridge's grant, while they are a member of the session's
+		-- group. Vibe Together knows only what the bridge says of the room, "about", which the
+		-- session's info shows: a bridge is no participant, so it says nothing in the session itself.
 		CREATE TABLE IF NOT EXISTS bridge_room (
-			session TEXT PRIMARY KEY REFERENCES session(id) ON DELETE CASCADE,
-			about TEXT NOT NULL
+			id TEXT PRIMARY KEY,
+			session TEXT NOT NULL REFERENCES owned_session(id) ON DELETE CASCADE,
+			bridge TEXT NOT NULL,
+			user TEXT NOT NULL REFERENCES user(id) ON DELETE CASCADE,
+			about TEXT,
+			created TEXT NOT NULL
 		);
+		CREATE INDEX IF NOT EXISTS bridge_room_session ON bridge_room (session);
 		-- One row per side: "from" added "to". Two people are friends where both rows exist.
 		CREATE TABLE IF NOT EXISTS friend (
 			"from" TEXT NOT NULL REFERENCES user(id) ON DELETE CASCADE,
@@ -265,19 +267,24 @@ export function migrate(): void {
 	// as one whose grant had already ended had already gone.
 	if (hasColumn("owned_session", "app_grant") || hasColumn("session", "person"))
 		withoutApps();
-	// A bridge goes with its session, and with its person's membership in the session's group.
-	// Triggers, since a session goes by a cascade too, such as with its project or group.
+	// A room goes with its session by its reference, and with its person's membership in the
+	// session's group and their grant to its bridge, by triggers, since those go by cascades too.
+	// A grant replaced by a new one of the same bridge keeps the rooms.
 	db.exec(`
-		CREATE TRIGGER IF NOT EXISTS bridge_with_session AFTER DELETE ON owned_session
+		CREATE TRIGGER IF NOT EXISTS room_with_member AFTER DELETE ON group_member
 		BEGIN
-			DELETE FROM session WHERE bridge = OLD.id;
-		END;
-		CREATE TRIGGER IF NOT EXISTS bridge_with_member AFTER DELETE ON group_member
-		BEGIN
-			DELETE FROM session WHERE userId = OLD.user AND bridge IN (
+			DELETE FROM bridge_room WHERE user = OLD.user AND session IN (
 				SELECT s.id FROM owned_session s JOIN project p ON p.id = s.project
 				WHERE p."group" = OLD."group"
 			);
+		END;
+		CREATE TRIGGER IF NOT EXISTS room_with_grant AFTER DELETE ON session
+		WHEN OLD.bridge IS NOT NULL
+		BEGIN
+			DELETE FROM bridge_room WHERE user = OLD.userId AND bridge = OLD.bridge
+				AND NOT EXISTS (
+					SELECT 1 FROM session WHERE userId = OLD.userId AND bridge = OLD.bridge
+				);
 		END;
 	`);
 }
@@ -515,22 +522,21 @@ function intoGroups(): void {
 	}
 }
 
-/** A bridge of a session, as its info shows it: which bridge, who added it, and what it says of its room. */
+/** A room a bridge mirrors onto a session, as the session's info shows it: which bridge, who added it, and what it says of the room. */
 export type SessionBridge = {
 	bridge: string;
 	by: string;
 	about: string | null;
 };
 
-/** A session's bridges, oldest first: the rooms outside Vibe Together that what is said in it reaches. */
+/** A session's rooms, oldest first: the rooms outside Vibe Together that what is said in it reaches. */
 export function bridgesOf(session: string): SessionBridge[] {
 	return db
 		.prepare(
-			`SELECT b.agent AS bridge, u.login AS by, r.about FROM session b JOIN user u ON u.id = b.userId
-			 LEFT JOIN bridge_room r ON r.session = b.id
-			 WHERE b.bridge = ? AND b.expiresAt > ? ORDER BY b.createdAt`,
+			`SELECT r.bridge, u.login AS by, r.about FROM bridge_room r JOIN user u ON u.id = r.user
+			 WHERE r.session = ? ORDER BY r.created, r.rowid`,
 		)
-		.all(session, Date.now()) as SessionBridge[];
+		.all(session) as SessionBridge[];
 }
 
 /** Whether `user` is in `group`. */

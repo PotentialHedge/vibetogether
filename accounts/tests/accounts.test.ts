@@ -1165,7 +1165,7 @@ async function askAsBridge(body: Record<string, string> = {}) {
 	return code.json as { user_code: string; device_code: string };
 }
 
-/** The bridge's credential for an OTP approved, by its secret. */
+/** The bridge's grant for an OTP approved, by its secret. */
 async function redeemAsBridge(deviceCode: string, secret?: string) {
 	return call(null, "POST", "/api/auth/device/token", {
 		grant_type: "urn:ietf:params:oauth:grant-type:device_code",
@@ -1175,17 +1175,12 @@ async function redeemAsBridge(deviceCode: string, secret?: string) {
 	});
 }
 
-/** A bridge added by `someone` to `sessionId`, by its credential. */
-async function bridgeOf(
-	someone: string,
-	sessionId: string,
-	body: Record<string, string> = {},
-): Promise<string> {
-	const code = await askAsBridge(body);
+/** `someone`'s grant to messagent, which they approve. */
+async function grantOf(someone: string): Promise<string> {
+	const code = await askAsBridge();
 	await call(someone, "GET", `/api/auth/device?user_code=${code.user_code}`);
 	const approved = await call(someone, "POST", "/api/auth/device/approve", {
 		userCode: code.user_code,
-		session: sessionId,
 	});
 	assert.equal(approved.status, 200, approved.text);
 	const redeemed = await redeemAsBridge(
@@ -1196,7 +1191,7 @@ async function bridgeOf(
 	return redeemed.json.access_token;
 }
 
-test("a bridge is added to one session by a member who approves its OTP, and reaches only that session", async () => {
+test("a person grants a bridge to speak as them, and it mirrors rooms onto their sessions by it", async () => {
 	from = "192.0.2.44";
 	const ask = (body: Record<string, string>) =>
 		call(null, "POST", "/api/auth/device/code", {
@@ -1231,8 +1226,10 @@ test("a bridge is added to one session by a member who approves its OTP, and rea
 		(s: any) => s.group.name === "ben",
 	);
 
+	// The OTP asks only to speak as the person: nothing of the messenger is kept but its words.
 	const code = await askAsBridge({
-		for: 'Telegram group "Team", id -100123, 3 members, asked by 123 @luiswirth',
+		for: "Telegram user 123 @luiswirth",
+		identity: "123",
 	});
 	const page = await call(
 		luis,
@@ -1242,26 +1239,25 @@ test("a bridge is added to one session by a member who approves its OTP, and rea
 	assert.equal(page.status, 200, page.text);
 	assert.equal(page.json.client_id, "messagent");
 	assert.equal(page.json.bridge, true);
-	assert.match(page.json.for, /Team/);
-	assert.equal(page.json.identity, null);
-	const approve = (body: Record<string, string>) =>
-		call(luis, "POST", "/api/auth/device/approve", {
-			userCode: code.user_code,
-			...body,
-		});
-	// A bridge goes into a session the person picks, of a group of theirs.
-	assert.equal((await approve({})).status, 400);
-	assert.equal((await approve({ session: benOwn.id })).status, 404);
-	assert.equal((await approve({ session: chat.id })).status, 200);
+	assert.equal(page.json.for, "Telegram user 123 @luiswirth");
+	assert.equal(page.json.identity, undefined);
+	assert.equal(
+		(
+			await call(luis, "POST", "/api/auth/device/approve", {
+				userCode: code.user_code,
+			})
+		).status,
+		200,
+	);
 	assert.equal((await redeemAsBridge(code.device_code)).status, 401);
 	const redeemed = await redeemAsBridge(
 		code.device_code,
 		"a-secret-of-the-bot",
 	);
 	assert.equal(redeemed.status, 200, redeemed.text);
-	const bridge = redeemed.json.access_token;
+	const grant = redeemed.json.access_token;
 
-	// Its credential is no token, and reaches nothing but itself.
+	// A grant is no token, and reaches nothing but the bridge's own operations.
 	assert.equal(
 		(await call(luis, "GET", "/api/tokens")).json.some(
 			(t: any) => t.name === "messagent",
@@ -1277,7 +1273,7 @@ test("a bridge is added to one session by a member who approves its OTP, and rea
 		assert.equal(
 			(
 				await call(
-					bridge,
+					grant,
 					method,
 					path,
 					method === "GET" ? undefined : { name: "x" },
@@ -1287,36 +1283,37 @@ test("a bridge is added to one session by a member who approves its OTP, and rea
 			path,
 		);
 	assert.equal((await call(luisToken, "GET", "/api/bridges/self")).status, 404);
-	const self = await call(bridge, "GET", "/api/bridges/self");
+	const self = await call(grant, "GET", "/api/bridges/self");
 	assert.equal(self.status, 200, self.text);
 	assert.equal(self.json.bridge, "messagent");
-	assert.equal(self.json.by, "luis");
-	assert.equal(self.json.session.id, chat.id);
-	assert.equal(self.json.session.address, chat.address);
-	// Every member of the group sees it.
-	for (const someone of [luis, ben, benToken]) {
-		const listed = await call(
-			someone,
-			"GET",
-			`/api/sessions/${chat.id}/bridges`,
-		);
-		assert.equal(listed.status, 200, listed.text);
-		assert.deepEqual(
-			listed.json.map((b: any) => [b.id, b.bridge, b.for]),
-			[[self.json.id, "messagent", self.json.for]],
-		);
-	}
+	assert.equal(self.json.account, "luis");
 	assert.match(self.json.id, /^b_/);
-	// One bridge of a kind per person and session.
-	const again = await askAsBridge();
+	assert.deepEqual(self.json.rooms, []);
+	const listed = (await call(luis, "GET", "/api/bridges")).json;
+	assert.deepEqual(
+		listed.map((b: any) => [b.id, b.bridge, b.for]),
+		[[self.json.id, "messagent", "Telegram user 123 @luiswirth"]],
+	);
+
+	// The bridge lists the person's sessions, and mirrors a room onto one they pick.
+	const choices = (await call(grant, "GET", "/api/bridges/self/sessions")).json;
+	assert.ok(choices.some((s: any) => s.id === chat.id));
+	assert.ok(!choices.some((s: any) => s.id === benOwn.id));
+	const add = (session: string, as = grant) =>
+		call(as, "POST", "/api/bridges/self/rooms", {
+			session,
+			about: 'the Telegram group "Team" (3 people)',
+		});
+	assert.equal((await add(benOwn.id)).status, 404);
+	assert.equal((await add(chat.id, luisToken)).status, 404);
+	const room = await add(chat.id);
+	assert.equal(room.status, 201, room.text);
+	assert.match(room.json.id, /^r_/);
+	assert.equal(room.json.session.address, chat.address);
 	assert.equal(
-		(
-			await call(luis, "POST", "/api/auth/device/approve", {
-				userCode: again.user_code,
-				session: chat.id,
-			})
-		).status,
-		409,
+		(await call(grant, "GET", `/api/bridges/self/rooms/${room.json.id}`))
+			.status,
+		200,
 	);
 
 	const secretOf = (s: any) => s.address.split("/").pop();
@@ -1333,25 +1330,36 @@ test("a bridge is added to one session by a member who approves its OTP, and rea
 			token: as,
 			owned: true,
 		});
-	// A bridge is no participant: it reads its own session apart, and joins only as the people it
-	// carries, anyone unverified under its messenger's name.
-	assert.equal((await read(bridge)).status, 200);
-	assert.equal((await read(bridge, elsewhere)).status, 403);
-	assert.equal((await join("luis/messagent", bridge)).status, 403);
-	assert.equal((await join("luis/claude", bridge)).status, 403);
-	const stranger = await join("telegram/eve", bridge);
+	// A bridge is no participant: it reads the session apart, and joins only as its grant's person
+	// or as anyone unverified under its messenger's name.
+	assert.equal((await read(grant)).status, 200);
+	assert.equal((await read(grant, elsewhere)).status, 403);
+	const asLuis = await join("luis", grant);
+	assert.equal(asLuis.status, 200, asLuis.text);
+	assert.equal(asLuis.json.account, "luis");
+	for (const name of ["luis/messagent", "luis/claude", "ben"])
+		assert.equal((await join(name, grant)).status, 403, name);
+	const stranger = await join("telegram/eve", grant);
 	assert.equal(stranger.status, 200, stranger.text);
 	assert.equal(stranger.json.account, null);
 	assert.equal(stranger.json.about.project, "telegram");
 	assert.match(stranger.json.grant, /^g1\./);
-	assert.equal((await join("telegram/eve", bridge, elsewhere)).status, 403);
+	assert.equal((await join("telegram/eve", grant, elsewhere)).status, 403);
 	for (const name of [
 		"telegram/Eve",
 		"telegram/eve/x",
 		"telegram",
 		"discord/eve",
 	])
-		assert.equal((await join(name, bridge)).status, 403, name);
+		assert.equal((await join(name, grant)).status, 403, name);
+	// The grant the relay keeps works as the credential does.
+	const byGrant = await call(null, "POST", "/agentwire/join", {
+		session: secretOf(chat),
+		name: "luis",
+		grant: asLuis.json.grant,
+		owned: true,
+	});
+	assert.equal(byGrant.status, 200, byGrant.text);
 	// No one else joins under the messenger's name, so that no account passes as a carried person.
 	for (const as of [luisToken, null])
 		assert.equal(
@@ -1365,19 +1373,14 @@ test("a bridge is added to one session by a member who approves its OTP, and rea
 			).status,
 			403,
 		);
-	// What the bridge says of its room is the session's info.
+	// What the bridge says of its room is the session's info, which an agent learns as it joins.
 	assert.equal(
 		(
-			await call(bridge, "PATCH", "/api/bridges/self", {
-				about: 'the Telegram group "Team" (3 people)',
+			await call(grant, "PATCH", `/api/bridges/self/rooms/${room.json.id}`, {
+				about: 'the Telegram group "Team" (4 people)',
 			})
 		).status,
 		204,
-	);
-	assert.equal(
-		(await call(luisToken, "PATCH", "/api/bridges/self", { about: "x" }))
-			.status,
-		404,
 	);
 	const info = (await call(ben, "GET", "/api/sessions")).json.find(
 		(s: any) => s.id === chat.id,
@@ -1386,10 +1389,9 @@ test("a bridge is added to one session by a member who approves its OTP, and rea
 		{
 			bridge: "messagent",
 			by: "luis",
-			about: 'the Telegram group "Team" (3 people)',
+			about: 'the Telegram group "Team" (4 people)',
 		},
 	]);
-	// An agent learns as it joins whom its words reach.
 	const agentJoins = await call(null, "POST", "/agentwire/join", {
 		session: secretOf(chat),
 		name: "ben/claude",
@@ -1398,111 +1400,104 @@ test("a bridge is added to one session by a member who approves its OTP, and rea
 	});
 	assert.equal(agentJoins.status, 200, agentJoins.text);
 	assert.deepEqual(agentJoins.json.about.bridges, info.bridges);
-	// As a person only once they linked their identity on the bridge.
-	assert.equal((await join("luis", bridge)).status, 403);
-	const privateChat = await askAsBridge({
-		for: "Telegram private chat with 123 @luiswirth",
-		identity: "123",
-		identity_name: "@luiswirth, Luis",
-	});
-	assert.equal(
-		(
-			await call(
-				luis,
-				"GET",
-				`/api/auth/device?user_code=${privateChat.user_code}`,
-			)
-		).json.identity,
-		"@luiswirth, Luis",
-	);
-	assert.equal(
-		(
-			await call(luis, "POST", "/api/auth/device/approve", {
-				userCode: privateChat.user_code,
-				session: elsewhere.id,
-			})
-		).status,
-		200,
-	);
-	assert.equal(
-		(await redeemAsBridge(privateChat.device_code, "a-secret-of-the-bot"))
-			.status,
-		200,
-	);
-	const identities = (await call(luisToken, "GET", "/api/identities")).json;
-	assert.deepEqual(
-		identities.map((i: any) => [i.bridge, i.external, i.name]),
-		[["messagent", "123", "@luiswirth, Luis"]],
-	);
-	const linked = await join("luis", bridge);
-	assert.equal(linked.status, 200, linked.text);
-	assert.equal(linked.json.account, "luis");
-	// The grant the relay keeps works as the credential does.
-	const byGrant = await call(null, "POST", "/agentwire/join", {
-		session: secretOf(chat),
-		name: "luis",
-		grant: linked.json.grant,
-		owned: true,
-	});
-	assert.equal(byGrant.status, 200, byGrant.text);
-	assert.equal((await join("ben", bridge)).status, 403);
-	// Unlinking the identity ends that at once.
-	assert.equal(
-		(await call(luis, "DELETE", `/api/identities/${identities[0].id}`)).status,
-		204,
-	);
-	assert.equal((await join("luis", bridge)).status, 403);
-	assert.equal((await join("telegram/luis", bridge)).status, 200);
 
-	// Ben's bridge in the same session goes once he leaves the group.
-	const bens = await bridgeOf(ben, chat.id);
+	// Ben, linked too, speaks as himself in Luis's room, and only while he is in its group.
+	const bens = await grantOf(ben);
+	assert.equal((await join("ben", bens)).status, 200);
 	assert.equal((await read(bens)).status, 200);
+	// Every member sees the session's rooms; Ben's grant reaches no room of Luis's.
+	const rooms = await call(ben, "GET", `/api/sessions/${chat.id}/bridges`);
+	assert.deepEqual(
+		rooms.json.map((r: any) => [r.id, r.bridge, r.by]),
+		[[room.json.id, "messagent", "luis"]],
+	);
+	assert.equal(
+		(await call(bens, "GET", `/api/bridges/self/rooms/${room.json.id}`)).status,
+		404,
+	);
+	const bensRoom = await add(chat.id, bens);
+	assert.equal(bensRoom.status, 201);
 	assert.equal(
 		(await call(ben, "DELETE", `/api/groups/${group}/members/ben`)).status,
 		204,
 	);
-	assert.equal((await read(bens)).status, 403);
-	assert.equal((await call(bens, "GET", "/api/bridges/self")).status, 401);
+	assert.equal((await join("ben", bens)).status, 403);
+	assert.equal(
+		(await call(bens, "GET", `/api/bridges/self/rooms/${bensRoom.json.id}`))
+			.status,
+		404,
+	);
 
-	// Any member removes a bridge; the bridge removes itself; and a session takes its bridges with it.
+	// Linking again replaces the grant and keeps the rooms.
+	const again = await grantOf(luis);
+	assert.equal((await call(grant, "GET", "/api/bridges/self")).status, 401);
+	assert.equal(
+		(await call(again, "GET", `/api/bridges/self/rooms/${room.json.id}`))
+			.status,
+		200,
+	);
+	assert.equal((await call(luis, "GET", "/api/bridges")).json.length, 1);
+
+	// Any member removes a room; the bridge removes its own; a session takes its rooms with it.
 	assert.equal(
 		(
 			await call(
 				luisToken,
 				"DELETE",
-				`/api/sessions/${chat.id}/bridges/${self.json.id}`,
+				`/api/sessions/${chat.id}/bridges/${room.json.id}`,
 			)
 		).status,
 		204,
 	);
-	assert.equal((await read(bridge)).status, 403);
-	assert.equal((await join("telegram/eve", bridge)).status, 403);
-	const second = await bridgeOf(luis, chat.id);
-	assert.equal((await call(second, "DELETE", "/api/bridges/self")).status, 204);
-	assert.equal((await call(second, "GET", "/api/bridges/self")).status, 401);
-	const third = await bridgeOf(luis, chat.id);
+	assert.equal((await read(again)).status, 403);
+	assert.equal((await join("telegram/eve", again)).status, 403);
+	const second = (await add(chat.id, again)).json.id;
+	assert.equal(
+		(await call(again, "DELETE", `/api/bridges/self/rooms/${second}`)).status,
+		204,
+	);
+	assert.equal((await add(chat.id, again)).status, 201);
 	assert.equal(
 		(await call(luis, "DELETE", `/api/sessions/${chat.id}`)).status,
 		204,
 	);
-	assert.equal((await call(third, "GET", "/api/bridges/self")).status, 401);
-	// The bridge in the private chat's session stays.
-	const kept = (
-		await call(luis, "GET", `/api/sessions/${elsewhere.id}/bridges`)
-	).json;
-	assert.equal(kept.length, 1);
+	assert.deepEqual(
+		(await call(again, "GET", "/api/bridges/self")).json.rooms,
+		[],
+	);
+
+	// Revoking the grant on the account page ends it and its rooms at once.
+	const kept = await add(elsewhere.id, again);
+	assert.equal(kept.status, 201);
+	assert.equal((await join("luis", again, elsewhere)).status, 200);
+	const [mine] = (await call(luis, "GET", "/api/bridges")).json;
+	assert.deepEqual(
+		mine.rooms.map((r: any) => r.id),
+		[kept.json.id],
+	);
+	assert.equal(
+		(await call(luis, "DELETE", `/api/bridges/${mine.id}`)).status,
+		204,
+	);
+	assert.equal((await call(again, "GET", "/api/bridges/self")).status, 401);
+	assert.deepEqual(
+		(await call(luis, "GET", `/api/sessions/${elsewhere.id}/bridges`)).json,
+		[],
+	);
+	// The bridge revokes its own grant, as when its person unlinks there.
+	const last = await grantOf(luis);
+	assert.equal((await call(last, "DELETE", "/api/bridges/self")).status, 204);
+	assert.deepEqual((await call(luis, "GET", "/api/bridges")).json, []);
 
 	// What only the person does stays theirs.
+	const held = await grantOf(luis);
 	const other = await askAsBridge();
 	for (const [path, body] of [
-		[
-			"/api/auth/device/approve",
-			{ userCode: other.user_code, session: elsewhere.id },
-		],
+		["/api/auth/device/approve", { userCode: other.user_code }],
 		["/api/auth/device/deny", { userCode: other.user_code }],
 		["/api/auth/update-user", { name: "x" }],
 	] as const)
-		assert.equal((await call(third, "POST", path, body)).status, 403, path);
+		assert.equal((await call(held, "POST", path, body)).status, 403, path);
 	// No variant of a path gets past the checks that match it exactly.
 	for (const path of [
 		"/api/auth/device/code/",
