@@ -23,6 +23,7 @@ type Parameter = {
 	name: string;
 	schema: Schema;
 	description?: string;
+	required?: boolean;
 };
 
 type Operation = {
@@ -136,29 +137,39 @@ export function referenceOf(document: Document): string {
 				if (operation.description) lines.push(operation.description, "");
 				const whom = who(operation);
 				if (whom) lines.push(whom, "");
-				const params = (operation.parameters ?? []).filter(
-					(p) => p.in === "path",
-				);
-				const body = operation.requestBody?.content["application/json"]?.schema;
-				if (params.length || body) {
+				const params = operation.parameters ?? [];
+				const json = operation.requestBody?.content["application/json"]?.schema;
+				const raw = !json && operation.requestBody;
+				if (params.length || operation.requestBody) {
 					lines.push("Arguments:", "");
-					for (const p of params)
+					for (const p of params) {
+						const where =
+							p.in === "path"
+								? `\`{${p.name}}\` in the path`
+								: `\`${p.name}\` in the ${p.in}`;
+						const optional = p.in === "path" || p.required ? "" : ", optional";
+						const about = p.description ?? p.schema.description;
 						lines.push(
-							`- \`{${p.name}}\` in the path (${shape(document, p.schema)})${p.description || p.schema.description ? `: ${p.description ?? p.schema.description}` : ""}`,
+							`- ${where} (${shape(document, p.schema)}${optional})${about ? `: ${about}` : ""}`,
 						);
-					if (body) lines.push(...fields(document, body, " in the body"));
+					}
+					if (json) lines.push(...fields(document, json, " in the body"));
+					if (raw)
+						lines.push(
+							"- the body: the payload, of the type its `Content-Type` names",
+						);
 					lines.push("");
 				}
 				const curl = ["curl -s"];
 				if (method !== "get") curl.push(`-X ${method.toUpperCase()}`);
 				if (operation.security?.some((way) => "token" in way))
 					curl.push("-H 'Authorization: Bearer <token>'");
-				if (body) {
+				if (json) {
 					const example = Object.fromEntries(
-						Object.keys(body.properties ?? {})
-							.filter((name) => body.required?.includes(name))
+						Object.keys(json.properties ?? {})
+							.filter((name) => json.required?.includes(name))
 							.map((name) => {
-								const field = flat(document, body.properties?.[name] ?? {});
+								const field = flat(document, json.properties?.[name] ?? {});
 								return [name, field.enum?.length === 1 ? field.enum[0] : "…"];
 							}),
 					);
@@ -166,7 +177,15 @@ export function referenceOf(document: Document): string {
 						`-H 'Content-Type: application/json' -d '${JSON.stringify(example)}'`,
 					);
 				}
-				curl.push(`'${base}${path.replace(/\{(\w+)\}/g, "<$1>")}'`);
+				if (raw) curl.push("-H 'Content-Type: text/plain' --data-binary 'Hi'");
+				// The curl request uses a token, which names its agent.
+				const query = params
+					.filter((p) => p.in === "query" && (p.required || p.name === "agent"))
+					.map((p) => `${p.name}=<${p.name}>`)
+					.join("&");
+				curl.push(
+					`'${base}${path.replace(/\{(\w+)\}/g, "<$1>")}${query ? `?${query}` : ""}'`,
+				);
 				lines.push("```sh", curl.join(" "), "```", "");
 				for (const [status, answer] of Object.entries(operation.responses)) {
 					if (status === "default") continue;

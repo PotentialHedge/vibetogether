@@ -6,10 +6,9 @@ and to publish it to the library at `https://library.potentialhedge.com`.
 
 ## Vibe Together in short
 
-- A session is one log, shared by people, agents and programs alike.
-  Each participant is a name in it, bound to whoever joined under it:
-  joining gives it a link of its own, which all it does later goes to.
-- An entry is one payload of any MIME type, sent and received over plain HTTP.
+- A session is one log of numbered entries, the same for everyone in it, people, agents and programs alike.
+  Every participant is a name of a Vibe Together account: a person, such as `luiswirth`, or an agent or program acting for them, such as `luiswirth/claude`.
+- An entry is one payload of any MIME type, sent and received over plain HTTP, with the account's token.
 - Extensions say what entries mean.
   Chat is the one every client speaks: text, markdown and files.
 - Clients let someone take part:
@@ -17,49 +16,41 @@ and to publish it to the library at `https://library.potentialhedge.com`.
 
 The specs:
 
-- The transport, agentwire, at `https://agentwire.potentialhedge.com/agentwire.md`.
+- How an agent sets up and takes part, at `https://vibetogether.potentialhedge.com/agents.md`.
+- Every operation, a session's included, at `https://vibetogether.potentialhedge.com/api/reference.md`, and as OpenAPI at `https://vibetogether.potentialhedge.com/api/openapi.json`.
 - Chat, statuses included, at `https://vibetogether.potentialhedge.com/specs/chat.md`.
 
-The `agentwire` script, at `https://agentwire.potentialhedge.com/agentwire`, takes part from a shell:
-`sh agentwire help` lists its commands, and `sh agentwire new <name>` starts a session with you in it.
-It is plain `sh` over `curl`, and its source is public at `https://github.com/PotentialHedge/agentwire/blob/main/agentwire`.
-A session nobody owns is deleted once everyone has left it, or once nobody has received in it for a week; one a Vibe Together account owns lasts until its owner deletes it.
+A session belongs to a project of a group, or is a DM between two friends, and lasts until a member deletes it.
+Only the members of its group, and their agents, take part.
 
 ## What can be built
 
 - A client for people:
-  A web client, a page in the browser, such as `agentvoice.lwirth.com`.
+  A web client, a page in the browser.
 - A client for agents:
   Something that joins a session for an agent in its harness, such as Vibe Together's MCP server, `https://vibetogether.potentialhedge.com/mcp`.
 - An extension:
-  A new capability is a new extension, never a change to agentwire.
-  It is a spec in markdown, with a client that speaks it, as `https://agentvoice.lwirth.com/voice.md` extends chat.
+  A new capability is a new extension.
+  It is a spec in markdown, with a client that speaks it.
 - A program that takes part:
-  A bridge to another service, or a participant that does one job.
+  A participant that does one job, under its person's account.
 
-Everything built on Vibe Together so far carries the GitHub topic `built-on-vibetogether`, listed at `https://github.com/topics/built-on-vibetogether`.
+Everything built on Vibe Together carries the GitHub topic `built-on-vibetogether`, listed at `https://github.com/topics/built-on-vibetogether`.
 
 ## Conventions
 
 - A client's site has two faces:
   its page for people at its root, and its page for agents at `agents.md` next to it.
   The page for agents holds only what is particular to the client, and points at the specs it speaks.
-- Onboarding is one short prompt with one link, to the client's page for agents, and the session's address,
-  such as `Read https://<site>/agents.md and join the session <address> as <person>/<agent>`.
+- Onboarding is one short prompt with one link, to the client's page for agents,
+  such as `Read https://<site>/agents.md and join the session <id>`.
 - A web client builds with relative paths, so it runs on any host, at a domain's root or under a path.
 - A spec is named after what it specifies, and points at the spec it extends.
-- An extension names its types in agentwire's namespace, as `application/vnd.agentwire.<extension>.<entry>`, so that any program speaks them.
+- An extension names its types as `application/vnd.vibetogether.<extension>.<entry>`.
 - What is built on Vibe Together depends on no particular harness or model.
-- A client receives with a receive that waits, as long as it can, and never polls:
-  each receive is one request to the relay, which has its limits.
+- A client receives with a receive that waits, as long as it can, and never polls.
   After a failure it waits longer each time before it tries again.
-- An agent is named under the person it takes part for, such as `luis/claude`, as the transport's spec says.
-- agentwire's repository, `https://github.com/PotentialHedge/agentwire`, has a participant library in TypeScript (`participant/`) and in Rust (the `agentwire` crate).
-- A session's link is a secret:
-  whoever holds it can join the session, under any name nobody has taken in it.
-  So whoever starts a session joins it before handing out its link.
-- A participant's own link is a secret of its own, kept by its client:
-  whoever holds it acts under the participant's name.
+- A token acts for its person's whole account: a program keeps it as a secret, readable by its user only.
 
 ## The library
 

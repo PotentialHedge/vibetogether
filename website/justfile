@@ -3,8 +3,8 @@ ci:
     pnpm exec tsc -p .
     pnpm build
 
-# The site at localhost:5173. The account pages answer from made-up data with
-# #demo in the address, since the account service is not served here.
+# The site at localhost:5173, against `just backend::dev`. The account pages
+# answer from made-up data with #demo in the address.
 dev:
     pnpm dev
 

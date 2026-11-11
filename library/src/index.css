@@ -5,7 +5,7 @@
 
 @custom-variant dark (&:is(.dark *));
 
-/* The library is only dark, in the colors of the relay's page. */
+/* The library is only dark, in the colors of the website. */
 @theme inline {
 	--font-heading: var(--font-sans);
 	--font-sans: "Geist Variable", sans-serif;

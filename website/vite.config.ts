@@ -28,14 +28,14 @@ export default defineConfig({
 			),
 		},
 	},
-	// The account service: `just dev` in vibetogether-accounts serves it at
-	// 8793, `just stack` at 8798, chosen with ACCOUNTS.
+	// The backend, which `just backend::dev` serves at 8793, or another chosen
+	// with BACKEND.
 	server: {
 		port: 5173,
 		proxy: Object.fromEntries(
-			["/api", "/.well-known"].map((path) => [
+			["/api", "/mcp", "/.well-known"].map((path) => [
 				path,
-				process.env.ACCOUNTS ?? "http://127.0.0.1:8793",
+				process.env.BACKEND ?? "http://127.0.0.1:8793",
 			]),
 		),
 	},

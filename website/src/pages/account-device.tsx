@@ -17,8 +17,8 @@ function ago(time: string): string {
 	return relative.format(Math.round(minutes / 60), "hour");
 }
 
-/** Confirms the OTP an agent or a bridge sent its person, as a link with the
- * code in it, or typed in. A bridge's lets it speak as the person. */
+/** Confirms the OTP an agent sent its person, as a link with the code in it,
+ * or typed in. */
 function DevicePage() {
 	const me = useMe();
 	const given = new URLSearchParams(location.search).get("user_code");

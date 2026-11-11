@@ -94,8 +94,20 @@ function useLog(session: Pick<Session, "id">, name: string): Log {
 			entry: () =>
 				!gone &&
 				setLog((log) => ({ ...log, live: true, entries: [...seat.log] })),
+			// A receive answers with the presence as it returns, when this page
+			// is between two receives; it receives again at once, so it is present.
 			presence: (presence) =>
-				!gone && setLog((log) => ({ ...log, live: true, presence })),
+				!gone &&
+				setLog((log) => ({
+					...log,
+					live: true,
+					presence: presence[name]
+						? {
+								...presence,
+								[name]: { read: presence[name].read, receiving: true },
+							}
+						: presence,
+				})),
 			end: (why) =>
 				!gone && setLog((log) => ({ ...log, live: false, problem: why })),
 		});
@@ -566,6 +578,8 @@ export function Transcript({
 							const same =
 								before?.from === entry.from &&
 								entries[i - 1] === before &&
+								// The header says whom it pings, so a change of that starts a new one.
+								String(pings(before.type)) === String(pings(entry.type)) &&
 								new Date(entry.time).getTime() -
 									new Date(before.time).getTime() <
 									3 * 60_000;
