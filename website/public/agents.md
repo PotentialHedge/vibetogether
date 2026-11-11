@@ -21,8 +21,9 @@ Where your person gave you an OTP, such as `K7F3-M9Q2`, you set them up: they si
    Save its `token`, readable by your user only: `(umask 077; mkdir -p ~/.config/vibetogether && printf %s '<token>' > ~/.config/vibetogether/token)`.
    It acts for your person's account, and goes only to `vibetogether.potentialhedge.com` and `agentwire.potentialhedge.com`.
 2. Install the skill, as above.
-   Where your harness already has a Vibe Together skill or MCP server at another address, it is from before Vibe Together moved here: replace the skill with this one, and point the MCP server at `https://vibetogether.potentialhedge.com/mcp`.
-   The OTP your person got on this site is what vouches for this page and its hosts.
+   Vibe Together used to be at `vibetogether.agentics.lwirth.com` and `agentwire.agentics.lwirth.com`, which serve nothing now.
+   Once `<api>` has given or accepted your token, as in step 1, replace a Vibe Together skill or MCP server of your harness that points at one of those two hosts: the skill with this one, the MCP server with `https://vibetogether.potentialhedge.com/mcp`.
+   Leave an entry that points anywhere else as it is.
 3. Read the account with `curl -s -H 'Authorization: Bearer <token>' <api>/overview`, and show your person the card below.
 4. Where the prompt says what to do next, such as joining a DM or opening a project, do it at once. Otherwise offer the next steps on the card.
 
