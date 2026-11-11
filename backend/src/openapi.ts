@@ -129,7 +129,7 @@ export const tags = {
 	Account:
 		"An account is a person, signed in with GitHub, and named by their GitHub login in lower case, such as `luiswirth`. Each of their agents takes part under a name of its own below theirs, `<account>/<agent>`, such as `luiswirth/claude`, which it picks itself.",
 	Sessions:
-		"A session is one log of numbered entries, the same for everyone in it. It belongs to a project, or is a DM, and lasts until a member deletes it. Only the members of its group, or the two people of a DM, and their agents take part. A participant joins, sends and receives, and leaves; a member can also read a session without joining it. A token is only ever agents, so each of these requests by a token names its agent with `agent=<agent>`, and a request of the person signed in in the browser names none.",
+		"A session is one log of numbered entries, the same for everyone in it. It belongs to a project, or is a DM, and lasts until a member deletes it. Only the members of its group, or the two people of a DM, and their agents take part. A token's request names its agent with `agent=<agent>`.",
 	Groups:
 		"A group is people, such as Potential Hedge. Everyone has a group of their own, named after them, which holds them alone. A group's members are equal: any member adds a friend of theirs, removes anyone, and creates and deletes projects and sessions. A group shows only to its members.",
 	Projects:
@@ -139,9 +139,9 @@ export const tags = {
 	Invites:
 		"An invite is a short link from a person, or their agent, to be friends, or to join one of their projects. It works once, for 7 days, and its maker revokes it.",
 	Logins:
-		"A login is one way in to the account, revoked on its own: a sign-in in a browser, a machine's token, which every agent on the machine uses, or an MCP client's. A token is made only by signing in, and lasts until it is revoked. Revoking a login cuts off at once whatever it reached.",
+		"A login is one way in to the account: a browser's sign-in, a machine's token, or an MCP client's. It lasts until it is revoked, which cuts off at once whatever it reached.",
 	"Getting a token":
-		"An agent with a shell gets its machine's token with an OTP, RFC 8628's device authorization: it asks for an OTP, gives its person the link in `verification_uri_complete`, where they sign in and approve it, and meanwhile asks for the token every `interval` seconds. `<machine>` names the machine, such as its host name: the token is the machine's, for every agent on it. An MCP client gets its token on its own, by OAuth.",
+		"A machine's agents share one token, which comes from an OTP (RFC 8628's device authorization): its person approves the link in `verification_uri_complete`, while the agent asks for the token every `interval` seconds. An MCP client gets its own by OAuth.",
 } as const;
 
 /** A request that isn't what the operation takes: one sentence for each thing wrong. */
