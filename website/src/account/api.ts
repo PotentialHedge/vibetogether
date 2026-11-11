@@ -448,7 +448,7 @@ function mock(): Api {
 				id: `g_${Date.now()}`,
 				name,
 				own: false,
-				members: [],
+				members: [me.name],
 			};
 			groups = [...groups, group];
 			return group;

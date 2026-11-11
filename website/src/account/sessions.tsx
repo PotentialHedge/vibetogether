@@ -147,15 +147,17 @@ function NameDialog({
 	);
 }
 
-/** A group's face in the rail: the start of its name. */
+/** A group's face in the rail: the start of its name, by characters rather
+ * than UTF-16 units, so that an emoji stays whole. */
 function GroupFace({ group }: { group: Group }) {
 	return (
 		<span className="flex size-10 items-center justify-center rounded-xl bg-secondary font-mono text-sm font-medium">
 			{group.name
 				.split(/\s+/)
-				.map((word) => word.slice(0, 1))
-				.join("")
+				.filter(Boolean)
+				.map((word) => Array.from(word)[0])
 				.slice(0, 2)
+				.join("")
 				.toUpperCase()}
 		</span>
 	);
@@ -213,6 +215,7 @@ export function Rail({
 					key={group.id}
 					type="button"
 					title={group.own ? `${group.name}, your own group` : group.name}
+					aria-label={group.name}
 					aria-current={group.id === open}
 					onClick={() => onOpen(group.id)}
 					className={cn(
@@ -335,7 +338,10 @@ function ProjectItem({
 	return (
 		<li className="flex flex-col">
 			<div className="group/project flex h-8 items-center gap-1.5 rounded-md pr-1 pl-2">
-				<span className="min-w-0 flex-1 truncate font-medium">
+				<span
+					className="min-w-0 flex-1 truncate font-medium"
+					title={project.name}
+				>
 					{project.name}
 				</span>
 				<Button
@@ -410,6 +416,7 @@ function ProjectItem({
 						<button
 							type="button"
 							aria-current={session.id === current}
+							title={session.name}
 							onClick={() => onSession(session.id)}
 							className={cn(
 								"flex h-8 w-full items-center gap-2 rounded-md pr-2 pl-5 text-left font-mono text-sm text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground",
@@ -481,13 +488,16 @@ function Members({
 						className="group/member flex h-8 items-center gap-2 rounded-md px-2 text-sm"
 					>
 						<Person {...face(name)} size="sm" />
-						<span className="min-w-0 flex-1 truncate font-mono">{name}</span>
+						<span className="min-w-0 flex-1 truncate font-mono" title={name}>
+							{name}
+						</span>
 						{!group.own && name !== me.name && (
 							<Button
 								variant="ghost"
 								size="icon-xs"
 								aria-label={`Remove ${name}`}
-								className="opacity-0 group-hover/member:opacity-100 focus-visible:opacity-100"
+								// Shown on hover where there is one, always on a touch screen.
+								className="[@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover/member:opacity-100 [@media(hover:hover)]:focus-visible:opacity-100"
 								onClick={act(() => api.removeMember(group.id, name))}
 							>
 								<X />
@@ -563,9 +573,12 @@ export function Sidebar({
 	const last = group.members.length <= 1;
 	const [adding, setAdding] = useState(false);
 	return (
-		<div className="flex min-h-0 w-full flex-col bg-card/20 md:w-64 md:shrink-0 md:border-r">
+		<div className="flex min-h-0 min-w-0 flex-1 flex-col bg-card/20 md:w-64 md:flex-none md:shrink-0 md:border-r">
 			<header className="flex h-14 shrink-0 items-center gap-2 border-b px-4">
-				<h2 className="min-w-0 flex-1 truncate font-mono font-medium">
+				<h2
+					className="min-w-0 flex-1 truncate font-mono font-medium"
+					title={group.name}
+				>
 					{group.name}
 				</h2>
 				{!group.own && (

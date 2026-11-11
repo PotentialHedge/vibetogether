@@ -3,7 +3,7 @@
  * sidebar, since it is no group's. On a phone, the
  * navigation and the session take the screen in turn. */
 
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, X } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { Frame } from "ui/onboard";
 import {
@@ -83,7 +83,7 @@ const LAST = "vibetogether last session";
 
 function App({ state, reload }: { state: State; reload: () => Promise<void> }) {
 	const { me, groups, projects, sessions, friends, dms } = state;
-	const { problem, act } = useActions(reload);
+	const { problem, act, dismiss } = useActions(reload);
 	const [place, setPlace] = useState<Place>(() => {
 		const place = placeOfAddress();
 		if (place.session || place.dm || place.group) return place;
@@ -177,11 +177,6 @@ function App({ state, reload }: { state: State; reload: () => Promise<void> }) {
 					navigating ? "hidden md:flex" : "flex",
 				)}
 			>
-				{problem && (
-					<p className="border-b px-6 py-2 text-sm text-destructive">
-						{problem}
-					</p>
-				)}
 				{dm ? (
 					<Transcript
 						key={dm.dm.id}
@@ -227,11 +222,31 @@ function App({ state, reload }: { state: State; reload: () => Promise<void> }) {
 						}
 					/>
 				) : (
-					<p className="m-auto px-6 text-center text-sm text-muted-foreground">
-						Open a session on the left, or start one in a project with +.
+					<p className="m-auto max-w-sm px-6 text-center text-sm text-pretty text-muted-foreground">
+						{group &&
+						!projects.some((project) => project.group.id === group.id)
+							? `Make a project in ${group.name} on the left, then start a session in it.`
+							: "Open a session on the left, or start one with the + by a project."}
 					</p>
 				)}
 			</main>
+			{/* Over everything, so that it shows on a phone whichever side is open. */}
+			{problem && (
+				<div
+					role="alert"
+					className="fixed inset-x-3 bottom-3 z-50 mx-auto flex max-w-lg items-start gap-2 rounded-xl border bg-popover py-2 pr-2 pl-4 text-sm text-destructive shadow-lg"
+				>
+					<p className="min-w-0 flex-1 py-1 break-words">{problem}</p>
+					<Button
+						variant="ghost"
+						size="icon-sm"
+						aria-label="Dismiss"
+						onClick={dismiss}
+					>
+						<X />
+					</Button>
+				</div>
+			)}
 		</div>
 	);
 }

@@ -170,5 +170,5 @@ export function useActions(reload: () => Promise<void>) {
 		}
 		await reload();
 	};
-	return { problem, act };
+	return { problem, act, dismiss: () => setProblem(null) };
 }
