@@ -37,7 +37,17 @@ const options = {
 	basePath: "/api/auth",
 	secret: config.secret,
 	database: db,
+	// Exact origins only: other sites under the same domain are other people's.
 	trustedOrigins: [config.url],
+	// Over HTTPS, every cookie is `__Host-`: Secure, for this host alone and its whole path, so
+	// that no other subdomain of the site can set or overwrite one. It is never cross-subdomain.
+	...(config.url.startsWith("https://") && {
+		advanced: {
+			useSecureCookies: false,
+			cookiePrefix: "__Host-vibetogether",
+			defaultCookieAttributes: { secure: true, path: "/" },
+		},
+	}),
 	// On everywhere, not only where NODE_ENV is production. Caddy sets X-Forwarded-For to the client.
 	rateLimit: {
 		enabled: true,

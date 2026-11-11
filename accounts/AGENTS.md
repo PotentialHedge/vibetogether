@@ -9,6 +9,7 @@ Its interface is its operations, defined once in `src/api.ts` and served as an O
 - One SQLite database, `node:sqlite`, holds Better Auth's tables and the service's own (`src/db.ts`).
 - A token is an opaque Better Auth session token (a machine's, from an OTP or minted on the account page) or OAuth access token (prefixed `vt_at_`), looked up at each request, so that revoking one cuts its agent off at once.
 - The account page and agents use the same requests: nothing is only for the page.
+- Over HTTPS every cookie is `__Host-` and host-only, and `trustedOrigins` holds the exact origin alone, since other sites under the same domain are other people's.
 - The HTTP API is the foundation, Luis's decision (2026-11-10): each operation is declared once, as a route of `@hono/zod-openapi` through `operation()` (`src/openapi.ts`), whose `who` sets both its security in the document and the check, and whose description is written for agents.
   The document (`/api/openapi.json`) is the only place an operation is defined: the MCP server's account tools and the reference (`/api/reference.md`, `src/reference.ts`) are generated from it.
   Each tag is a concept, whose paragraph opens its section of the reference and goes into the MCP server's instructions.

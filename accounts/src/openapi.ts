@@ -198,7 +198,7 @@ export function documentOf(api: OpenAPIHono<Env>) {
 	api.openAPIRegistry.registerComponent("securitySchemes", "browser", {
 		type: "apiKey",
 		in: "cookie",
-		name: "better-auth.session_token",
+		name: "__Host-vibetogether.session_token",
 		description: "The person, signed in in the browser.",
 	});
 	registerDeviceFlow(api);
