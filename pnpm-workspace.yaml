@@ -1,6 +1,5 @@
 packages:
   - accounts
-  - agentwire
   - library
   - ui
   - website

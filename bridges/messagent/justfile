@@ -8,16 +8,16 @@ ci:
 serve:
     #!/usr/bin/env bash
     set -euo pipefail
-    cargo build --quiet -p messagent -p agentwire-relay
+    cargo build --quiet -p messagent
     target="${CARGO_TARGET_DIR:-../../target}/debug"
-    tests/serve.sh "$target/messagent" "$target/agentwire-relay" ../../accounts
+    tests/serve.sh "$target/messagent" agentwire-relay ../../accounts
 
 # The bridge end to end, between a fake Telegram and a relay of its own.
 bridge:
     #!/usr/bin/env bash
     set -euo pipefail
-    cargo build --quiet -p messagent -p agentwire-relay
+    cargo build --quiet -p messagent
     target="${CARGO_TARGET_DIR:-../../target}/debug"
-    AGENTWIRE_ADDRESS=127.0.0.1:8792 "$target/agentwire-relay" &
+    AGENTWIRE_ADDRESS=127.0.0.1:8792 agentwire-relay &
     trap 'kill $!' EXIT
     tests/bridge.sh http://localhost:8792 "$target/messagent"

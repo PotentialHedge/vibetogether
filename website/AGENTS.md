@@ -12,6 +12,6 @@ Vibe Together's `AGENTS.md` (`../AGENTS.md`) and its design hold the framing: re
 - `just deploy` builds the site and pushes it to lwirth-cloud; dotcloud's `serve.nix` says how it is served.
   The same host proxies `/mcp` to the MCP server, `../mcp`, and `/api/` to the account service, `../accounts`, whose operations, at `/api/reference.md`, are the interface the account pages use, the same one agents use.
 - The app reads an open session without joining it, with the token of the page's own sign-in, so it reads exactly where the person may, and stands in no presence.
-- agentwire, the transport, is `../agentwire`, served at `agentwire.agentics.lwirth.com`.
+- agentwire, the transport, is `PotentialHedge/agentwire` (`~/dev/agentwire`), served at `agentwire.agentics.lwirth.com`.
 
 Provenance: agent-autonomous

@@ -1,5 +1,31 @@
 {
   "nodes": {
+    "agentwire": {
+      "inputs": {
+        "nixpkgs": [
+          "nixpkgs"
+        ],
+        "rust-overlay": [
+          "rust-overlay"
+        ],
+        "treefmt-nix": [
+          "treefmt-nix"
+        ]
+      },
+      "locked": {
+        "lastModified": 1794398222,
+        "narHash": "sha256-KJXHX92BwLtLrCtChGp3goDBQPllETX+b0v0UFsyKAo=",
+        "owner": "PotentialHedge",
+        "repo": "agentwire",
+        "rev": "3bf9350ff3859716060079cf08c88eeb35d5cd11",
+        "type": "github"
+      },
+      "original": {
+        "owner": "PotentialHedge",
+        "repo": "agentwire",
+        "type": "github"
+      }
+    },
     "nixpkgs": {
       "locked": {
         "lastModified": 1792502884,
@@ -18,6 +44,7 @@
     },
     "root": {
       "inputs": {
+        "agentwire": "agentwire",
         "nixpkgs": "nixpkgs",
         "rust-overlay": "rust-overlay",
         "treefmt-nix": "treefmt-nix"

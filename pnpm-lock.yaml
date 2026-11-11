@@ -45,12 +45,6 @@ importers:
         specifier: ^7.0.2
         version: 7.0.2
 
-  agentwire:
-    devDependencies:
-      typescript:
-        specifier: ^7.0.2
-        version: 7.0.2
-
   library:
     dependencies:
       '@base-ui/react':
@@ -112,8 +106,8 @@ importers:
         specifier: ^19.3.0
         version: 19.3.0
       agentwire:
-        specifier: workspace:*
-        version: link:../agentwire
+        specifier: github:PotentialHedge/agentwire#3bf9350ff3859716060079cf08c88eeb35d5cd11
+        version: https://codeload.github.com/PotentialHedge/agentwire/tar.gz/3bf9350ff3859716060079cf08c88eeb35d5cd11
       react:
         specifier: '>=19'
         version: 19.3.1
@@ -133,8 +127,8 @@ importers:
         specifier: ^5.3.0
         version: 5.3.0
       agentwire:
-        specifier: workspace:*
-        version: link:../agentwire
+        specifier: github:PotentialHedge/agentwire#3bf9350ff3859716060079cf08c88eeb35d5cd11
+        version: https://codeload.github.com/PotentialHedge/agentwire/tar.gz/3bf9350ff3859716060079cf08c88eeb35d5cd11
       class-variance-authority:
         specifier: ^0.7.1
         version: 0.7.1
@@ -1095,6 +1089,10 @@ packages:
         optional: true
       oxc-transform-react:
         optional: true
+
+  agentwire@https://codeload.github.com/PotentialHedge/agentwire/tar.gz/3bf9350ff3859716060079cf08c88eeb35d5cd11:
+    resolution: {gitHosted: true, integrity: sha512-DunypZKEZ8Bmgl1MpnkeU7NmZB/UyPPUuSq25/vMps5rLLLrZA7TRUunsLM42z2fAIZ3xIMU2rOwpVSukm2gqQ==, tarball: https://codeload.github.com/PotentialHedge/agentwire/tar.gz/3bf9350ff3859716060079cf08c88eeb35d5cd11}
+    version: 0.0.0
 
   ajv-formats@2.1.1:
     resolution: {integrity: sha512-Wx0Kx52hxE7C18hkMEggYlEifqWZtYaRgouJor+WMdPnQyEK13vgEWyVNup7SoeeoLMsr4kf5h6dOW11I15MUA==}
@@ -3138,6 +3136,8 @@ snapshots:
     dependencies:
       '@rolldown/pluginutils': 1.0.1
       vite: 8.3.6(@types/node@26.6.6)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1)
+
+  agentwire@https://codeload.github.com/PotentialHedge/agentwire/tar.gz/3bf9350ff3859716060079cf08c88eeb35d5cd11: {}
 
   ajv-formats@2.1.1:
     dependencies:

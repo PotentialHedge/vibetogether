@@ -7,6 +7,12 @@
 
     treefmt-nix.url = "github:numtide/treefmt-nix";
     treefmt-nix.inputs.nixpkgs.follows = "nixpkgs";
+
+    # The transport. Cargo and pnpm pin the same commit, which `just ci` checks.
+    agentwire.url = "github:PotentialHedge/agentwire";
+    agentwire.inputs.nixpkgs.follows = "nixpkgs";
+    agentwire.inputs.rust-overlay.follows = "rust-overlay";
+    agentwire.inputs.treefmt-nix.follows = "treefmt-nix";
   };
 
   outputs = {
@@ -14,6 +20,7 @@
     nixpkgs,
     rust-overlay,
     treefmt-nix,
+    agentwire,
     ...
   }: let
     inherit (nixpkgs) lib;
@@ -31,12 +38,13 @@
 
     # One environment, entered by the shell and by the checks alike. The
     # TypeScript compiler and the type definitions are pinned by pnpm instead,
-    # since editors look for them in node_modules.
+    # since editors look for them in node_modules. The relay is for the tests
+    # and local stacks.
     tools = pkgs:
-      with pkgs; [(rust pkgs) bacon cargo-edit nodejs pnpm biome just curl jq openssl python3 rsync];
+      with pkgs; [(rust pkgs) bacon cargo-edit nodejs pnpm biome just curl jq openssl python3 rsync agentwire.packages.${pkgs.stdenv.hostPlatform.system}.agentwire-relay];
 
-    # A binary of the Cargo workspace, built from agentwire and the parts in
-    # `parts` alone, so that it changes with nothing else. Cargo needs every
+    # A binary of the Cargo workspace, built from the parts in `parts` alone,
+    # so that it changes with nothing else. Cargo needs every
     # member of the workspace, so each of the other members is only its
     # manifest, with an empty library as its source.
     rustPackage = pkgs: {
@@ -60,8 +68,6 @@
             fileset = lib.fileset.unions ([
                 ./Cargo.toml
                 ./Cargo.lock
-                (rustFiles ./agentwire)
-                ./agentwire/relay/people.html
               ]
               ++ map rustFiles parts
               ++ map manifests others);
@@ -72,7 +78,12 @@
               [ -n "$(find "$dir" -name '*.rs')" ] || { mkdir -p "$dir/src"; touch "$dir/src/lib.rs"; }
             done
           '';
-          cargoLock.lockFile = ./Cargo.lock;
+          cargoLock = {
+            lockFile = ./Cargo.lock;
+            # agentwire's repository at the commit Cargo pins, which `just ci`
+            # checks is the flake input's, so its hash is the input's.
+            outputHashes."agentwire-0.1.0" = agentwire.narHash;
+          };
           cargoBuildFlags = ["-p" pname];
           cargoTestFlags = ["-p" pname];
           # A binary names the toolchain's sources, in panic messages, which
@@ -88,16 +99,6 @@
         // args);
   in {
     packages = forEachSystem (pkgs: {
-      agentwire-relay = rustPackage pkgs {pname = "agentwire-relay";};
-
-      # The spec and the script the relay serves, apart from its binary, so
-      # that a new wording changes no binary and restarts no relay.
-      agentwire-relay-files = pkgs.runCommandLocal "agentwire-relay-files" {} ''
-        mkdir $out
-        cp ${./agentwire/agentwire} $out/agentwire
-        cp ${./agentwire/agentwire.md} $out/agentwire.md
-      '';
-
       vibetogether-mcp = rustPackage pkgs {
         pname = "vibetogether-mcp";
         parts = [./mcp];
@@ -154,7 +155,6 @@
     });
 
     nixosModules = {
-      relay = import ./agentwire/nixos-module.nix self;
       mcp = import ./mcp/nixos-module.nix self;
       accounts = import ./accounts/nixos-module.nix self;
       messagent = import ./bridges/messagent/nixos-module.nix self;
@@ -180,9 +180,6 @@
         programs.shfmt.enable = true;
         # direnv reads it, no shell runs it.
         settings.formatter.shellcheck.excludes = [".envrc"];
-        # agentwire's script has no extension, since it is run as `sh agentwire`.
-        settings.formatter.shellcheck.includes = ["*.sh" "agentwire/agentwire"];
-        settings.formatter.shfmt.includes = ["*.sh" "agentwire/agentwire"];
       });
 
     devShells = forEachSystem (pkgs: {

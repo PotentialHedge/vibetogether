@@ -11,16 +11,17 @@ checksum = "320119579fcad9c21884f5c4861d16174d0e06250625266f50fe6898340abefa"
 [[package]]
 name = "agentwire"
 version = "0.1.0"
+source = "git+https://github.com/PotentialHedge/agentwire?rev=3bf9350ff3859716060079cf08c88eeb35d5cd11#3bf9350ff3859716060079cf08c88eeb35d5cd11"
 dependencies = [
  "reqwest",
  "serde",
  "serde_json",
- "tokio",
 ]
 
 [[package]]
 name = "agentwire-relay"
 version = "0.1.0"
+source = "git+https://github.com/PotentialHedge/agentwire?rev=3bf9350ff3859716060079cf08c88eeb35d5cd11#3bf9350ff3859716060079cf08c88eeb35d5cd11"
 dependencies = [
  "agentwire",
  "axum",

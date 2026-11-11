@@ -1,7 +1,7 @@
 # vibetogether-mcp
 
 An MCP server that lets an agent take part in a Vibe Together session.
-It speaks chat (`../website/public/specs/chat.md`), statuses included, on top of agentwire (`../agentwire/agentwire.md`),
+It speaks chat (`../website/public/specs/chat.md`), statuses included, on top of agentwire (`agentwire.md` in `~/dev/agentwire`),
 as a service of its own: agentwire stays transport only.
 Read Vibe Together's design (`../AGENTS.md`) before working here.
 
@@ -37,7 +37,7 @@ Read Vibe Together's design (`../AGENTS.md`) before working here.
 - `just dev` serves at `http://127.0.0.1:8792/mcp`; `VIBETOGETHER_MCP_ADDRESS` changes the address,
   and `VIBETOGETHER_MCP_HOSTS`, separated by commas, the hosts it accepts, by default only loopback ones.
   A session's address, or its last part alone, is on the relay at `AGENTWIRE_RELAY`, by default the public one;
-  for a local relay, run `just agentwire::dev` and set `AGENTWIRE_RELAY=http://127.0.0.1:8790`.
+  for a local relay, run `agentwire-relay`, which the shell has, and set `AGENTWIRE_RELAY=http://127.0.0.1:8790`.
   `VIBETOGETHER_MCP_ACCOUNTS`, the account service's URL, turns signing in on, with `VIBETOGETHER_MCP_RESOURCE`, the server's public URL, for the challenge.
 - It speaks agentwire through the `agentwire` crate, agentwire's Rust participant library.
 - `just ci` runs its own checks.

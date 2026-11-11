@@ -21,9 +21,8 @@ stack url="http://localhost:5173":
     #!/usr/bin/env bash
     set -euo pipefail
     mkdir -p .stack
-    cargo build -q --release -p agentwire-relay
-    AGENTWIRE_ADDRESS=127.0.0.1:8797 AGENTWIRE_DATABASE=.stack/relay.db AGENTWIRE_FILES=../agentwire \
-      AGENTWIRE_ACCESS=http://127.0.0.1:8798/agentwire "${CARGO_TARGET_DIR:-../target}/release/agentwire-relay" &
+    AGENTWIRE_ADDRESS=127.0.0.1:8797 AGENTWIRE_DATABASE=.stack/relay.db \
+      AGENTWIRE_ACCESS=http://127.0.0.1:8798/agentwire agentwire-relay &
     trap 'kill $!' EXIT
     ACCOUNTS_URL={{ url }} ACCOUNTS_PORT=8798 ACCOUNTS_DATABASE=.stack/accounts.db ACCOUNTS_SECRET=a-local-secret-that-is-only-for-development \
       GITHUB_CLIENT_ID=Ov23lioG1e2zHhmOML3d GITHUB_CLIENT_SECRET=none AGENTWIRE_RELAY=http://127.0.0.1:8797 node src/main.ts
