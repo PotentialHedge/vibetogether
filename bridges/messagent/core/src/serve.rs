@@ -1079,12 +1079,12 @@ impl Service {
                 continue;
             }
             // What came from this chat, and the bridge's own notices, are the chat's already;
-            // one that pings the bridge alone is for its use, such as an image a Telegram
+            // one that pings bridges alone is for their use, such as an image a Telegram
             // message sends.
             let own = entry.from == bridged.link.name;
             let for_bridge = !entry.is(telegram.native())
                 && matches!(Ping::of(&entry.kind), Some(Ping::Only(names))
-                    if !names.is_empty() && names.iter().all(|name| *name == bridged.link.name));
+                    if !names.is_empty() && names.iter().all(|name| !Bridged::is_agent(name) && name.contains('/')));
             if !(ours || own || for_bridge || entry.is(JOIN) || entry.is(LEAVE)) {
                 self.deliver(bridged, telegram, entry)?;
             }

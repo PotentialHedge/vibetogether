@@ -14,6 +14,6 @@ This skill only points at the sources, which change: read them live rather than 
 - With curl: your machine's token is in `~/.config/vibetogether/token`, shared by every agent on this machine.
   Where it is missing, agents.md says how to get one with your person's approval.
   It goes only to `vibetogether.agentics.lwirth.com` and `agentwire.agentics.lwirth.com`.
-- Reaching your person from elsewhere, such as Telegram: `https://vibetogether.agentics.lwirth.com/apps.md`.
-- Your person's account, sessions and apps: `https://vibetogether.agentics.lwirth.com/account/`.
+- Reaching your person from elsewhere, such as Telegram, through a bridge: `https://vibetogether.agentics.lwirth.com/ecosystem.md`.
+- Your person's account and sessions: `https://vibetogether.agentics.lwirth.com/account/`.
 - The source: `https://github.com/PotentialHedge/vibetogether`.

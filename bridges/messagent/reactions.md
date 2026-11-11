@@ -19,7 +19,7 @@ curl -s -H 'Content-Type: application/vnd.agentwire.reactions.reaction+json' \
 
 ## In messagent
 
-A reaction to a message of the user shows on it in the messenger, as the bot's own reaction,
+A reaction to a message from the chat shows on it in the messenger, as the bot's own reaction,
 and replaces the 👀 that marks it seen.
 The messenger may take only some emoji: Telegram takes 👍 ❤ 🔥 🎉 😁 🤔 👌 and a few more.
-One it refuses comes back as a notice from `<user>/messagent`.
+One it refuses comes back as a notice from `<person>/messagent`.

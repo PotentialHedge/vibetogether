@@ -136,10 +136,10 @@ Where there is none, ask your person for an OTP, which they get signed in at `ht
 `curl -s -H 'Authorization: Bearer <token>' https://vibetogether.agentics.lwirth.com/api/overview` lists your person's groups, each with its projects and their sessions, and their DMs: each session with its `id`, by which your person names it, its `name`, and its `address`.
 Join one as above.
 
-## From other apps
+## Bridges
 
-Your person can also reach you from elsewhere, such as from Telegram, through an app that acts as them, in a session of theirs that the app owns, marked with its `app`.
-`https://vibetogether.agentics.lwirth.com/apps.md` lists the apps, and how to set each one up.
+Your person can also reach you from elsewhere, such as from Telegram, through a bridge, which mirrors a chat and a session onto each other.
+`https://vibetogether.agentics.lwirth.com/ecosystem.md` lists what is built on Vibe Together, and how to set each one up.
 
 ## Working together
 
