@@ -80,6 +80,9 @@ const PROGRESS_EVERY: Duration = Duration::from_secs(30);
 const TASK_WAIT: Duration = Duration::from_secs(24 * 60 * 60);
 /// The largest image handed to the agent as an image; a larger one is described instead.
 const IMAGE_MAX: u64 = 5 * 1024 * 1024;
+/// The bytes of images one answer holds at most: past them, an image is described as a
+/// file, so that a page of many images holds the server's memory within bounds.
+const IMAGES_MAX: u64 = 12 * 1024 * 1024;
 /// The bytes of entries the server holds for one participant at most: past them, a
 /// receive returns what is pending without a ping, so that a session full of others'
 /// entries fills no memory.
@@ -489,7 +492,13 @@ impl Server {
             if let Some((entries, presence)) = ready {
                 let read = entries.last().map_or(0, |entry| entry.n);
                 let mut content = self
-                    .describe(&entries, Some(&name), Source::Own(link), presence.as_ref())
+                    .describe(
+                        client,
+                        &entries,
+                        Some(&name),
+                        Source::Own(link),
+                        presence.as_ref(),
+                    )
                     .await;
                 if !entries.iter().any(|entry| chat::pings(&entry.kind, &name))
                     && let Some(wait) = wait
@@ -688,16 +697,19 @@ impl Server {
     }
 
     /// The entries as the agent reads them: one JSON object each, in a content block of
-    /// its own, with images inline, and the presence last, so that no body can pass
-    /// for a sender, a mark or another entry.
+    /// its own, with images inline up to `IMAGES_MAX` in all, fetched through the caller's
+    /// `client`, and the presence last, so that no body can pass for a sender, a mark or
+    /// another entry.
     async fn describe(
         &self,
+        client: &Client,
         entries: &[Entry],
         name: Option<&str>,
         source: Source<'_>,
         presence: Option<&BTreeMap<String, Presence>>,
     ) -> Vec<ContentBlock> {
         let mut content = Vec::new();
+        let mut images: u64 = 0;
         for entry in entries {
             let n = entry.n;
             let essence = entry.essence();
@@ -723,11 +735,16 @@ impl Server {
                 (_, Some(body)) if essence.starts_with("text/") && entry.filename.is_none() => {
                     item["text"] = body.as_str().into()
                 }
-                (_, _) if essence.starts_with("image/") && entry.size <= IMAGE_MAX => {
+                (_, _)
+                    if essence.starts_with("image/")
+                        && entry.size <= IMAGE_MAX
+                        && images + entry.size <= IMAGES_MAX =>
+                {
+                    images += entry.size;
                     item["image"] = file();
                     let fetched = match source {
-                        Source::Own(link) => self.client.fetch(link, n).await,
-                        Source::Read(link, token) => self.client.fetch_read(link, n, token).await,
+                        Source::Own(link) => client.fetch(link, n).await,
+                        Source::Read(link, token) => client.fetch_read(link, n, token).await,
                     };
                     match fetched {
                         Ok(payload) => {
@@ -784,6 +801,7 @@ impl Server {
         let received = client.read(&link, &now, token).await.map_err(fail)?;
         Ok(self
             .describe(
+                client,
                 &received.entries,
                 None,
                 Source::Read(&link, token),
@@ -1025,9 +1043,9 @@ enum Source<'a> {
 fn wait_of(wait: Option<f64>) -> Result<Option<Duration>, String> {
     match wait {
         None => Ok(None),
-        Some(wait) if wait.is_finite() && wait >= 0.0 => {
-            Ok(Some(Duration::from_secs_f64(wait).min(TASK_WAIT)))
-        }
+        Some(wait) if wait.is_finite() && wait >= 0.0 => Ok(Some(Duration::from_secs_f64(
+            wait.min(TASK_WAIT.as_secs_f64()),
+        ))),
         Some(_) => Err("wait is a number of seconds, 0 or more".to_owned()),
     }
 }

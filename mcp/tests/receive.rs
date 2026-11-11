@@ -431,3 +431,55 @@ async fn read_shows_the_log_without_joining() {
     let text = self::text(&client.call_tool(read(2)).await.unwrap());
     assert!(!text.contains("Hi."), "{text}");
 }
+
+#[tokio::test]
+async fn a_huge_wait_is_a_long_one() {
+    let world = world().await;
+    let client = world.client(ClientCapabilities::default()).await;
+    let link = join(&client, &world.session).await;
+    let receiving = tokio::spawn({
+        let peer = client.peer().clone();
+        let link = link.clone();
+        async move {
+            peer.call_tool(
+                CallToolRequestParams::new("receive")
+                    .with_arguments(object!({ "link": link, "wait": 1e300 })),
+            )
+            .await
+        }
+    });
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    world.say(None, "Still there?").await;
+    let result = tokio::time::timeout(Duration::from_secs(10), receiving)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    assert!(text(&result).contains("Still there?"));
+}
+
+#[tokio::test]
+async fn one_answer_holds_images_up_to_a_budget() {
+    let world = world().await;
+    let client = world.client(ClientCapabilities::default()).await;
+    let link = join(&client, &world.session).await;
+    let image = vec![0u8; 5 * 1024 * 1024];
+    for _ in 0..3 {
+        world
+            .post("image/png; ping=\"\"", &image, &world.luis)
+            .await;
+    }
+    world.say(None, "Three plots.").await;
+    let result = client.call_tool(receive(&link)).await.unwrap();
+    let shown = result
+        .content
+        .iter()
+        .filter(|block| block.as_image().is_some())
+        .count();
+    assert_eq!(shown, 2);
+    let text = text(&result);
+    assert!(
+        text.contains(r#""n":5,"from":"luis","verified":false,"pings_you":false,"file":{"#),
+        "{text}"
+    );
+}

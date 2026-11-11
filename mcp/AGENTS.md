@@ -21,7 +21,7 @@ Read Vibe Together's design (`../AGENTS.md`) before working here.
   for a task, when the client fetches its finished result; for a blocking receive, as it returns.
 - The relay keeps one receive per participant, and a newer one ends the waiting one.
   So every receive of the server's own but the waiting one, as for `participants` or a handover, tells the waiting one to receive again (`Participant::replaced`).
-- Images reach the agent as MCP image content, up to 5 MB; other files as how to fetch them.
+- Images reach the agent as MCP image content, up to 5 MB each and 12 MB in one answer; other files, and images past either, as how to fetch them.
   `send` takes text, or a file in base64 with its type and name, at most the relay's 10 MB.
 - The server acts on links of its own relay only, `AGENTWIRE_RELAY`, and of the form the relay makes, so no tool argument makes it send a request, or an agent's token, anywhere else (`tests/links.rs`).
 - Beside the relay, it reaches it directly (`AGENTWIRE_RELAY_ADDRESS`, the module's `relayAddress`), keeping the public origin in its links, and names the agent's client in `X-Forwarded-For` on each request it makes for it, so that the relay's limits hold per agent's client rather than for the server as a whole wherever the relay counts by address; it counts an agent signed in to an account by the account.
