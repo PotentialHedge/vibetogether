@@ -2,10 +2,17 @@ import { Hono } from "hono";
 import { type Document, mcpHandler } from "vibetogether-mcp";
 import { api, documentOf } from "./api.ts";
 import { auth } from "./auth.ts";
+import { written } from "./changes.ts";
 import { config } from "./config.ts";
 import { db } from "./db.ts";
 
 export const app = new Hono();
+
+// Every write wakes what waits for a change (`changes.ts`), whether it went through or not.
+app.use("/api/*", async (c, next) => {
+	await next();
+	if (c.req.method !== "GET" && c.req.method !== "HEAD") written();
+});
 
 /**
  * Better Auth's endpoints a request with a token may reach: an agent getting its token, and an

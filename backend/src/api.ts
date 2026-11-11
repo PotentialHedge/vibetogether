@@ -4,6 +4,7 @@
  * deleting the account; signing in and approving an OTP are Better Auth's, outside these.
  */
 import { grantKey } from "./caller.ts";
+import { changed, versionOf } from "./changes.ts";
 import {
 	areFriends,
 	db,
@@ -34,6 +35,7 @@ import {
 	sessionJson,
 	sessionOperations,
 } from "./sessions.ts";
+import { Refused } from "./transport.ts";
 
 export const api = newApi();
 
@@ -269,7 +271,21 @@ api.openapi(
 		path: "/overview",
 		summary: "Show everything at once",
 		description:
-			"The account, its groups each with its projects and their sessions, its DMs and its friends: all an agent needs to find a session, in one request, with the ids the other operations take.",
+			"The account, its groups each with its projects and their sessions, its DMs and its friends: all an agent needs to find a session, in one request, with the ids the other operations take. With `version`, it waits until any of it changes, such as by a friend or another agent.",
+		request: {
+			query: z
+				.object({
+					version: z.string().optional().meta({
+						description:
+							"An overview's `version`: waits until the overview differs from it, and returns at once where it already does.",
+					}),
+					wait: z.coerce.number().int().min(0).optional().meta({
+						description:
+							"Waits at most this many seconds, and then returns the overview as it is.",
+					}),
+				})
+				.strict(),
+		},
 		responses: {
 			200: json(
 				z.object({
@@ -281,32 +297,56 @@ api.openapi(
 					),
 					dms: z.array(Session),
 					friends: z.array(Friend),
+					version: z.string().meta({
+						description: "Differs wherever the rest does.",
+					}),
 				}),
 				"The account and what it has.",
 			),
 		},
 	}),
-	(c) => {
+	async (c) => {
 		const me = c.var.caller.id;
-		const sessions = projectSessionsOf(me).map((id) => sessionJson(id, me));
-		const projects = projectsOf(me).map((project) => ({
-			...projectJson(project),
-			sessions: sessions.filter((s) => s.project?.id === project.id),
-		}));
-		return c.json(
-			{
-				account: accountJson(me),
-				groups: groupsOf(me).map((group) => ({
-					...groupJson(group),
-					projects: projects.filter((p) => p.group.id === group.id),
-				})),
-				dms: dmsOf(me),
-				friends: friendsOf(me),
-			},
-			200,
-		);
+		const { version, wait } = c.req.valid("query");
+		try {
+			const overview =
+				version === undefined
+					? overviewOf(me)
+					: await changed(
+							me,
+							() => overviewOf(me),
+							version,
+							wait,
+							c.req.raw.signal,
+						);
+			if (!overview) return c.text("The wait was cut off.", 400);
+			return c.json({ ...overview, version: versionOf(overview) }, 200);
+		} catch (error) {
+			if (!(error instanceof Refused)) throw error;
+			if (error.retryAfter !== undefined)
+				c.header("Retry-After", String(error.retryAfter));
+			return c.text(error.message, error.status);
+		}
 	},
 );
+
+/** Everything the account sees at once, as `overview` answers it. */
+function overviewOf(me: string) {
+	const sessions = projectSessionsOf(me).map((id) => sessionJson(id, me));
+	const projects = projectsOf(me).map((project) => ({
+		...projectJson(project),
+		sessions: sessions.filter((s) => s.project?.id === project.id),
+	}));
+	return {
+		account: accountJson(me),
+		groups: groupsOf(me).map((group) => ({
+			...groupJson(group),
+			projects: projects.filter((p) => p.group.id === group.id),
+		})),
+		dms: dmsOf(me),
+		friends: friendsOf(me),
+	};
+}
 
 api.openapi(
 	operation({

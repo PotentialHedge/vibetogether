@@ -10,6 +10,7 @@ Its interface is its operations, defined once in the code and served as an OpenA
 - One SQLite database, `node:sqlite`, holds Better Auth's tables and the backend's own (`src/db.ts`).
   No migrations: a breaking change to the schema starts from a fresh database, Luis's decision (2026-11-11).
 - A token is an opaque Better Auth session token (a machine's, from an OTP) or OAuth access token (prefixed `vt_at_`), looked up at each request, so that revoking one cuts its agent off at once.
+- `overview` with a `version` waits until the account's overview changes, Luis's decision (2026-11-11), so a page or an agent sees what others change without polling (`src/changes.ts`): every write wakes each waiter, which compares its overview's version.
 - The transport is in memory beside the database: `src/transport.ts` holds the log, the participants and the waiting receives, and `src/sessions.ts` its operations.
 - The website and agents use the same requests: nothing is only for the website.
 - Over HTTPS every cookie is `__Host-` and host-only, and `trustedOrigins` holds the exact origin alone, since other sites under the same domain are other people's.

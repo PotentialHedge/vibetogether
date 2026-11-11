@@ -1,6 +1,7 @@
 /** The parts the pages of an account share: a person's face, and rows. */
 
-import { type ReactNode, useState } from "react";
+import { type ReactNode, useEffect, useState } from "react";
+import { api, Unauthorized } from "@/account/api";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -135,4 +136,32 @@ export function useActions(reload: () => Promise<void>) {
 		await reload();
 	};
 	return { problem, act, dismiss: () => setProblem(null) };
+}
+
+/** Reloads whenever anything the account sees changes, such as by an agent or
+ * a friend, from `version`, the one the page's state was loaded at. */
+export function useReloadOnChange(
+	version: string | undefined,
+	reload: () => Promise<void>,
+) {
+	useEffect(() => {
+		if (version === undefined) return;
+		const stop = new AbortController();
+		(async () => {
+			let seen = version;
+			while (!stop.signal.aborted) {
+				try {
+					const next = await api.version(seen, stop.signal);
+					if (next === seen) continue;
+					seen = next;
+					await reload();
+				} catch (error) {
+					if (stop.signal.aborted) return;
+					if (error instanceof Unauthorized) return void (await reload());
+					await new Promise((resolve) => setTimeout(resolve, 10_000));
+				}
+			}
+		})();
+		return () => stop.abort();
+	}, [version, reload]);
 }

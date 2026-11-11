@@ -115,9 +115,11 @@ async function call<T>(
 	method: string,
 	path: string,
 	body?: unknown,
+	signal?: AbortSignal,
 ): Promise<T> {
 	const response = await fetch(page(path), {
 		method,
+		...(signal && { signal }),
 		credentials: "same-origin",
 		headers: body === undefined ? {} : { "Content-Type": "application/json" },
 		body: body === undefined ? null : JSON.stringify(body),
@@ -130,6 +132,19 @@ async function call<T>(
 
 const live = {
 	me: () => call<Me>("GET", "api/me"),
+	/** The version of everything the account sees at once; with `version`, it
+	 * waits until that differs, at most four minutes. */
+	version: async (version?: string, signal?: AbortSignal) =>
+		(
+			await call<{ version: string }>(
+				"GET",
+				version === undefined
+					? "api/overview"
+					: `api/overview?version=${encodeURIComponent(version)}&wait=240`,
+				undefined,
+				signal,
+			)
+		).version,
 	groups: () => call<Group[]>("GET", "api/groups"),
 	createGroup: (name: string) => call<Group>("POST", "api/groups", { name }),
 	deleteGroup: (id: string) =>
@@ -304,6 +319,15 @@ function mock(): Api {
 	const done = async () => {};
 	return {
 		me: async () => me,
+		// Nothing changes on its own here.
+		version: (version?: string, signal?: AbortSignal) =>
+			version === undefined
+				? Promise.resolve("demo")
+				: new Promise<string>((_, reject) =>
+						signal?.addEventListener("abort", () =>
+							reject(new DOMException("Aborted", "AbortError")),
+						),
+					),
 		groups: async () => groups,
 		createGroup: async (name) => {
 			const group = {

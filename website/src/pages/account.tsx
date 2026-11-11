@@ -16,7 +16,7 @@ import {
 	type Session,
 	Unauthorized,
 } from "@/account/api";
-import { useActions } from "@/account/parts";
+import { useActions, useReloadOnChange } from "@/account/parts";
 import {
 	ConfirmDialog,
 	CopySessionPrompt,
@@ -33,6 +33,8 @@ import { cn } from "@/lib/utils";
 import { render, Site } from "@/site";
 
 type State = {
+	/** The version of everything the account sees, as it was loaded at. */
+	version: string;
 	me: Me;
 	groups: Group[];
 	projects: Project[];
@@ -42,6 +44,8 @@ type State = {
 };
 
 async function load(): Promise<State> {
+	// First, so that a change while the rest loads shows as one more.
+	const version = await api.version();
 	const [me, groups, projects, sessions, friends, dms] = await Promise.all([
 		api.me(),
 		api.groups(),
@@ -50,7 +54,7 @@ async function load(): Promise<State> {
 		api.friends(),
 		api.dms(),
 	]);
-	return { me, groups, projects, sessions, friends, dms };
+	return { version, me, groups, projects, sessions, friends, dms };
 }
 
 /** What is open, kept in the address so that a reload or a link opens it
@@ -287,6 +291,10 @@ function Account() {
 	useEffect(() => {
 		reload();
 	}, [reload]);
+	useReloadOnChange(
+		state && state !== "signed-out" ? state.version : undefined,
+		reload,
+	);
 
 	if (problem)
 		return (

@@ -509,3 +509,40 @@ test("the MCP server's tools are the document's operations", async () => {
 	assert.equal(log.entries.at(-1).text, "via MCP");
 	assert.equal(log.entries.at(-1).from, "ben/claude");
 });
+
+test("an overview with its version waits until it changes", async () => {
+	const first = (await call(ben.machine, "GET", "/api/overview")).json;
+	assert.equal(typeof first.version, "string");
+	// A write that changes nothing of Ben's doesn't wake him.
+	const unchanged = call(
+		ben.machine,
+		"GET",
+		`/api/overview?version=${first.version}&wait=1`,
+	);
+	await call(eve.browser, "POST", "/api/groups", { name: "elsewhere" });
+	assert.equal((await unchanged).json.version, first.version);
+	// A change to his group by Luis's agent does.
+	const woken = call(
+		ben.machine,
+		"GET",
+		`/api/overview?version=${first.version}&wait=10`,
+	);
+	await call(luis.machine, "POST", "/api/projects", {
+		name: "proofmarket",
+		group: group.id,
+	});
+	const next = (await woken).json;
+	assert.notEqual(next.version, first.version);
+	assert.ok(
+		next.groups
+			.find((g: any) => g.id === group.id)
+			.projects.some((p: any) => p.name === "proofmarket"),
+	);
+	// An old version returns at once.
+	const again = await call(
+		ben.machine,
+		"GET",
+		`/api/overview?version=${first.version}`,
+	);
+	assert.equal(again.json.version, next.version);
+});

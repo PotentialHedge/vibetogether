@@ -21,13 +21,22 @@ import {
 	type Me,
 	Unauthorized,
 } from "@/account/api";
-import { AddByName, Person, Row, Titled, useActions } from "@/account/parts";
+import {
+	AddByName,
+	Person,
+	Row,
+	Titled,
+	useActions,
+	useReloadOnChange,
+} from "@/account/parts";
 import { SignIn } from "@/account/sign-in";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { page, render, Site } from "@/site";
 
 type State = {
+	/** The version of everything the account sees, as it was loaded at. */
+	version: string;
 	me: Me;
 	friends: Friend[];
 	logins: Login[];
@@ -35,13 +44,15 @@ type State = {
 };
 
 async function load(): Promise<State> {
+	// First, so that a change while the rest loads shows as one more.
+	const version = await api.version();
 	const [me, friends, logins, activity] = await Promise.all([
 		api.me(),
 		api.friends(),
 		api.logins(),
 		api.activity(),
 	]);
-	return { me, friends, logins, activity };
+	return { version, me, friends, logins, activity };
 }
 
 const date = new Intl.DateTimeFormat(undefined, { dateStyle: "medium" });
@@ -396,6 +407,10 @@ function Page() {
 	useEffect(() => {
 		reload();
 	}, [reload]);
+	useReloadOnChange(
+		state && state !== "signed-out" ? state.version : undefined,
+		reload,
+	);
 
 	if (problem)
 		return (
