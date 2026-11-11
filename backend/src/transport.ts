@@ -1,0 +1,661 @@
+/**
+ * The transport: each session's log, its participants, and the receives waiting on it.
+ * Everything waiting is in memory, everything else in the database, so a restart ends the
+ * waiting receives, which their clients make again.
+ */
+import { statfsSync } from "node:fs";
+import { dirname } from "node:path";
+import { lasts } from "./caller.ts";
+import { config } from "./config.ts";
+import { db, sessionFor, transaction } from "./db.ts";
+
+export const joinType = "application/vnd.vibetogether.join";
+export const leaveType = "application/vnd.vibetogether.leave";
+export const statusType = "application/vnd.vibetogether.chat.status+json";
+
+/** The most a payload holds. */
+export const maxPayload = 10 * 1024 * 1024;
+/** The most text an entry carries inline; a longer payload is fetched. */
+const maxInline = 64 * 1024;
+/** About the most one answer carries, of the entries' inline text; it always carries one. */
+const maxAnswer = 1024 * 1024;
+/** How long a name an agent holds stays its login's after its last receive, unless it leaves. */
+const holdFor = 3600_000;
+
+/** A participant: a person, where `agent` is empty, or one of their agents. */
+export type Participant = { session: string; user: string; agent: string };
+
+type ParticipantRow = Participant & {
+	login: string;
+	inside: number;
+	entry: number;
+	read: number;
+	since: string;
+	holder: string | null;
+	status: string | null;
+};
+
+export type Entry = {
+	n: number;
+	time: string;
+	from: string;
+	type: string;
+	size: number;
+	filename?: string;
+	text?: string;
+};
+
+type EntryRow = {
+	n: number;
+	time: string;
+	sender: string;
+	type: string;
+	size: number;
+	filename: string | null;
+	text: string | null;
+};
+
+export type Presence = Record<
+	string,
+	{ read: number; receiving: boolean; since?: string; status?: string }
+>;
+
+export type Answer = {
+	entries: (Entry & { ping?: boolean })[];
+	presence: Presence;
+};
+
+/** What wakes a receive: an entry that pings it, any entry, or any change, presence included. */
+export type Wake = "ping" | "entry" | "change";
+
+/** A refusal, with its status and one sentence. */
+export class Refused extends Error {
+	readonly status: 400 | 403 | 404 | 409 | 413 | 503;
+	readonly retryAfter: number | undefined;
+	constructor(status: Refused["status"], message: string, retryAfter?: number) {
+		super(message);
+		this.status = status;
+		this.retryAfter = retryAfter;
+	}
+}
+
+export function nameOf(login: string, agent: string): string {
+	return agent ? `${login}/${agent}` : login;
+}
+
+const participants = `SELECT p.*, u.login FROM participant p JOIN user u ON u.id = p.user`;
+
+function participantRow(p: Participant): ParticipantRow | undefined {
+	return db
+		.prepare(
+			`${participants} WHERE p.session = ? AND p.user = ? AND p.agent = ?`,
+		)
+		.get(p.session, p.user, p.agent) as ParticipantRow | undefined;
+}
+
+function entryJson(row: EntryRow): Entry {
+	return {
+		n: row.n,
+		time: row.time,
+		from: row.sender,
+		type: row.type,
+		size: row.size,
+		...(row.filename !== null && { filename: row.filename }),
+		...(row.text !== null && { text: row.text }),
+	};
+}
+
+function lastOf(session: string): number {
+	return (
+		db
+			.prepare("SELECT coalesce(max(n), 0) AS n FROM entry WHERE session = ?")
+			.get(session) as { n: number }
+	).n;
+}
+
+/** A MIME type's parameter, such as `ping` of `text/plain; ping="ben ben/claude"`. */
+function parameterOf(type: string, name: string): string | undefined {
+	const pattern = new RegExp(
+		`;\\s*${name}\\s*=\\s*(?:"([^"]*)"|([^;\\s]*))`,
+		"i",
+	);
+	const match = type.match(pattern);
+	return match ? (match[1] ?? match[2] ?? "") : undefined;
+}
+
+/**
+ * Whether `entry` pings `name`: a `ping` parameter names whom it pings, or `*` everyone; left
+ * out, a message pings everyone, and an entry of an extension, of a `vnd.` type, no one.
+ */
+export function pings(type: string, name: string): boolean {
+	const ping = parameterOf(type, "ping");
+	if (ping === undefined) {
+		const subtype =
+			type.split(";")[0]?.split("/")[1]?.trim().toLowerCase() ?? "";
+		return !subtype.startsWith("vnd.");
+	}
+	const names = ping.split(/\s+/).filter(Boolean);
+	return names.includes("*") || names.includes(name);
+}
+
+/** Who is in the session, with their read position, whether they are receiving, and their status. */
+export function presenceOf(session: string): Presence {
+	const rows = db
+		.prepare(
+			`${participants} WHERE p.session = ? AND p.inside = 1 ORDER BY u.login, p.agent`,
+		)
+		.all(session) as ParticipantRow[];
+	const presence: Presence = {};
+	for (const row of rows) {
+		const receiving = [...waiting].some(
+			(w) =>
+				w.session === session && w.user === row.user && w.agent === row.agent,
+		);
+		presence[nameOf(row.login, row.agent)] = {
+			read: row.read,
+			receiving,
+			...(!receiving && { since: row.since }),
+			...(row.status && { status: row.status }),
+		};
+	}
+	return presence;
+}
+
+/** A receive or a read that waits: a participant's, or a member's reading. */
+type Waiter = {
+	session: string;
+	/** The participant's, where it is a receive; a read is no participant. */
+	user: string;
+	agent: string;
+	reads: boolean;
+	login: string;
+	name: string;
+	wake: Wake;
+	own: boolean;
+	after: number;
+	end: (outcome: Found | Refused, presence?: Presence) => void;
+};
+
+/** What a waiter found: the entries for it, and the last entry they cover, its own included. */
+type Found = { entries: EntryRow[]; covered: number };
+
+const waiting = new Set<Waiter>();
+
+/** The entries after `after`, the waiter's own left out where it wants them not, about one answer's worth. */
+function entriesFor(
+	w: Pick<Waiter, "session" | "name" | "own" | "reads" | "after">,
+): Found {
+	const rows = db
+		.prepare(
+			"SELECT n, time, sender, type, size, filename, text FROM entry WHERE session = ? AND n > ? ORDER BY n LIMIT 1000",
+		)
+		.all(w.session, w.after) as EntryRow[];
+	const entries: EntryRow[] = [];
+	let covered = w.after;
+	let bytes = 0;
+	for (const row of rows) {
+		bytes += (row.text?.length ?? 0) + 200;
+		if (entries.length && bytes > maxAnswer) break;
+		covered = row.n;
+		if (!w.reads && !w.own && row.sender === w.name) continue;
+		entries.push(row);
+	}
+	return { entries, covered };
+}
+
+/** Whether `w` has something to return now. */
+function ready(w: Waiter, entries: EntryRow[]): boolean {
+	if (w.reads || w.wake !== "ping") return entries.length > 0;
+	return entries.some((e) => pings(e.type, w.name));
+}
+
+function answerOf(w: Waiter, { entries }: Found, presence: Presence): Answer {
+	return {
+		entries: entries.map((row) => ({
+			...entryJson(row),
+			...(!w.reads && { ping: pings(row.type, w.name) }),
+		})),
+		presence,
+	};
+}
+
+/**
+ * Wakes the waiters of `session` that have something now, or all those that wake for any
+ * change where the presence changed. Every one woken at once gets the presence from before
+ * any of them ended.
+ */
+function notify(session: string, presenceChanged: boolean): void {
+	const woken: [Waiter, Found][] = [];
+	for (const w of waiting) {
+		if (w.session !== session) continue;
+		const found = entriesFor(w);
+		if (ready(w, found.entries) || (presenceChanged && w.wake === "change"))
+			woken.push([w, found]);
+	}
+	if (!woken.length) return;
+	const presence = presenceOf(session);
+	for (const [w, found] of woken) w.end(found, presence);
+}
+
+/** Ends every waiter of `session` that `matches`, with `outcome`. */
+function endWaiters(
+	session: string,
+	matches: (w: Waiter) => boolean,
+	outcome: (w: Waiter) => Found | Refused,
+): void {
+	const presence = presenceOf(session);
+	for (const w of [...waiting])
+		if (w.session === session && matches(w)) w.end(outcome(w), presence);
+}
+
+/** Ends everything waiting on a session that is gone. */
+export function sessionGone(session: string): void {
+	endWaiters(
+		session,
+		() => true,
+		() => new Refused(404, "No such session."),
+	);
+}
+
+/** Checks that the caller may still be in `session`, as a member, and holds the participant's name. */
+function stillIn(w: Waiter): Refused | undefined {
+	if (!lasts(w.user, w.login)) return new Refused(403, "The login is revoked.");
+	if (!sessionFor(w.session, w.user))
+		return new Refused(403, "You are no longer in this session's group.");
+	if (w.reads) return undefined;
+	const row = participantRow(w);
+	if (!row?.inside) return new Refused(403, "You left the session.");
+	if (row.holder !== null && row.holder !== w.login)
+		return new Refused(403, "Another login took this name.");
+	return undefined;
+}
+
+// Every few seconds, so that a revoked login or a member who left is cut off on a receive
+// already waiting too.
+setInterval(() => {
+	for (const w of [...waiting]) {
+		const refused = stillIn(w);
+		if (refused) w.end(refused);
+	}
+}, 5000).unref();
+
+/** The participant as `login` acts for it, or why not: joined, and its name held by `login`. */
+function inside(p: Participant, login: string): ParticipantRow {
+	const row = participantRow(p);
+	if (!row?.inside)
+		throw new Refused(
+			403,
+			"Join the session first, or join again after leaving.",
+		);
+	if (row.holder !== null && row.holder !== login)
+		throw new Refused(
+			403,
+			"Another login took this name: join again to take it back, or take another.",
+		);
+	return row;
+}
+
+/** The limits on what one account adds, per hour, and on its receives waiting at once. */
+const limits = { entries: 3000, bytes: 1024 * 1024 * 1024, waiting: 64 };
+const added = new Map<
+	string,
+	{ start: number; entries: number; bytes: number }
+>();
+
+function adds(user: string, bytes: number): void {
+	try {
+		const disk = statfsSync(dirname(config.database));
+		if (disk.bavail * disk.bsize < 1024 * 1024 * 1024 + bytes)
+			throw new Refused(503, "The backend's disk is nearly full.", 3600);
+	} catch (error) {
+		if (error instanceof Refused) throw error;
+	}
+	const now = Date.now();
+	let count = added.get(user);
+	if (!count || now - count.start > 3600_000) {
+		count = { start: now, entries: 0, bytes: 0 };
+		added.set(user, count);
+	}
+	if (count.entries + 1 > limits.entries || count.bytes + bytes > limits.bytes)
+		throw new Refused(
+			503,
+			"This account added too much this hour.",
+			Math.ceil((count.start + 3600_000 - now) / 1000),
+		);
+	count.entries += 1;
+	count.bytes += bytes;
+}
+
+function append(
+	session: string,
+	sender: string,
+	type: string,
+	payload: Uint8Array,
+	filename: string | null,
+): number {
+	const n = lastOf(session) + 1;
+	const text = inlineText(type, payload);
+	db.prepare(
+		"INSERT INTO entry (session, n, time, sender, type, size, filename, text, payload) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+	).run(
+		session,
+		n,
+		new Date().toISOString().replace(/\.\d+Z$/, "Z"),
+		sender,
+		type,
+		payload.length,
+		filename,
+		text ?? null,
+		text === undefined && payload.length ? payload : null,
+	);
+	return n;
+}
+
+/** The payload as text where it is short text: any `text/*`, `application/json` or `+json` type. */
+function inlineText(type: string, payload: Uint8Array): string | undefined {
+	const essence = type.split(";")[0]?.trim().toLowerCase() ?? "";
+	const textual =
+		essence.startsWith("text/") ||
+		essence === "application/json" ||
+		essence.endsWith("+json");
+	if (!textual || payload.length > maxInline) return undefined;
+	try {
+		return new TextDecoder("utf-8", { fatal: true }).decode(payload);
+	} catch {
+		return undefined;
+	}
+}
+
+/**
+ * Joins `p` as `login`, or joins again; joining while in does nothing. An agent's name is held
+ * by one login at a time: another login takes it once its holder left, was revoked, or has not
+ * received for an hour.
+ */
+export function join(
+	p: Participant,
+	login: string,
+	name: string,
+): { n: number; name: string; read: number } {
+	const holder = p.agent ? login : null;
+	const result = transaction(() => {
+		const row = participantRow(p);
+		if (row?.inside) {
+			if (row.holder === null || row.holder === login)
+				return { n: row.entry, read: row.read, took: false };
+			const busy = [...waiting].some(
+				(w) =>
+					!w.reads &&
+					w.session === p.session &&
+					w.user === p.user &&
+					w.agent === p.agent,
+			);
+			const recent = Date.now() - Date.parse(row.since) < holdFor;
+			if (lasts(p.user, row.holder) && (busy || recent))
+				throw new Refused(
+					409,
+					`${name} is held by another login: pick another name, such as ${name}-2.`,
+				);
+			db.prepare(
+				"UPDATE participant SET holder = ? WHERE session = ? AND user = ? AND agent = ?",
+			).run(holder, p.session, p.user, p.agent);
+			return { n: row.entry, read: row.read, took: true };
+		}
+		const n = append(p.session, name, joinType, new Uint8Array(), null);
+		const now = new Date().toISOString();
+		db.prepare(
+			`INSERT INTO participant (session, user, agent, inside, entry, read, since, holder)
+			 VALUES (?, ?, ?, 1, ?, ?, ?, ?)
+			 ON CONFLICT DO UPDATE SET inside = 1, entry = excluded.entry, since = excluded.since, holder = excluded.holder`,
+		).run(p.session, p.user, p.agent, n, row?.read ?? 0, now, holder);
+		return { n, read: row?.read ?? 0, took: false };
+	});
+	if (result.took)
+		endWaiters(
+			p.session,
+			(w) =>
+				!w.reads &&
+				w.user === p.user &&
+				w.agent === p.agent &&
+				w.login !== login,
+			() => new Refused(403, "Another login took this name."),
+		);
+	notify(p.session, true);
+	return { n: result.n, name, read: result.read };
+}
+
+/** Leaves: the name's receives still waiting return, on every login. */
+export function leave(
+	p: Participant,
+	login: string,
+	name: string,
+): { n: number } {
+	const row = participantRow(p);
+	if (row && !row.inside) return { n: row.entry };
+	inside(p, login);
+	const n = transaction(() => {
+		const n = append(p.session, name, leaveType, new Uint8Array(), null);
+		db.prepare(
+			"UPDATE participant SET inside = 0, entry = ?, holder = NULL, status = NULL, since = ? WHERE session = ? AND user = ? AND agent = ?",
+		).run(n, new Date().toISOString(), p.session, p.user, p.agent);
+		return n;
+	});
+	endWaiters(
+		p.session,
+		(w) => !w.reads && w.user === p.user && w.agent === p.agent,
+		entriesFor,
+	);
+	notify(p.session, true);
+	return { n };
+}
+
+/** Sends an entry, and returns its number. A status sets the sender's status as well. */
+export function send(
+	p: Participant,
+	login: string,
+	name: string,
+	type: string,
+	payload: Uint8Array,
+	filename: string | null,
+): { n: number } {
+	inside(p, login);
+	if (payload.length > maxPayload)
+		throw new Refused(
+			413,
+			`A payload is at most ${maxPayload / 1024 / 1024} MB.`,
+		);
+	let status: string | null | undefined;
+	if (type.split(";")[0]?.trim().toLowerCase() === statusType) {
+		const text = (() => {
+			try {
+				return JSON.parse(new TextDecoder().decode(payload))?.text;
+			} catch {
+				return undefined;
+			}
+		})();
+		if (typeof text !== "string")
+			throw new Refused(400, 'A status is {"text": "<one sentence>"}.');
+		status = text.trim().slice(0, 500) || null;
+	}
+	adds(p.user, payload.length);
+	const n = transaction(() => {
+		const n = append(p.session, name, type, payload, filename);
+		if (status !== undefined)
+			db.prepare(
+				"UPDATE participant SET status = ? WHERE session = ? AND user = ? AND agent = ?",
+			).run(status, p.session, p.user, p.agent);
+		return n;
+	});
+	notify(p.session, status !== undefined);
+	return { n };
+}
+
+/**
+ * Receives what others sent after the read position, or after `after`, and acknowledges what it
+ * covers as it returns. It waits until something wakes it, or `wait` seconds are over.
+ * One receive per participant and login at a time: a newer one ends the one before with 409.
+ */
+export function receive(
+	p: Participant,
+	login: string,
+	name: string,
+	options: { after?: number; wait?: number; wake: Wake; own: boolean },
+	signal: AbortSignal,
+): Promise<Answer> {
+	const row = inside(p, login);
+	endWaiters(
+		p.session,
+		(w) =>
+			!w.reads && w.user === p.user && w.agent === p.agent && w.login === login,
+		() =>
+			new Refused(
+				409,
+				"A newer receive of the same participant replaced this one.",
+			),
+	);
+	return wait(
+		{
+			session: p.session,
+			user: p.user,
+			agent: p.agent,
+			reads: false,
+			login,
+			name,
+			wake: options.wake,
+			own: options.own,
+			after: Math.min(options.after ?? row.read, lastOf(p.session)),
+		},
+		options.wait,
+		signal,
+	);
+}
+
+/** Reads the log without joining: every entry after `after`, waiting up to `wait` seconds for one. */
+export function read(
+	session: string,
+	user: string,
+	login: string,
+	options: { after: number; wait: number },
+	signal: AbortSignal,
+): Promise<Answer> {
+	return wait(
+		{
+			session,
+			user,
+			agent: "",
+			reads: true,
+			login,
+			name: "",
+			wake: "entry",
+			own: true,
+			after: options.after,
+		},
+		options.wait,
+		signal,
+	);
+}
+
+function wait(
+	w: Omit<Waiter, "end">,
+	seconds: number | undefined,
+	signal: AbortSignal,
+): Promise<Answer> {
+	const waiter = w as Waiter;
+	const found = entriesFor(waiter);
+	if (ready(waiter, found.entries) || seconds === 0)
+		return Promise.resolve(finish(waiter, found, presenceOf(w.session), false));
+	if (
+		[...waiting].filter((other) => other.user === w.user).length >=
+		limits.waiting
+	)
+		return Promise.reject(
+			new Refused(503, "This account has too many receives waiting.", 10),
+		);
+	// Whether a receive is waiting is presence; one that wakes for any change, such as a
+	// page's, changes nothing for others, so that two of them don't wake each other forever.
+	const counted = !waiter.reads && waiter.wake !== "change";
+	return new Promise<Answer>((resolve, reject) => {
+		let timer: NodeJS.Timeout | undefined;
+		const stop = (): boolean => {
+			if (!waiting.delete(waiter)) return false;
+			clearTimeout(timer);
+			signal.removeEventListener("abort", abort);
+			return true;
+		};
+		waiter.end = (outcome, presence) => {
+			if (!stop()) return;
+			if (outcome instanceof Refused) {
+				reject(outcome);
+				if (counted) notify(w.session, true);
+			} else
+				resolve(
+					finish(waiter, outcome, presence ?? presenceOf(w.session), counted),
+				);
+		};
+		const abort = () => {
+			if (!stop()) return;
+			reject(new Refused(400, "The receive was cut off."));
+			if (waiter.reads) return;
+			db.prepare(
+				"UPDATE participant SET since = ? WHERE session = ? AND user = ? AND agent = ?",
+			).run(new Date().toISOString(), w.session, w.user, w.agent);
+			if (counted) notify(w.session, true);
+		};
+		waiting.add(waiter);
+		signal.addEventListener("abort", abort);
+		if (seconds !== undefined)
+			timer = setTimeout(() => waiter.end(entriesFor(waiter)), seconds * 1000);
+		if (counted) notify(w.session, true);
+	});
+}
+
+/**
+ * A receive that returns acknowledges what it covers, and ends its receiving: the presence
+ * changes where its read position moved, or where it counted as receiving.
+ */
+function finish(
+	w: Waiter,
+	found: Found,
+	presence: Presence,
+	wasReceiving: boolean,
+): Answer {
+	const answer = answerOf(w, found, presence);
+	if (w.reads) return answer;
+	const moved = db
+		.prepare(
+			"UPDATE participant SET read = ? WHERE session = ? AND user = ? AND agent = ? AND read < ?",
+		)
+		.run(found.covered, w.session, w.user, w.agent, found.covered).changes;
+	db.prepare(
+		"UPDATE participant SET since = ? WHERE session = ? AND user = ? AND agent = ?",
+	).run(new Date().toISOString(), w.session, w.user, w.agent);
+	if (moved || wasReceiving) queueMicrotask(() => notify(w.session, true));
+	return answer;
+}
+
+/** An entry's payload, with its type and file name. */
+export function payloadOf(
+	session: string,
+	n: number,
+): { type: string; filename: string | null; bytes: Uint8Array } | undefined {
+	const row = db
+		.prepare(
+			"SELECT type, filename, text, payload FROM entry WHERE session = ? AND n = ?",
+		)
+		.get(session, n) as
+		| {
+				type: string;
+				filename: string | null;
+				text: string | null;
+				payload: Uint8Array | null;
+		  }
+		| undefined;
+	if (!row) return undefined;
+	return {
+		type: row.type,
+		filename: row.filename,
+		bytes:
+			row.text !== null
+				? new TextEncoder().encode(row.text)
+				: (row.payload ?? new Uint8Array()),
+	};
+}

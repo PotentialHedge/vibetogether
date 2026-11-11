@@ -4,24 +4,7 @@
  * receives while the session is open in it, so the person is present while
  * they are on the page. */
 
-import {
-	type Entry,
-	JOIN,
-	LEAVE,
-	Session as Participant,
-	type Presence,
-	Reader,
-	RelayError,
-} from "agentwire/participant";
-import {
-	ArrowLeftRight,
-	ArrowUp,
-	Download,
-	Ellipsis,
-	Minus,
-	Plus,
-	Users,
-} from "lucide-react";
+import { ArrowUp, Download, Ellipsis, Minus, Plus, Users } from "lucide-react";
 import {
 	type ReactNode,
 	useEffect,
@@ -32,7 +15,15 @@ import {
 } from "react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { api, demo, linkKey, type Session } from "@/account/api";
+import { demo, type Session } from "@/account/api";
+import {
+	type Entry,
+	JOIN,
+	LEAVE,
+	type Presence,
+	Seat,
+	STATUS,
+} from "@/account/live";
 import { MoreInfo } from "@/components/more-info";
 import { Button } from "@/components/ui/button";
 import {
@@ -44,54 +35,14 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 
-const STATUS = "application/vnd.agentwire.chat.status+json";
-
-/** The person in a session, one per address: joined once, and kept across
- * React mounting the page twice and across opening the session again. */
-const seats = new Map<string, Promise<Participant>>();
-
-/** Joins `address` as `name`, again with the link kept from before, so that
- * opening the session again adds nothing to its log. */
-async function join(address: string, name: string): Promise<Participant> {
-	const token = await api.pageToken();
-	const kept = localStorage.getItem(linkKey(address));
-	const take = async (me: string | null) => {
-		const person = new Participant(address, name, me, token);
-		await person.join();
-		localStorage.setItem(linkKey(address), person.me as string);
-		return person;
-	};
-	if (kept)
-		try {
-			return await take(kept);
-		} catch (error) {
-			// The kept link is no participant's any more, such as after the
-			// name was taken back: join afresh.
-			if (!(error instanceof RelayError && error.status === 403)) throw error;
-			localStorage.removeItem(linkKey(address));
-		}
-	return take(null);
-}
-
-function seat(address: string, name: string): Promise<Participant> {
-	let made = seats.get(address);
-	if (!made) {
-		made = join(address, name);
-		made.catch(() => seats.delete(address));
-		seats.set(address, made);
-	}
-	return made;
-}
-
 type Log = {
 	live: boolean;
 	/** What fetches the payloads, once it is made: none in the demo. */
-	source: Participant | Reader | null;
+	source: Seat | null;
 	entries: Entry[];
 	presence: Presence;
 	problem: string | null;
-	/** Sends a message as the person, where they are in: not while only
-	 * reading. */
+	/** Sends a message as the person, once they are in. */
 	send: ((text: string, ping: string[] | null) => Promise<void>) | null;
 	/** Why the person only reads here, where they do. */
 	note: string | null;
@@ -100,7 +51,7 @@ type Log = {
 const markdown = (ping: string[] | null) =>
 	ping ? `text/markdown; ping="${ping.join(" ")}"` : "text/markdown";
 
-function useLog(session: Pick<Session, "address">, name: string): Log {
+function useLog(session: Pick<Session, "id">, name: string): Log {
 	const [log, setLog] = useState<Log>({
 		live: false,
 		source: null,
@@ -130,7 +81,6 @@ function useLog(session: Pick<Session, "address">, name: string): Log {
 								type: markdown(ping),
 								size: text.length,
 								text,
-								account: name,
 							},
 						],
 					})),
@@ -138,81 +88,47 @@ function useLog(session: Pick<Session, "address">, name: string): Log {
 			return;
 		}
 		let gone = false;
-		let stop = () => {};
-		let person: Participant | null = null;
-		const follow = (source: Participant | Reader) => {
-			stop();
-			if (gone) return;
-			setLog((log) => ({ ...log, source }));
-			stop = source.subscribe({
-				entry: () =>
-					!gone &&
-					setLog((log) => ({ ...log, live: true, entries: [...source.log] })),
-				presence: (presence) =>
-					!gone && setLog((log) => ({ ...log, live: true, presence })),
-				end: (why) => {
-					if (gone) return;
-					// Another page of the person's receives now, such as on another
-					// device: this one reads on, and takes over again once used.
-					if (source === person && person.me) {
-						read(null);
-						return;
-					}
-					setLog((log) => ({ ...log, live: false, problem: why }));
-				},
-			});
-		};
-		const read = (note: string | null) =>
-			api.pageToken().then((token) => {
-				if (gone) return;
-				follow(new Reader(session.address, token));
-				if (note) setLog((log) => ({ ...log, note }));
-			});
+		const seat = new Seat(session.id);
+		setLog((log) => ({ ...log, source: seat }));
+		const stop = seat.subscribe({
+			entry: () =>
+				!gone &&
+				setLog((log) => ({ ...log, live: true, entries: [...seat.log] })),
+			presence: (presence) =>
+				!gone && setLog((log) => ({ ...log, live: true, presence })),
+			end: (why) =>
+				!gone && setLog((log) => ({ ...log, live: false, problem: why })),
+		});
+		// Receives again once the page is used, such as after another tab took over.
 		const back = () => {
-			if (person && document.visibilityState === "visible")
-				person.join().then(
-					() => person && follow(person),
-					() => {},
-				);
+			if (document.visibilityState !== "visible") return;
+			setLog((log) => {
+				if (log.problem) seat.start();
+				return { ...log, problem: null };
+			});
 		};
-		seat(session.address, name).then(
-			(joined) => {
+		seat.join().then(
+			() => {
 				if (gone) return;
-				person = joined;
-				// Joining again while in adds nothing, and receives again.
-				joined.join().then(
-					() => follow(joined),
-					() => read(null),
-				);
+				seat.start();
 				setLog((log) => ({
 					...log,
-					send: async (text, ping) => {
-						await joined.send(text, { type: markdown(ping) });
-					},
+					send: (text, ping) => seat.send(text, markdown(ping)),
 				}));
 				document.addEventListener("visibilitychange", back);
 				window.addEventListener("focus", back);
 			},
-			// Where the person can't join, the page still reads where they may.
-			(error: Error) => {
-				if (gone) return;
-				if (error instanceof RelayError && error.status === 409)
-					read("You're in on another device, so here you only read.");
-				else
-					read(null).then(
-						() =>
-							!gone && setLog((log) => ({ ...log, problem: error.message })),
-					);
-			},
+			(error: Error) =>
+				!gone && setLog((log) => ({ ...log, problem: error.message })),
 		);
 		return () => {
 			gone = true;
 			stop();
-			person?.close();
+			seat.close();
 			document.removeEventListener("visibilitychange", back);
 			window.removeEventListener("focus", back);
 		};
-	}, [session.address, name]);
+	}, [session.id, name]);
 	return log;
 }
 
@@ -223,21 +139,10 @@ function hue(name: string): string {
 	return `oklch(0.8 0.11 ${hash % 360})`;
 }
 
-function Name({
-	name,
-	account,
-}: {
-	name: string;
-	account?: string | undefined;
-}) {
+function Name({ name }: { name: string }) {
 	return (
-		<span
-			className="font-mono font-medium"
-			style={{ color: hue(name) }}
-			title={account ? `verified: ${account}'s` : "not verified"}
-		>
+		<span className="font-mono font-medium" style={{ color: hue(name) }}>
 			{name}
-			{account && <span className="ml-1 text-[0.7em] opacity-70">✓</span>}
 		</span>
 	);
 }
@@ -265,8 +170,8 @@ const size = (bytes: number) =>
 			: `${(bytes / 1024 ** 2).toFixed(1)} MB`;
 
 /** What an entry holds, as the chat spec says to show it. */
-/** What fetches an entry's payload: the person's own link, or a reader's. */
-type Fetcher = Pick<Reader, "fetch">;
+/** What fetches an entry's payload. */
+type Fetcher = Pick<Seat, "fetch">;
 
 function Body({ entry, reader }: { entry: Entry; reader: Fetcher | null }) {
 	const type = base(entry.type);
@@ -385,17 +290,6 @@ function statusOf(entry: Entry): string {
 }
 
 /** The status each participant set last, by name, leaving out the cleared. */
-function statuses(entries: Entry[]): Map<string, string> {
-	const latest = new Map<string, string>();
-	for (const entry of entries)
-		if (base(entry.type) === STATUS) {
-			const text = statusOf(entry);
-			if (text) latest.set(entry.from, text);
-			else latest.delete(entry.from);
-		}
-	return latest;
-}
-
 /** An entry that is no message: joining, leaving, a status, or another
  * extension's. */
 function Note({ entry }: { entry: Entry }) {
@@ -414,7 +308,7 @@ function Note({ entry }: { entry: Entry }) {
 				{clock.format(new Date(entry.time))}
 			</span>
 			<span className="min-w-0 text-[0.8em]">
-				<Name name={entry.from} account={entry.account} /> {what}
+				<Name name={entry.from} /> {what}
 			</span>
 		</div>
 	);
@@ -438,8 +332,8 @@ function People({
 				Here · {others.length}
 				<MoreInfo label="About who is here">
 					A green dot is receiving now, a gray one has joined but is not
-					receiving, since the time beside it. A ✓ means the name is verified as
-					that account's. Under each name is the status it set last.
+					receiving, since the time beside it. Under each name is the status it
+					set last.
 				</MoreInfo>
 			</h2>
 			<ul className="flex flex-col gap-3 text-sm">
@@ -459,7 +353,7 @@ function People({
 						<span className="flex min-w-0 flex-col gap-0.5">
 							<span className="flex min-w-0 items-baseline gap-2">
 								<span className="truncate">
-									<Name name={name} account={state.account} />
+									<Name name={name} />
 								</span>
 								{!state.receiving && state.since && (
 									<span className="shrink-0 font-mono text-xs tabular-nums text-muted-foreground">
@@ -492,7 +386,7 @@ export function Transcript({
 	back,
 }: {
 	/** A session or a DM, as far as the transcript shows it. */
-	session: Pick<Session, "name" | "address" | "bridges">;
+	session: Pick<Session, "id" | "name">;
 	/** The person's account name, under which they are in the session. */
 	as: string;
 	/** What can be done with the session, at the header's end. */
@@ -511,7 +405,15 @@ export function Transcript({
 		send,
 		note,
 	} = useLog(session, as);
-	const status = useMemo(() => statuses(entries), [entries]);
+	const status = useMemo(
+		() =>
+			new Map(
+				Object.entries(presence).flatMap(([name, state]) =>
+					state.status ? [[name, state.status] as const] : [],
+				),
+			),
+		[presence],
+	);
 	const [people, setPeople] = useState(false);
 	const [scale, setScale] = useState(
 		() => Number(localStorage.getItem("vibetogether transcript scale")) || 1,
@@ -627,22 +529,6 @@ export function Transcript({
 							</Button>
 						</div>
 					</div>
-					{session.bridges?.map((bridge) => (
-						<p
-							key={`${bridge.bridge} ${bridge.by} ${bridge.about}`}
-							className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground"
-						>
-							<ArrowLeftRight className="size-3.5 shrink-0" />
-							<span className="min-w-0 truncate">
-								Everyone in {bridge.about ?? `a ${bridge.bridge} room`} sees
-								this
-							</span>
-							<MoreInfo label="About this bridge">
-								Added by {bridge.by}, through {bridge.bridge}. What is said
-								there shows here too.
-							</MoreInfo>
-						</p>
-					))}
 					{people && (
 						<div className="pb-1 xl:hidden">
 							<People presence={presence} status={status} />
@@ -695,7 +581,7 @@ export function Transcript({
 											<div className="min-w-0 flex-1 leading-relaxed">
 												{!same && (
 													<div className="mb-0.5 flex flex-wrap items-baseline gap-x-2">
-														<Name name={entry.from} account={entry.account} />
+														<Name name={entry.from} />
 														{pinged && (
 															<span className="font-mono text-[0.75em] text-muted-foreground">
 																→ {pinged.length ? pinged.join(" ") : "no one"}
@@ -862,20 +748,22 @@ function made(): Omit<Log, "live" | "source" | "send" | "note"> {
 		type: type as string,
 		size: (text as string).length,
 		...(text ? { text: text as string } : {}),
-		account: (from as string).split("/")[0] as string,
 	}));
 	return {
 		entries,
 		presence: {
-			luiswirth: { read: 8, receiving: true, account: "luiswirth" },
-			"luiswirth/claude": { read: 8, receiving: true, account: "luiswirth" },
+			luiswirth: { read: 8, receiving: true },
+			"luiswirth/claude": {
+				read: 8,
+				receiving: true,
+				status: "Fixing the receive loop in the account page.",
+			},
 			"benarmstrong/claude": {
 				read: 6,
 				receiving: false,
 				since: at(12),
-				account: "benarmstrong",
 			},
-			"tristangabl/codex": { read: 7, receiving: true, account: "tristangabl" },
+			"tristangabl/codex": { read: 7, receiving: true },
 		},
 		problem: null,
 	};

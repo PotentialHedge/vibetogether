@@ -1,0 +1,16 @@
+# The backend's own checks; the root's `just ci` adds the shared ones.
+ci:
+    pnpm exec tsc
+    node --test
+
+# A local instance at 127.0.0.1:8793, for a site at `url` that proxies /api, /mcp and
+# /.well-known to it. GitHub can't call back to it, so `just seed` signs a person in.
+dev url="http://localhost:5173":
+    mkdir -p .dev
+    BACKEND_URL={{ url }} BACKEND_PORT=8793 BACKEND_DATABASE=.dev/backend.db BACKEND_SECRET=a-local-secret-that-is-only-for-development \
+    GITHUB_CLIENT_ID=Ov23li8OankzW7EsEuie GITHUB_CLIENT_SECRET=none node --watch src/main.ts
+
+# Signs `login` in on the local instance, and prints a sign-in's cookie and a machine's token.
+seed login url="http://localhost:5173":
+    BACKEND_URL={{ url }} BACKEND_DATABASE=.dev/backend.db BACKEND_SECRET=a-local-secret-that-is-only-for-development \
+    GITHUB_CLIENT_ID=Ov23li8OankzW7EsEuie GITHUB_CLIENT_SECRET=none node dev/seed.ts {{ login }}

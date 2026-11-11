@@ -1,5 +1,6 @@
 packages:
-  - accounts
+  - backend
+  - mcp
   - library
   - website
 allowBuilds:

@@ -57,25 +57,17 @@ function DevicePage() {
 		return (
 			<Frame
 				title={
-					outcome === "denied"
-						? "Request denied"
-						: claimed?.bridge
-							? "Linked"
-							: "Your agent is connected"
+					outcome === "denied" ? "Request denied" : "Your agent is connected"
 				}
 				description={
 					outcome === "denied"
-						? `The ${claimed?.bridge ? "bridge" : "agent"} got no access. You can close this page.`
-						: claimed?.bridge
-							? "Back to the chat."
-							: "You can close this page."
+						? "The agent got no access. You can close this page."
+						: "You can close this page."
 				}
 				info={
 					outcome === "denied"
 						? undefined
-						: claimed?.bridge
-							? "Revoke it any time in your settings, under Bridges."
-							: "Your agent goes on by itself. Revoke it any time in your settings, under Tokens."
+						: "Your agent goes on by itself. Revoke it any time in your settings, under Logins."
 				}
 			>
 				<a
@@ -100,41 +92,14 @@ function DevicePage() {
 		};
 		return (
 			<Frame
-				title={
-					claimed.bridge
-						? `${claimed.client_id} wants to speak as you`
-						: `Connect ${claimed.client_id} to your account?`
-				}
-				description={
-					claimed.bridge
-						? "Only if this is you, and your chat shows this code."
-						: "Every agent on it then acts as you. Only if your own agent just gave you this code."
-				}
-				info={
-					claimed.bridge
-						? "What you write through it reaches your sessions as you. You approve this once. Which chats it bridges, and into which sessions, you choose in the app itself. Revoke it any time in your settings, under Bridges."
-						: "They can join your sessions as your agents, until you revoke it in your settings, under Tokens. If someone sent you this link, deny it."
-				}
+				title={`Connect ${claimed.client_id} to your account?`}
+				description="Every agent on it then acts as you. Only if your own agent just gave you this code."
+				info="They can join your sessions as your agents, until you revoke it in your settings, under Logins. If someone sent you this link, deny it."
 			>
 				<div className="flex flex-col gap-4 rounded-2xl border bg-card/60 p-5">
-					{claimed.bridge && (
-						<p className="text-center font-mono text-3xl tracking-widest text-foreground">
-							{claimed.user_code}
-						</p>
-					)}
 					<dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 font-mono text-sm">
-						{claimed.bridge && claimed.for && (
-							<>
-								<dt className="text-muted-foreground">who</dt>
-								<dd className="break-words">{claimed.for}</dd>
-							</>
-						)}
-						{!claimed.bridge && (
-							<>
-								<dt className="text-muted-foreground">code</dt>
-								<dd>{claimed.user_code}</dd>
-							</>
-						)}
+						<dt className="text-muted-foreground">code</dt>
+						<dd>{claimed.user_code}</dd>
 						<dt className="text-muted-foreground">asked</dt>
 						<dd>{claimed.requested ? ago(claimed.requested) : "unknown"}</dd>
 						<dt className="text-muted-foreground">from</dt>

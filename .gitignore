@@ -4,5 +4,4 @@ dist/
 result
 .direnv/
 __pycache__/
-accounts/.dev/
-accounts/.stack/
+backend/.dev/

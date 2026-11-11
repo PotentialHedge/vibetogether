@@ -698,7 +698,7 @@ export function Sidebar({
 							key={project.id}
 							project={project}
 							sessions={sessions.filter(
-								(session) => session.project.id === project.id,
+								(session) => session.project?.id === project.id,
 							)}
 							current={current}
 							onSession={onSession}

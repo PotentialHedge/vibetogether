@@ -1,10 +1,8 @@
-/** The account's settings, one tab each: friends, tokens, the bridges that
- * speak as the person, what agents changed, and signing out and deleting the
- * account. */
+/** The account's settings, one tab each: friends, logins, what agents
+ * changed, and signing out and deleting the account. */
 
 import {
 	ArrowLeft,
-	Cable,
 	CircleUser,
 	History,
 	KeyRound,
@@ -17,17 +15,14 @@ import { type ReactNode, useCallback, useEffect, useState } from "react";
 import {
 	type Activity,
 	api,
-	type Bridge,
 	demo,
 	type Friend,
+	type Login,
 	type Me,
-	type Minted,
-	type Token,
 	Unauthorized,
 } from "@/account/api";
 import { AddByName, Person, Row, Titled, useActions } from "@/account/parts";
 import { SignIn } from "@/account/sign-in";
-import { MoreInfo } from "@/components/more-info";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { page, render, Site } from "@/site";
@@ -35,20 +30,18 @@ import { page, render, Site } from "@/site";
 type State = {
 	me: Me;
 	friends: Friend[];
-	tokens: Token[];
-	bridges: Bridge[];
+	logins: Login[];
 	activity: Activity[];
 };
 
 async function load(): Promise<State> {
-	const [me, friends, tokens, bridges, activity] = await Promise.all([
+	const [me, friends, logins, activity] = await Promise.all([
 		api.me(),
 		api.friends(),
-		api.tokens(),
-		api.bridges(),
+		api.logins(),
 		api.activity(),
 	]);
-	return { me, friends, tokens, bridges, activity };
+	return { me, friends, logins, activity };
 }
 
 const date = new Intl.DateTimeFormat(undefined, { dateStyle: "medium" });
@@ -71,8 +64,7 @@ const app = page(`account/${demo ? "#demo" : ""}`);
 /** The settings' tabs, one thing each, kept in the address as `?tab=`. */
 const TABS = [
 	{ id: "friends", label: "Friends", icon: Users },
-	{ id: "tokens", label: "Tokens", icon: KeyRound },
-	{ id: "bridges", label: "Bridges", icon: Cable },
+	{ id: "logins", label: "Logins", icon: KeyRound },
 	{ id: "activity", label: "Activity", icon: History },
 	{ id: "account", label: "Account", icon: CircleUser },
 ] as const;
@@ -138,9 +130,8 @@ function Settings({
 	state: State;
 	reload: () => Promise<void>;
 }) {
-	const { me, friends, tokens, bridges, activity } = state;
+	const { me, friends, logins, activity } = state;
 	const { problem, act } = useActions(reload);
-	const [minted, setMinted] = useState<Minted | null>(null);
 	const [tab, setTab] = useState<Tab>(tabOfAddress);
 	useEffect(() => {
 		const back = () => setTab(tabOfAddress());
@@ -264,109 +255,46 @@ function Settings({
 					</Pane>
 				)}
 
-				{tab === "tokens" && (
+				{tab === "logins" && (
 					<Pane
-						title="Tokens"
-						line="Each connects a machine's agents, or an MCP client, to your account."
-						action={
-							<AddByName
-								placeholder="machine name"
-								label="Mint token"
-								onAdd={async (name) => {
-									setMinted(await api.mint(name));
-									await reload();
-								}}
-							/>
-						}
+						title="Logins"
+						line="Each way in to your account: a browser you signed in on, a machine's agents, or an MCP client. Agents connect by asking you to approve their OTP."
 					>
-						{minted && <MintedToken minted={minted} />}
-						<Rows empty="No tokens yet.">
-							{tokens.map((token) => (
+						<Rows empty="No logins.">
+							{logins.map((login) => (
 								<Row
-									key={token.id}
+									key={login.id}
 									actions={
 										<Button
 											variant="ghost"
 											size="sm"
-											onClick={act(() => api.revoke(token.id))}
+											onClick={act(async () => {
+												await api.revoke(login.id);
+												if (login.current) location.href = page();
+											})}
 										>
-											Revoke
+											{login.current ? "Sign out" : "Revoke"}
 										</Button>
 									}
 								>
-									{token.kind === "mcp" ? (
+									{login.kind === "mcp" ? (
 										<Plug
 											aria-label="MCP client"
 											className="size-4 shrink-0 text-muted-foreground"
 										/>
 									) : (
 										<Monitor
-											aria-label="machine"
+											aria-label={
+												login.kind === "browser" ? "browser" : "machine"
+											}
 											className="size-4 shrink-0 text-muted-foreground"
 										/>
 									)}
 									<Titled
-										title={token.name}
-										detail={`${token.kind === "mcp" ? "MCP client" : "machine"} · since ${date.format(new Date(token.created))}`}
-									/>
-								</Row>
-							))}
-						</Rows>
-					</Pane>
-				)}
-
-				{tab === "bridges" && (
-					<Pane
-						title="Bridges"
-						line={
-							<>
-								Apps that speak as you, such as Telegram.
-								<MoreInfo label="About bridges">
-									A bridge mirrors a chat elsewhere and a session onto each
-									other. What you write there reaches the session as you.
-									Revoking it ends every chat it bridged for you.
-								</MoreInfo>
-							</>
-						}
-					>
-						<Rows
-							empty={
-								<>
-									None yet. Message{" "}
-									<a
-										className="text-foreground underline underline-offset-4"
-										href="https://t.me/vt_messagent_bot"
-									>
-										@vt_messagent_bot
-									</a>{" "}
-									on Telegram.
-								</>
-							}
-						>
-							{bridges.map((bridge) => (
-								<Row
-									key={bridge.id}
-									actions={
-										<Button
-											variant="ghost"
-											size="sm"
-											onClick={act(() => api.revokeBridge(bridge.id))}
-										>
-											Revoke
-										</Button>
-									}
-								>
-									<Cable
-										aria-hidden
-										className="size-4 shrink-0 text-muted-foreground"
-									/>
-									<Titled
-										title={`${bridge.bridge} speaks as you`}
-										detail={
-											bridge.rooms.length
-												? `in ${bridge.rooms.map((room) => room.session.name).join(", ")}`
-												: `since ${date.format(new Date(bridge.created))}`
+										title={
+											login.current ? `${login.name} (this one)` : login.name
 										}
+										detail={`${login.kind === "mcp" ? "MCP client" : login.kind === "browser" ? "browser" : "machine"} · since ${date.format(new Date(login.created))}`}
 									/>
 								</Row>
 							))}
@@ -379,7 +307,7 @@ function Settings({
 						<Rows empty="Nothing yet.">
 							{activity.map((change) => (
 								<Row
-									key={`${change.created} ${change.token} ${change.operation} ${JSON.stringify(change.arguments)}`}
+									key={`${change.created} ${change.login} ${change.operation} ${JSON.stringify(change.arguments)}`}
 								>
 									<Titled
 										title={change.operation}
@@ -451,39 +379,6 @@ function AccountPane() {
 				{problem && <p className="text-sm text-destructive">{problem}</p>}
 			</div>
 		</Pane>
-	);
-}
-
-/** A token just minted, shown this once, as the command that keeps it where
- * the machine's agents look for it, readable by its user only, as
- * `agents.md` has an agent keep it. */
-function MintedToken({ minted }: { minted: Minted }) {
-	const [copied, setCopied] = useState(false);
-	const command = `(umask 077; mkdir -p ~/.config/vibetogether && printf %s '${minted.token}' > ~/.config/vibetogether/token)`;
-	return (
-		<div className="flex flex-col gap-3 bg-background/40 px-5 py-4">
-			<p className="text-sm text-pretty">
-				The token for <span className="font-mono">{minted.name}</span>, shown
-				only now. Run this in a terminal on that machine: it saves the token in{" "}
-				<code className="font-mono">~/.config/vibetogether/token</code>,
-				readable only by you, where its agents look for it. Don't paste it into
-				a chat: it acts for your account.
-			</p>
-			<div className="flex flex-wrap items-center gap-2">
-				<code className="min-w-0 flex-1 rounded-lg border bg-background/80 px-3 py-2 font-mono text-sm break-all">
-					{command}
-				</code>
-				<Button
-					variant="outline"
-					onClick={async () => {
-						await navigator.clipboard.writeText(command);
-						setCopied(true);
-					}}
-				>
-					{copied ? "Copied" : "Copy"}
-				</Button>
-			</div>
-		</div>
 	);
 }
 

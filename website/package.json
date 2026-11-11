@@ -10,7 +10,6 @@
 		"@base-ui/react": "^1.9.0",
 		"@fontsource-variable/geist": "^5.3.0",
 		"@fontsource-variable/geist-mono": "^5.3.0",
-		"agentwire": "github:PotentialHedge/agentwire#3bf9350ff3859716060079cf08c88eeb35d5cd11",
 		"class-variance-authority": "^0.7.1",
 		"cn": "^0.5.2",
 		"lucide-react": "^1.60.0",

@@ -2,112 +2,33 @@
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
 
-    rust-overlay.url = "github:oxalica/rust-overlay";
-    rust-overlay.inputs.nixpkgs.follows = "nixpkgs";
-
     treefmt-nix.url = "github:numtide/treefmt-nix";
     treefmt-nix.inputs.nixpkgs.follows = "nixpkgs";
-
-    # The transport. Cargo and pnpm pin the same commit, which `just ci` checks.
-    agentwire.url = "github:PotentialHedge/agentwire";
-    agentwire.inputs.nixpkgs.follows = "nixpkgs";
-    agentwire.inputs.rust-overlay.follows = "rust-overlay";
-    agentwire.inputs.treefmt-nix.follows = "treefmt-nix";
   };
 
   outputs = {
     self,
     nixpkgs,
-    rust-overlay,
     treefmt-nix,
-    agentwire,
     ...
   }: let
     inherit (nixpkgs) lib;
 
     forEachSystem = f:
       lib.genAttrs ["aarch64-darwin" "x86_64-linux"]
-      (system:
-        f (import nixpkgs {
-          inherit system;
-          overlays = [(import rust-overlay)];
-        }));
-
-    # The one toolchain, which the shell and the packages share.
-    rust = pkgs: pkgs.rust-bin.fromRustupToolchainFile ./rust-toolchain.toml;
+      (system: f nixpkgs.legacyPackages.${system});
 
     # One environment, entered by the shell and by the checks alike. The
     # TypeScript compiler and the type definitions are pinned by pnpm instead,
-    # since editors look for them in node_modules. The relay is for the tests
-    # and local stacks.
-    tools = pkgs:
-      with pkgs; [(rust pkgs) bacon cargo-edit nodejs pnpm biome just curl jq openssl python3 rsync agentwire.packages.${pkgs.stdenv.hostPlatform.system}.agentwire-relay];
-
-    # A binary of the Cargo workspace, built from the parts in `parts` alone,
-    # so that it changes with nothing else. Cargo needs every
-    # member of the workspace, so each of the other members is only its
-    # manifest, with an empty library as its source.
-    rustPackage = pkgs: {
-      pname,
-      parts ? [],
-      binaries ? [pname],
-      args ? {},
-    }: let
-      rustFiles = lib.fileset.fileFilter (file: file.hasExt "rs" || file.name == "Cargo.toml");
-      manifests = lib.fileset.fileFilter (file: file.name == "Cargo.toml");
-      others = lib.filter (part: !(lib.elem part parts)) [./mcp];
-    in
-      (pkgs.makeRustPlatform {
-        cargo = rust pkgs;
-        rustc = rust pkgs;
-      }).buildRustPackage ({
-          inherit pname;
-          version = "0.1.0";
-          src = lib.fileset.toSource {
-            root = ./.;
-            fileset = lib.fileset.unions ([
-                ./Cargo.toml
-                ./Cargo.lock
-              ]
-              ++ map rustFiles parts
-              ++ map manifests others);
-          };
-          postPatch = ''
-            for manifest in $(find . -mindepth 2 -name Cargo.toml); do
-              dir=$(dirname "$manifest")
-              [ -n "$(find "$dir" -name '*.rs')" ] || { mkdir -p "$dir/src"; touch "$dir/src/lib.rs"; }
-            done
-          '';
-          cargoLock = {
-            lockFile = ./Cargo.lock;
-            # agentwire's repository at the commit Cargo pins, which `just ci`
-            # checks is the flake input's, so its hash is the input's.
-            outputHashes."agentwire-0.1.0" = agentwire.narHash;
-          };
-          cargoBuildFlags = ["-p" pname];
-          cargoTestFlags = ["-p" pname];
-          # A binary names the toolchain's sources, in panic messages, which
-          # would pull all of it into whatever runs it.
-          nativeBuildInputs = [pkgs.removeReferencesTo];
-          # The HTTP client loads the system's certificates even for the tests'
-          # local relay, and the build sandbox has none.
-          nativeCheckInputs = [pkgs.cacert];
-          postFixup = lib.concatMapStrings (binary: "remove-references-to -t ${rust pkgs} $out/bin/${binary}\n") binaries;
-          disallowedReferences = [(rust pkgs)];
-          meta.mainProgram = pname;
-        }
-        // args);
+    # since editors look for them in node_modules.
+    tools = pkgs: with pkgs; [nodejs pnpm biome just curl jq rsync];
   in {
     packages = forEachSystem (pkgs: {
-      vibetogether-mcp = rustPackage pkgs {
-        pname = "vibetogether-mcp";
-        parts = [./mcp];
-      };
-
-      # The account service as it runs: its sources and its production
-      # dependencies, which Node runs as they are, stripping the types itself.
-      vibetogether-accounts = pkgs.stdenvNoCC.mkDerivation (finalAttrs: {
-        pname = "vibetogether-accounts";
+      # The backend as it runs, the MCP server in it: their sources and their
+      # production dependencies, which Node runs as they are, stripping the
+      # types itself.
+      vibetogether-backend = pkgs.stdenvNoCC.mkDerivation (finalAttrs: {
+        pname = "vibetogether-backend";
         version = "0.1.0";
         src = lib.fileset.toSource {
           root = ./.;
@@ -115,37 +36,38 @@
             ./package.json
             ./pnpm-lock.yaml
             ./pnpm-workspace.yaml
-            ./accounts/package.json
-            ./accounts/src
+            ./backend/package.json
+            ./backend/src
+            ./mcp/package.json
+            ./mcp/src
           ];
         };
-        pnpmWorkspaces = ["vibetogether-accounts"];
+        pnpmWorkspaces = ["vibetogether-backend..."];
         nativeBuildInputs = [pkgs.nodejs pkgs.pnpm pkgs.pnpmConfigHook pkgs.makeWrapper];
         pnpmDeps = pkgs.fetchPnpmDeps {
           inherit (finalAttrs) pname version src pnpmWorkspaces;
           fetcherVersion = 4;
-          hash = "sha256-3h49EP8QwMYLBEJOSHrB0Y77DmyoT9xO7V1lKm/nWiE=";
+          hash = "sha256-a5jUcY2fVIVEVuHqSI4p4AoPCpSlpf7feZokubpfQzo=";
           # pnpm leaves an empty `links` in its store on Darwin only, which
           # fetchPnpmDeps keeps, so the hash would differ between platforms.
           preFixup = "rm -rf $storePath/v11/links";
         };
         pnpmInstallFlags = ["--prod"];
         installPhase = ''
-          # The part's node_modules links into the workspace's, so both go.
-          mkdir -p $out/lib/vibetogether-accounts/accounts
-          cp -r node_modules $out/lib/vibetogether-accounts
-          cp -r accounts/package.json accounts/src accounts/node_modules $out/lib/vibetogether-accounts/accounts
-          makeWrapper ${lib.getExe pkgs.nodejs} $out/bin/vibetogether-accounts \
-            --add-flags $out/lib/vibetogether-accounts/accounts/src/main.ts
+          # Each part's node_modules links into the workspace's, so all go.
+          dir=$out/lib/vibetogether-backend
+          mkdir -p $dir/backend $dir/mcp
+          cp -r node_modules $dir
+          cp -r backend/package.json backend/src backend/node_modules $dir/backend
+          cp -r mcp/package.json mcp/src mcp/node_modules $dir/mcp
+          makeWrapper ${lib.getExe pkgs.nodejs} $out/bin/vibetogether-backend \
+            --add-flags $dir/backend/src/main.ts
         '';
-        meta.mainProgram = "vibetogether-accounts";
+        meta.mainProgram = "vibetogether-backend";
       });
     });
 
-    nixosModules = {
-      mcp = import ./mcp/nixos-module.nix self;
-      accounts = import ./accounts/nixos-module.nix self;
-    };
+    nixosModules.backend = import ./backend/nixos-module.nix self;
 
     # Every language in the tree, behind one command. The global pre-commit
     # hook checks a repository by running this, so a language left out here is
@@ -161,7 +83,6 @@
         programs.biome.validate.enable = false;
         programs.biome.settings = removeAttrs (builtins.fromJSON (builtins.readFile ./biome.json)) ["vcs"];
         programs.alejandra.enable = true;
-        programs.rustfmt.enable = true;
         programs.just.enable = true;
         programs.shellcheck.enable = true;
         programs.shfmt.enable = true;

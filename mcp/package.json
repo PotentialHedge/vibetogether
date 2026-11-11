@@ -1,0 +1,16 @@
+{
+	"name": "vibetogether-mcp",
+	"private": true,
+	"type": "module",
+	"exports": "./src/mcp.ts",
+	"engines": {
+		"node": ">=24"
+	},
+	"dependencies": {
+		"@modelcontextprotocol/server": "^2.4.0"
+	},
+	"devDependencies": {
+		"@types/node": "^24.19.1",
+		"typescript": "^7.0.2"
+	}
+}

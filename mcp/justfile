@@ -1,7 +1,4 @@
-# The server's own checks; the root's `just ci` adds the shared ones.
+# The server's own checks; the root's `just ci` adds the shared ones. It runs in
+# the backend, whose tests use it through HTTP.
 ci:
-    cargo test -p vibetogether-mcp
-
-# The server, locally, at http://127.0.0.1:8792/mcp.
-dev:
-    cargo run -p vibetogether-mcp
+    pnpm exec tsc

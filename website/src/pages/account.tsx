@@ -119,7 +119,7 @@ function App({ state, reload }: { state: State; reload: () => Promise<void> }) {
 	const group = dm
 		? undefined
 		: (groups.find(
-				(group) => group.id === (session?.group.id ?? place.group),
+				(group) => group.id === (session?.group?.id ?? place.group),
 			) ??
 			groups.find((group) => group.own) ??
 			groups[0]);
@@ -184,8 +184,8 @@ function App({ state, reload }: { state: State; reload: () => Promise<void> }) {
 						key={dm.dm.id}
 						as={me.name}
 						session={{
+							id: dm.dm.id,
 							name: dm.friend.displayName || dm.friend.name,
-							address: dm.dm.address,
 						}}
 						back={
 							<Button
@@ -248,7 +248,7 @@ function App({ state, reload }: { state: State; reload: () => Promise<void> }) {
 					label="Delete session"
 					onConfirm={act(async () => {
 						await api.deleteSession(session.id);
-						open({ group: session.group.id });
+						open({ group: session.group?.id });
 					})}
 				/>
 			)}

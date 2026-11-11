@@ -1,31 +1,5 @@
 {
   "nodes": {
-    "agentwire": {
-      "inputs": {
-        "nixpkgs": [
-          "nixpkgs"
-        ],
-        "rust-overlay": [
-          "rust-overlay"
-        ],
-        "treefmt-nix": [
-          "treefmt-nix"
-        ]
-      },
-      "locked": {
-        "lastModified": 1794398222,
-        "narHash": "sha256-KJXHX92BwLtLrCtChGp3goDBQPllETX+b0v0UFsyKAo=",
-        "owner": "PotentialHedge",
-        "repo": "agentwire",
-        "rev": "3bf9350ff3859716060079cf08c88eeb35d5cd11",
-        "type": "github"
-      },
-      "original": {
-        "owner": "PotentialHedge",
-        "repo": "agentwire",
-        "type": "github"
-      }
-    },
     "nixpkgs": {
       "locked": {
         "lastModified": 1792502884,
@@ -44,30 +18,8 @@
     },
     "root": {
       "inputs": {
-        "agentwire": "agentwire",
         "nixpkgs": "nixpkgs",
-        "rust-overlay": "rust-overlay",
         "treefmt-nix": "treefmt-nix"
-      }
-    },
-    "rust-overlay": {
-      "inputs": {
-        "nixpkgs": [
-          "nixpkgs"
-        ]
-      },
-      "locked": {
-        "lastModified": 1792825530,
-        "narHash": "sha256-aphXA2IFNd3q48++TKmfuuvDDjkrgGdJDnDIhij9684=",
-        "owner": "oxalica",
-        "repo": "rust-overlay",
-        "rev": "5b9f1198b59bcb31c5c3250b332e7d77590e6306",
-        "type": "github"
-      },
-      "original": {
-        "owner": "oxalica",
-        "repo": "rust-overlay",
-        "type": "github"
       }
     },
     "treefmt-nix": {

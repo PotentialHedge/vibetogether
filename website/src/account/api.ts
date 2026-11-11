@@ -1,4 +1,4 @@
-/** The account service, as its spec has it (`accounts/api.md`), served on
+/** The backend's API, as its reference has it (`/api/reference.md`), served on
  * the site's own host under `/api/`. The page calls it
  * with its session cookie, through the same requests an agent makes with its
  * token. With `#demo` in the address, it answers from made-up data instead,
@@ -30,45 +30,29 @@ export type Project = {
 	repos: string[];
 };
 
+/** A project's session, or a DM. */
 export type Session = {
 	id: string;
 	name: string;
-	project: Named;
-	group: Named;
+	/** Its project, with the repositories it points at; null for a DM. */
+	project: (Named & { repos: string[] }) | null;
+	/** Its project's group; null for a DM. */
+	group: Named | null;
+	/** For a DM, the other person in it. */
+	friend: string | null;
 	/** Who created it. */
-	creator?: string | null;
-	/** Its URL on the relay, hard to guess: it identifies the session, and is its secret. */
-	address: string;
-	/** The rooms outside Vibe Together it is bridged to, such as Telegram chats. */
-	bridges?: SessionBridge[];
+	creator: string | null;
 };
 
-/** A room a session is bridged to, as its info shows it. */
-export type SessionBridge = {
-	/** Which bridge, such as `messagent`. */
-	bridge: string;
-	/** Who added it. */
-	by: string;
-	/** What the bridge says of its room, such as a Telegram group and how many are in it. */
-	about: string | null;
-};
+/** Two friends' DM: a session for the two of them and their agents alone. */
+export type Dm = Session & { friend: string };
 
-/** Two friends' DM: one session for the two of them and their agents, in no
- * group or project. */
-export type Dm = {
-	id: string;
-	/** The friend's name. */
-	friend: string;
-	/** Its URL on the relay, as a session's. */
-	address: string;
-};
-
-/** A change an agent or app made in the account, through its token. */
+/** A change an agent made in the account, through its token. */
 export type Activity = {
-	/** The token's or app's name, such as the machine's. */
+	/** The login's name, such as the machine's. */
 	agent: string;
-	/** The token's or app's id. */
-	token: string;
+	/** The login's id. */
+	login: string;
 	/** The operation's id, such as `add_friend`. */
 	operation: string;
 	arguments: Record<string, unknown>;
@@ -83,31 +67,17 @@ export type Friend = {
 	state: "friends" | "asked" | "asking";
 };
 
-/** What acts for the account, held by an agent or its harness. */
-export type Token = {
+/** One way in to the account: a sign-in in a browser, a machine's token,
+ * which every agent on it shares, or an MCP client's. */
+export type Login = {
 	id: string;
-	/** The machine's name, for a machine's token, or its MCP client's. */
+	/** The machine's name, the MCP client's, or `a sign-in`. */
 	name: string;
-	/** A machine's, from an OTP or minted here, which every agent on it
-	 * shares, or an MCP client's, from its signing in. */
-	kind: "machine" | "mcp";
+	kind: "browser" | "machine" | "mcp";
+	/** Whether the page is signed in by it. */
+	current: boolean;
 	created: string;
 };
-
-/** A bridge the person let speak as them, such as messagent for Telegram, by
- * approving its OTP, with the rooms it mirrors onto sessions by it. */
-export type Bridge = {
-	id: string;
-	/** Which bridge, such as `messagent`. */
-	bridge: string;
-	/** Who the bridge said asked, in its own words. */
-	for: string | null;
-	rooms: { id: string; session: Named; about: string | null }[];
-	created: string;
-};
-
-/** A token just minted: the only time the token itself is shown. */
-export type Minted = Token & { token: string };
 
 /** An OTP, as the service tells of it once it is claimed: which
  * agent asks. */
@@ -120,11 +90,6 @@ export type Device = {
 	requested?: string;
 	/** Where it was asked from: an IP address or a country. */
 	from?: string;
-	/** Whether a bridge asks to speak as the person, rather than a machine
-	 * for its agents. */
-	bridge?: boolean;
-	/** Who the bridge says asks, in its own words. */
-	for?: string | null;
 };
 
 export class Unauthorized extends Error {}
@@ -163,22 +128,6 @@ async function call<T>(
 	return (text ? JSON.parse(text) : undefined) as T;
 }
 
-/** The key under which the app keeps the person's own link in a session,
- * which acts as them. */
-export const linkKey = (address: string) => `vibetogether link ${address}`;
-
-/** Forgets the person's own links in sessions, and those that earlier
- * versions of the app kept to read on as `<name>/reader`: all act for the
- * person. */
-function forgetLinks() {
-	for (const key of Object.keys(localStorage))
-		if (
-			key.startsWith(linkKey("")) ||
-			/^vibetogether \S+ [^ /]+\/reader(-\d+)?$/.test(key)
-		)
-			localStorage.removeItem(key);
-}
-
 const live = {
 	me: () => call<Me>("GET", "api/me"),
 	groups: () => call<Group[]>("GET", "api/groups"),
@@ -211,24 +160,16 @@ const live = {
 		call<void>("DELETE", `api/sessions/${encodeURIComponent(id)}`),
 	friends: () => call<Friend[]>("GET", "api/friends"),
 	activity: () => call<Activity[]>("GET", "api/activity"),
-	/** Deletes the account: only the person, signed in, may. Forgets the
-	 * kept links too, as signing out does. */
-	deleteAccount: async () => {
-		await call<void>("DELETE", "api/me");
-		forgetLinks();
-	},
+	/** Deletes the account: only the person, signed in, may. */
+	deleteAccount: () => call<void>("DELETE", "api/me"),
 	dms: () => call<Dm[]>("GET", "api/dms"),
 	addFriend: (name: string) =>
 		call<void>("PUT", `api/friends/${encodeURIComponent(name)}`),
 	removeFriend: (name: string) =>
 		call<void>("DELETE", `api/friends/${encodeURIComponent(name)}`),
-	tokens: () => call<Token[]>("GET", "api/tokens"),
-	mint: (name: string) => call<Minted>("POST", "api/tokens", { name }),
+	logins: () => call<Login[]>("GET", "api/logins"),
 	revoke: (id: string) =>
-		call<void>("DELETE", `api/tokens/${encodeURIComponent(id)}`),
-	bridges: () => call<Bridge[]>("GET", "api/bridges"),
-	revokeBridge: (id: string) =>
-		call<void>("DELETE", `api/bridges/${encodeURIComponent(id)}`),
+		call<void>("DELETE", `api/logins/${encodeURIComponent(id)}`),
 	/** Returns the address to go to, GitHub's. `oauthQuery` is the signed
 	 * query an MCP client's authorization sent the person here with, so that
 	 * it goes on after GitHub. */
@@ -240,17 +181,7 @@ const live = {
 				...(oauthQuery ? { oauth_query: oauthQuery } : {}),
 			})
 		).url,
-	/** Signs out, and forgets the links the session pages kept, which act
-	 * for the person. */
-	signOut: async () => {
-		await call<void>("POST", "api/auth/sign-out", {});
-		forgetLinks();
-	},
-	/** The token of the page's own sign-in, with which a page joins a session
-	 * as the person, exactly where they may. */
-	pageToken: async () =>
-		(await call<{ session: { token: string } }>("GET", "api/auth/get-session"))
-			.session.token,
+	signOut: () => call<void>("POST", "api/auth/sign-out", {}),
 	device: (code: string) =>
 		call<Device>(
 			"GET",
@@ -305,12 +236,6 @@ function mock(): Api {
 	const named = (id: string) =>
 		groups.find((group) => group.id === id) as Named;
 	let projects: Project[] = [
-		{
-			id: "p_0",
-			name: "messagent",
-			group: named("g_0"),
-			repos: [],
-		},
 		{ id: "p_1", name: "notes", group: named("g_0"), repos: [] },
 		{
 			id: "p_2",
@@ -322,37 +247,16 @@ function mock(): Api {
 	const inProject = (id: string) => {
 		const project = projects.find((p) => p.id === id) as Project;
 		return {
-			project: { id: project.id, name: project.name },
+			project: { id: project.id, name: project.name, repos: project.repos },
 			group: project.group,
+			friend: null,
+			creator: me.name,
 		};
 	};
 	let sessions: Session[] = [
-		{
-			id: "s_0",
-			name: "Telegram",
-			...inProject("p_0"),
-			address: "",
-			bridges: [
-				{
-					bridge: "messagent",
-					by: "luiswirth",
-					about: "Luis Wirth's private Telegram chat",
-				},
-			],
-		},
-		{
-			id: "s_1",
-			name: "notes",
-			...inProject("p_1"),
-			address: "",
-		},
-		{
-			id: "s_2",
-			name: "agents",
-			...inProject("p_2"),
-			address: "",
-		},
-		{ id: "s_3", name: "demo", ...inProject("p_2"), address: "" },
+		{ id: "s_1", name: "notes", ...inProject("p_1") },
+		{ id: "s_2", name: "agents", ...inProject("p_2") },
+		{ id: "s_3", name: "demo", ...inProject("p_2") },
 	];
 	let friends: Friend[] = [
 		{
@@ -374,39 +278,27 @@ function mock(): Api {
 			state: "asking",
 		},
 	];
-	let bridges: Bridge[] = [
+	let logins: Login[] = [
 		{
-			id: "b_1",
-			bridge: "messagent",
-			for: "Telegram user 123456789, @luiswirth, named Luis",
-			rooms: [
-				{
-					id: "r_1",
-					session: { id: "s_0", name: "Telegram" },
-					about: "Luis Wirth's private Telegram chat",
-				},
-			],
-			created: "2026-11-09T21:40:00Z",
+			id: "w_1",
+			name: "a sign-in",
+			kind: "browser",
+			current: true,
+			created: "2026-11-08T20:00:00Z",
 		},
-	];
-	let tokens: Token[] = [
 		{
 			id: "o_1",
 			name: "Claude Code",
 			kind: "mcp",
+			current: false,
 			created: "2026-11-09T00:12:00Z",
 		},
 		{
 			id: "t_1",
 			name: "lwirth-macbook",
 			kind: "machine",
+			current: false,
 			created: "2026-11-09T00:10:00Z",
-		},
-		{
-			id: "t_2",
-			name: "lwirth-server",
-			kind: "machine",
-			created: "2026-11-02T14:31:00Z",
 		},
 	];
 	const done = async () => {};
@@ -426,7 +318,7 @@ function mock(): Api {
 		deleteGroup: async (id) => {
 			groups = groups.filter((group) => group.id !== id);
 			projects = projects.filter((project) => project.group.id !== id);
-			sessions = sessions.filter((session) => session.group.id !== id);
+			sessions = sessions.filter((session) => session.group?.id !== id);
 		},
 		addMember: async (id, name) => {
 			groups = groups.map((group) =>
@@ -472,7 +364,7 @@ function mock(): Api {
 		},
 		deleteProject: async (id) => {
 			projects = projects.filter((project) => project.id !== id);
-			sessions = sessions.filter((session) => session.project.id !== id);
+			sessions = sessions.filter((session) => session.project?.id !== id);
 		},
 		sessions: async () => sessions,
 		createSession: async (project, name) => {
@@ -480,8 +372,6 @@ function mock(): Api {
 				id: `s_${Date.now()}`,
 				name,
 				...inProject(project),
-				creator: me.name,
-				address: "",
 			};
 			sessions = [...sessions, session];
 			return session;
@@ -499,14 +389,14 @@ function mock(): Api {
 		activity: async () => [
 			{
 				agent: "lwirth-macbook",
-				token: "t_1",
+				login: "t_1",
 				operation: "add_friend",
 				arguments: { name: "tristangabl" },
 				created: new Date(Date.now() - 3 * 3600_000).toISOString(),
 			},
 			{
 				agent: "Claude Code",
-				token: "o_1",
+				login: "o_1",
 				operation: "create_session",
 				arguments: { project: "p_2", name: "demo" },
 				created: new Date(Date.now() - 26 * 3600_000).toISOString(),
@@ -518,8 +408,11 @@ function mock(): Api {
 				.filter((friend) => friend.state === "friends")
 				.map((friend) => ({
 					id: `s_dm_${friend.name}`,
+					name: "DM",
+					project: null,
+					group: null,
 					friend: friend.name,
-					address: "",
+					creator: null,
 				})),
 		addFriend: async (name) => {
 			const known = friends.find((friend) => friend.name === name);
@@ -545,28 +438,12 @@ function mock(): Api {
 		removeFriend: async (name) => {
 			friends = friends.filter((friend) => friend.name !== name);
 		},
-		tokens: async () => tokens,
-		mint: async (name) => {
-			const minted = {
-				id: `t_${tokens.length + 1}`,
-				name,
-				kind: "machine" as const,
-				created: new Date().toISOString(),
-				token: "made-up-token-for-the-demo",
-			};
-			tokens = [...tokens, minted];
-			return minted;
-		},
+		logins: async () => logins,
 		revoke: async (id) => {
-			tokens = tokens.filter((token) => token.id !== id);
-		},
-		bridges: async () => bridges,
-		revokeBridge: async (id) => {
-			bridges = bridges.filter((bridge) => bridge.id !== id);
+			logins = logins.filter((login) => login.id !== id);
 		},
 		signIn: async () => `${page("account/")}#demo`,
 		signOut: done,
-		pageToken: async () => "made-up-token-for-the-demo",
 		device: async (code) => ({
 			user_code: code,
 			client_id: "lwirth-macbook",
