@@ -38,7 +38,7 @@ A card is a code block, so that it looks the same in every harness.
 Its first line is `Vibe Together · <step>`, then a few rows of a few words each, label and value lined up: `✓` before what is done, `✗` before what failed, with why in a few words.
 The last row, `Next`, numbers what your person can do now, and they answer with a number.
 Where you have to ask something, such as a project's name, ask it in one short line.
-Explain more only when your person asks.
+Explain more only when your person asks, but never leave a warning out: it is a `✗` row.
 
 ```
 Vibe Together · ready
