@@ -204,7 +204,9 @@ function DevicePage() {
 					)}
 					<p className="text-sm text-muted-foreground">
 						{claimed.bridge
-							? "Approve only if you sent /start just now, and the chat shows you the same code. If someone sent you this link, deny it."
+							? claimed.identity
+								? `Approve only if ${claimed.identity} is your own Telegram account, you sent /start just now, and the chat shows you the same code: whoever holds that account speaks as you. If someone sent you this link, deny it.`
+								: "Approve only if you sent /start just now, and the chat shows you the same code. If someone sent you this link, deny it."
 							: "Approve only if your own agent gave you this code just now. If someone sent you this link, deny it."}
 					</p>
 					<div className="flex gap-3">
