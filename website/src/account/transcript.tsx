@@ -502,11 +502,12 @@ export function Transcript({
 						>
 							<ArrowLeftRight className="size-3.5 shrink-0" />
 							<span className="min-w-0 truncate">
-								Bridged to {bridge.about ?? `a room of ${bridge.bridge}`}
+								Everyone in {bridge.about ?? `a ${bridge.bridge} room`} sees
+								this
 							</span>
 							<MoreInfo label="About this bridge">
-								Added by {bridge.by}, through {bridge.bridge}. Everything said
-								here reaches that room, and what is said there shows here.
+								Added by {bridge.by}, through {bridge.bridge}. What is said there
+								shows here too.
 							</MoreInfo>
 						</p>
 					))}
