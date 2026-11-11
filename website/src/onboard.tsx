@@ -62,8 +62,24 @@ export function promptFor(otp: string, then?: string): string {
 	return `Read ${page("agents.md")} and set me up with the OTP ${otp}${rest}.`;
 }
 
+type OtpState = {
+	state: "pending" | "used" | "expired";
+	machine: string | null;
+};
+
+/** Where the page's own OTP stands, or null where the service knows it no more,
+ * which it does only once it has expired. */
+async function otpState(code: string): Promise<OtpState | null> {
+	const response = await fetch(page(`api/otp/${encodeURIComponent(code)}`), {
+		credentials: "same-origin",
+	});
+	if (response.status === 404) return null;
+	if (!response.ok) throw new Error(await response.text());
+	return (await response.json()) as OtpState;
+}
+
 /** Makes an OTP and shows the prompt with it, with a fresh one once it has
- * expired. */
+ * expired. Once the agent has traded it, says so and goes on to the account. */
 export function AgentPrompt({ then }: { then?: string }) {
 	const [otp, setOtp] = useState<{ code: string; expires: string } | null>(
 		null,
@@ -71,6 +87,7 @@ export function AgentPrompt({ then }: { then?: string }) {
 	const [problem, setProblem] = useState<string | null>(null);
 	const [now, setNow] = useState(Date.now());
 	const [copied, setCopied] = useState(false);
+	const [connected, setConnected] = useState<string | null>(null);
 	const fresh = () => {
 		setProblem(null);
 		onboarding.otp().then(setOtp, (error) => setProblem(String(error)));
@@ -81,6 +98,31 @@ export function AgentPrompt({ then }: { then?: string }) {
 		const timer = setInterval(() => setNow(Date.now()), 1000);
 		return () => clearInterval(timer);
 	}, []);
+	const left = otp ? Math.max(0, new Date(otp.expires).getTime() - now) : 0;
+	const waiting = otp !== null && left > 0 && connected === null;
+	// Every 2 seconds while the OTP waits: whether the agent has traded it.
+	useEffect(() => {
+		if (!waiting || !otp) return;
+		let stopped = false;
+		const timer = setInterval(async () => {
+			try {
+				const state = await otpState(otp.code);
+				if (stopped || state?.state !== "used") return;
+				setConnected(state.machine ?? "");
+			} catch {
+				// The next look tries again.
+			}
+		}, 2000);
+		return () => {
+			stopped = true;
+			clearInterval(timer);
+		};
+	}, [waiting, otp]);
+	useEffect(() => {
+		if (connected === null) return;
+		const timer = setTimeout(() => location.assign(page("account/")), 2500);
+		return () => clearTimeout(timer);
+	}, [connected]);
 	if (problem)
 		return (
 			<p className="text-sm text-destructive">
@@ -88,11 +130,36 @@ export function AgentPrompt({ then }: { then?: string }) {
 			</p>
 		);
 	if (!otp) return <div className="h-40" />;
-	const left = Math.max(0, new Date(otp.expires).getTime() - now);
+	if (connected !== null)
+		return (
+			<section className="flex flex-col gap-2 rounded-2xl border bg-card/60 p-6 shadow-2xl shadow-black/20">
+				<p className="text-lg font-medium">
+					<span className="text-emerald-400">✓</span> Your agent is connected
+					{connected ? ` (${connected})` : ""}
+				</p>
+				<p className="text-sm text-muted-foreground">
+					Taking you to{" "}
+					<a className="underline underline-offset-4" href={page("account/")}>
+						your account
+					</a>
+					…
+				</p>
+			</section>
+		);
 	const prompt = promptFor(otp.code, then);
+	const clock = `${Math.floor(left / 60000)}:${String(Math.floor(left / 1000) % 60).padStart(2, "0")}`;
 	return (
 		<section className="flex flex-col gap-3">
 			<div className="flex flex-col gap-2 rounded-2xl border bg-card/60 p-2 shadow-2xl shadow-black/20 backdrop-blur">
+				<div className="flex items-center justify-between gap-2 px-2 pt-1 text-xs text-muted-foreground">
+					<span>Prompt for your agent</span>
+					<span
+						className={`rounded-full border px-2 py-0.5 font-mono tabular-nums ${left ? "" : "border-destructive/50 text-destructive"}`}
+						aria-live="off"
+					>
+						{left ? `expires in ${clock}` : "expired"}
+					</span>
+				</div>
 				<pre
 					className={`rounded-xl bg-background/80 p-4 font-mono text-sm leading-relaxed whitespace-pre-wrap wrap-anywhere ${left ? "" : "opacity-40"}`}
 				>
@@ -118,12 +185,8 @@ export function AgentPrompt({ then }: { then?: string }) {
 			<p className="px-2 text-sm text-pretty text-muted-foreground">
 				Paste it into your agent, such as Claude Code. It signs in, keeps its
 				token on your machine, and shows you what you can do next. The OTP works
-				once, for{" "}
-				{left
-					? `${Math.floor(left / 60000)}:${String(Math.floor(left / 1000) % 60).padStart(2, "0")}`
-					: "no more time"}
-				, and gives your agent everything you can do here: share it with no one
-				else.
+				once and gives your agent everything you can do here: share it with no
+				one else. This page notices when your agent is in.
 			</p>
 		</section>
 	);

@@ -219,6 +219,20 @@ test("an OTP the person makes is traded once for a machine's token", async () =>
 	const otp = await call(luis.cookie, "POST", "/api/otp");
 	assert.equal(otp.status, 201, otp.text);
 	assert.match(otp.json.code, /^[A-Z2-9]{4}-[A-Z2-9]{4}$/);
+	const state = async (who: string | null) =>
+		await call(who, "GET", `/api/otp/${otp.json.code}`);
+	assert.deepEqual((await state(luis.cookie)).json, {
+		state: "pending",
+		machine: null,
+	});
+	// Only the person's own page sees it: a token can't, nor anyone else.
+	assert.equal((await state(luis.token)).status, 403);
+	const ben = await person("otp-ben");
+	assert.equal((await state(ben.cookie)).status, 404);
+	assert.equal(
+		(await call(luis.cookie, "GET", "/api/otp/AAAA-AAAA")).status,
+		404,
+	);
 	assert.equal(
 		(
 			await call(null, "POST", `/api/otp/${otp.json.code}/token`, {
@@ -235,6 +249,10 @@ test("an OTP the person makes is traded once for a machine's token", async () =>
 	);
 	assert.equal(traded.status, 201, traded.text);
 	assert.equal(traded.json.account, "otp-luis");
+	assert.deepEqual((await state(luis.cookie)).json, {
+		state: "used",
+		machine: "luis-laptop",
+	});
 	const me = await call(traded.json.token, "GET", "/api/me");
 	assert.equal(me.json.name, "otp-luis");
 	const tokens = await call(luis.token, "GET", "/api/tokens");

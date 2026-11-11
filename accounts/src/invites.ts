@@ -324,9 +324,33 @@ export function createOtp(user: string): { code: string; expires: string } {
 	return { code, expires };
 }
 
+/** Where `user`'s own OTP stands, for its page to see it traded; undefined where it is
+ * unknown, gone or someone else's, all alike. */
+export function otpState(
+	code: string,
+	user: string,
+):
+	| { state: "pending" | "used" | "expired"; machine: string | null }
+	| undefined {
+	const row = db
+		.prepare(
+			"SELECT expires, used, machine FROM person_otp WHERE code = ? AND user = ?",
+		)
+		.get(otpHash(code), user) as
+		| { expires: string; used: string | null; machine: string | null }
+		| undefined;
+	if (!row) return undefined;
+	if (row.used) return { state: "used", machine: row.machine };
+	return {
+		state: row.expires > new Date().toISOString() ? "pending" : "expired",
+		machine: null,
+	};
+}
+
 /**
  * Trades an OTP, once, for a machine's token named `machine`, of the person who made it.
  * The person made the OTP in the browser, so no token minted it, and `minted` keeps no row.
+ * The OTP stays, used, until it expires, so that its page sees it traded.
  * Undefined where the OTP is unknown, used or expired.
  */
 export async function redeemOtp(
@@ -337,11 +361,14 @@ export async function redeemOtp(
 > {
 	const row = db
 		.prepare(
-			"DELETE FROM person_otp WHERE code = ? AND expires > ? RETURNING user",
+			"UPDATE person_otp SET used = ?, machine = ? WHERE code = ? AND expires > ? AND used IS NULL RETURNING user",
 		)
-		.get(otpHash(code), new Date().toISOString()) as
-		| { user: string }
-		| undefined;
+		.get(
+			new Date().toISOString(),
+			machine,
+			otpHash(code),
+			new Date().toISOString(),
+		) as { user: string } | undefined;
 	if (!row) return undefined;
 	const context = await auth.$context;
 	const session = await context.internalAdapter.createSession(row.user, false, {
@@ -373,24 +400,35 @@ export function network(address: string): string {
 		.join(":")}::/64`;
 }
 
-/** At most `max` requests per minute from one address, for the operations anyone calls. */
-function perAddress(max: number) {
+/** At most `max` requests per minute for one key. */
+function perKey(max: number) {
 	const seen = new Map<string, { start: number; n: number }>();
-	return (request: Request): boolean => {
-		const address = network(
-			request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? "",
-		);
+	return (key: string): boolean => {
 		const now = Date.now();
 		if (seen.size > 10_000) seen.clear();
-		const entry = seen.get(address);
+		const entry = seen.get(key);
 		if (!entry || now - entry.start > 60_000) {
-			seen.set(address, { start: now, n: 1 });
+			seen.set(key, { start: now, n: 1 });
 			return true;
 		}
 		entry.n += 1;
 		return entry.n <= max;
 	};
 }
+
+/** At most `max` requests per minute from one address, for the operations anyone calls. */
+function perAddress(max: number) {
+	const limit = perKey(max);
+	return (request: Request): boolean =>
+		limit(
+			network(
+				request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? "",
+			),
+		);
+}
+
+/** A page asks every 2 seconds whether its OTP is traded: 30 a minute, with room. */
+const otpLooks = perKey(40);
 
 const lookups = perAddress(30);
 const redeems = perAddress(10);
@@ -591,6 +629,36 @@ export function inviteOperations(
 			},
 		}),
 		(c) => c.json(createOtp(c.var.caller.id), 201),
+	);
+
+	api.openapi(
+		operation({
+			id: "otp_state",
+			"x-tool": false,
+			tag: "Invites",
+			who: "browser",
+			method: "get",
+			path: "/otp/{code}",
+			summary: "See whether an OTP is traded",
+			description:
+				"The person's page sees whether the OTP it made is still waiting, traded for a machine's token, and for which machine, or expired. Only the person who made it sees it.",
+			request: { params: code },
+			responses: {
+				200: json(
+					z.object({
+						state: z.enum(["pending", "used", "expired"]),
+						machine: z.string().nullable().meta({ example: "ben-laptop" }),
+					}),
+					"Where the OTP stands, and the machine it was traded for, once used.",
+				),
+			},
+		}),
+		(c) => {
+			if (!otpLooks(c.var.caller.id))
+				return c.text("Too many tries: wait a minute.", 429);
+			const state = otpState(c.req.valid("param").code, c.var.caller.id);
+			return state ? c.json(state, 200) : c.text("No such OTP of yours.", 404);
+		},
 	);
 
 	api.openapi(

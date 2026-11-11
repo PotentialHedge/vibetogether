@@ -211,12 +211,21 @@ export function migrate(): void {
 			accepted_by TEXT REFERENCES user(id) ON DELETE CASCADE,
 			accepted TEXT
 		);
-		-- An OTP a person made for their agent, by the SHA-256 of its code, until it is used.
+	`);
+	// Databases from before an OTP stayed until it expired, so that its page sees it used:
+	// an OTP lasts 10 minutes, so the ones made go.
+	if (hasTable("person_otp") && !hasColumn("person_otp", "used"))
+		db.exec("DROP TABLE person_otp");
+	db.exec(`
+		-- An OTP a person made for their agent, by the SHA-256 of its code, until it expires:
+		-- once used, with when and the name of the machine it was traded for.
 		CREATE TABLE IF NOT EXISTS person_otp (
 			code TEXT PRIMARY KEY,
 			user TEXT NOT NULL REFERENCES user(id) ON DELETE CASCADE,
 			created TEXT NOT NULL,
-			expires TEXT NOT NULL
+			expires TEXT NOT NULL,
+			used TEXT,
+			machine TEXT
 		);
 	`);
 	// Databases from before groups were flat, whose groups each had an owner.
