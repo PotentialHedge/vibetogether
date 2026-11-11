@@ -189,10 +189,11 @@ function DevicePage() {
 					</dl>
 					{claimed.bridge && claimed.identity && (
 						<p className="text-muted-foreground">
-							Approving also links{" "}
-							<span className="text-foreground">{claimed.identity}</span> to
-							your account, so that what it writes in a bridged chat reaches the
-							session as you. You can unlink it in your settings.
+							Approving also links the account{" "}
+							<span className="text-foreground">{claimed.identity}</span>, which
+							asked, to yours, so that what it writes in a chat{" "}
+							{claimed.client_id} bridges reaches the session as you. You can
+							unlink it in your settings.
 						</p>
 					)}
 					{claimed.bridge && sessions && (

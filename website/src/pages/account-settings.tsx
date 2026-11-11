@@ -241,7 +241,7 @@ function Settings({
 							/>
 							<Titled
 								title={identity.name}
-								detail={`${identity.bridge}, id ${identity.external} · since ${date.format(new Date(identity.created))}`}
+								detail={`id ${identity.external}, through ${identity.bridge} · since ${date.format(new Date(identity.created))}`}
 							/>
 						</Row>
 					))
