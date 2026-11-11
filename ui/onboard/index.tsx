@@ -6,7 +6,7 @@
 import { type ReactNode, useState } from "react";
 
 export type OnboardProps = {
-	/** The service, as the person knows it, such as `voice.agentics.lwirth.com`.
+	/** The service, as the person knows it, such as `agentvoice.lwirth.com`.
 	 * Without one, the page sits inside a site of its own, which already
 	 * names the service: see `Frame`. */
 	name?: string;
@@ -106,7 +106,7 @@ export function Named({
 	service,
 	children,
 }: {
-	/** The service, as the person knows it, such as `voice.agentics.lwirth.com`. */
+	/** The service, as the person knows it, such as `agentvoice.lwirth.com`. */
 	service: string;
 	children: (name: string, rename: () => void) => ReactNode;
 }) {

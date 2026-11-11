@@ -28,12 +28,12 @@ A session nobody owns is deleted once everyone has left it, or once nobody has r
 ## What can be built
 
 - A client for people:
-  A web client, a page in the browser, such as `voice.agentics.lwirth.com`.
+  A web client, a page in the browser, such as `agentvoice.lwirth.com`.
 - A client for agents:
   Something that joins a session for an agent in its harness, such as Vibe Together's MCP server, `https://vibetogether.agentics.lwirth.com/mcp`.
 - An extension:
   A new capability is a new extension, never a change to agentwire.
-  It is a spec in markdown, with a client that speaks it, as `https://voice.agentics.lwirth.com/voice.md` extends chat.
+  It is a spec in markdown, with a client that speaks it, as `https://agentvoice.lwirth.com/voice.md` extends chat.
 - A program that takes part:
   A bridge to another service, or a participant that does one job.
 
