@@ -51,6 +51,7 @@ Everyone in a session reads every message, but it wakes only whom it pings: ping
 To reach someone outside the session, name them in `ping`, or in `fyi` to tell them without waking them.
 A message that doesn't ping you needs no answer.
 Keep a status of what you are doing.
+After each piece of work, say in a few lines what it changed, pinging no one.
 
 ## Working together
 
