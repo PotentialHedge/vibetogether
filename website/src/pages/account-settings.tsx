@@ -1,5 +1,6 @@
 /** The account's settings, one tab each: friends, logins, what agents
- * changed, and signing out and deleting the account. */
+ * changed, and signing out and deleting the account. They are part of the
+ * app, so the app's rail stays beside them. */
 
 import {
 	ArrowLeft,
@@ -15,10 +16,13 @@ import { type ReactNode, useCallback, useEffect, useState } from "react";
 import {
 	type Activity,
 	api,
+	type Dm,
 	demo,
 	type Friend,
+	type Group,
 	type Login,
 	type Me,
+	type Session,
 	Unauthorized,
 } from "@/account/api";
 import {
@@ -29,6 +33,7 @@ import {
 	useActions,
 	useReloadOnChange,
 } from "@/account/parts";
+import { type DmOfFriend, Rail } from "@/account/sessions";
 import { SignIn } from "@/account/sign-in";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -41,18 +46,26 @@ type State = {
 	friends: Friend[];
 	logins: Login[];
 	activity: Activity[];
+	/** What the rail shows, as in the app. */
+	groups: Group[];
+	sessions: Session[];
+	dms: Dm[];
 };
 
 async function load(): Promise<State> {
 	// First, so that a change while the rest loads shows as one more.
 	const version = await api.version();
-	const [me, friends, logins, activity] = await Promise.all([
-		api.me(),
-		api.friends(),
-		api.logins(),
-		api.activity(),
-	]);
-	return { version, me, friends, logins, activity };
+	const [me, friends, logins, activity, groups, sessions, dms] =
+		await Promise.all([
+			api.me(),
+			api.friends(),
+			api.logins(),
+			api.activity(),
+			api.groups(),
+			api.sessions(),
+			api.dms(),
+		]);
+	return { version, me, friends, logins, activity, groups, sessions, dms };
 }
 
 const date = new Intl.DateTimeFormat(undefined, { dateStyle: "medium" });
@@ -70,7 +83,9 @@ const argumentsOf = (args: Record<string, unknown>) =>
 		)
 		.join(" · ");
 
-const app = page(`account/${demo ? "#demo" : ""}`);
+/** The app, with what the query opens. */
+const app = (query = "") =>
+	page(`account/${query}${demo ? "#demo" : ""}`);
 
 /** The settings' tabs, one thing each, kept in the address as `?tab=`. */
 const TABS = [
@@ -165,11 +180,12 @@ function Settings({
 		<div className="mx-auto flex w-full max-w-5xl flex-col gap-8 px-6 pt-8 pb-16 md:flex-row md:gap-12 md:pt-12">
 			<aside className="flex shrink-0 flex-col gap-6 md:w-52">
 				<div className="flex items-center gap-3">
+					{/* On a phone, where the rail is hidden. */}
 					<a
-						href={app}
+						href={app()}
 						aria-label="Back to the app"
 						title="Back to the app"
-						className="-ml-1 rounded-md p-1 text-muted-foreground hover:text-foreground"
+						className="-ml-1 rounded-md p-1 text-muted-foreground hover:text-foreground md:hidden"
 					>
 						<ArrowLeft className="size-5" />
 					</a>
@@ -393,6 +409,56 @@ function AccountPane() {
 	);
 }
 
+/** The settings beside the app's rail, whose groups and DMs open in the app. */
+function InApp({
+	state,
+	reload,
+}: {
+	state: State;
+	reload: () => Promise<void>;
+}) {
+	const { me, friends, groups, sessions, dms } = state;
+	const { act } = useActions(reload);
+	const dmsOfFriends: DmOfFriend[] = dms.flatMap((dm) => {
+		const friend = friends.find((friend) => friend.name === dm.friend);
+		return friend ? [{ dm, friend }] : [];
+	});
+	return (
+		<div className="flex h-dvh overflow-hidden">
+			<div className="hidden min-h-0 md:flex">
+				<Rail
+					me={me}
+					requests={friends.filter((friend) => friend.state === "asking")}
+					pinged={
+						new Set(
+							sessions.flatMap((s) =>
+								s.pinged && s.group ? [s.group.id] : [],
+							),
+						)
+					}
+					dms={dmsOfFriends}
+					groups={groups}
+					open={undefined}
+					onOpen={(id) => {
+						location.href = app(`?group=${encodeURIComponent(id)}`);
+					}}
+					onDm={(id) => {
+						const friend = dmsOfFriends.find(({ dm }) => dm.id === id)?.friend;
+						if (friend)
+							location.href = app(`?dm=${encodeURIComponent(friend.name)}`);
+					}}
+					act={act}
+					reload={reload}
+					settings
+				/>
+			</div>
+			<div className="min-w-0 flex-1 overflow-y-auto">
+				<Settings state={state} reload={reload} />
+			</div>
+		</div>
+	);
+}
+
 function Page() {
 	const [state, setState] = useState<State | "signed-out" | null>(null);
 	const [problem, setProblem] = useState<string | null>(null);
@@ -414,22 +480,22 @@ function Page() {
 
 	if (problem)
 		return (
-			<p className="mx-auto max-w-4xl px-6 pt-16 text-destructive">
-				The settings could not be loaded: {problem}
-			</p>
+			<Site current="account/">
+				<p className="mx-auto max-w-4xl px-6 pt-16 text-destructive">
+					The settings could not be loaded: {problem}
+				</p>
+			</Site>
 		);
 	if (state === null) return null;
 	if (state === "signed-out")
 		return (
-			<div className="mx-auto max-w-md px-6 pt-16">
-				<SignIn back={location.href} />
-			</div>
+			<Site current="account/">
+				<div className="mx-auto max-w-md px-6 pt-16">
+					<SignIn back={location.href} />
+				</div>
+			</Site>
 		);
-	return <Settings state={state} reload={reload} />;
+	return <InApp state={state} reload={reload} />;
 }
 
-render(
-	<Site current="account/">
-		<Page />
-	</Site>,
-);
+render(<Page />);

@@ -322,6 +322,7 @@ export function Rail({
 	onDm,
 	act,
 	reload,
+	settings = false,
 }: {
 	me: Me;
 	/** Who asked to be friends, waiting for an answer. */
@@ -336,6 +337,8 @@ export function Rail({
 	onDm: (dm: string) => void;
 	act: Act;
 	reload: () => Promise<void>;
+	/** Whether the settings are open, which the person's face marks. */
+	settings?: boolean;
 }) {
 	const [adding, setAdding] = useState(false);
 	const sorted = [...groups].sort((a, b) => Number(b.own) - Number(a.own));
@@ -344,6 +347,16 @@ export function Rail({
 			aria-label="DMs and groups"
 			className="flex w-16 shrink-0 flex-col items-center gap-2 overflow-y-auto border-r bg-card/40 py-3"
 		>
+			{/* The way out of the app, to the site's front page. */}
+			<a
+				href={page()}
+				title="Vibe Together"
+				aria-label="Vibe Together, the front page"
+				className="flex size-10 shrink-0 items-center justify-center rounded-xl font-mono text-sm font-medium tracking-tight text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground"
+			>
+				VT
+			</a>
+			<span className="h-px w-8 shrink-0 bg-border" />
 			{requests.map((friend) => (
 				<FriendRequest key={friend.name} friend={friend} act={act} />
 			))}
@@ -420,7 +433,10 @@ export function Rail({
 						<button
 							type="button"
 							aria-label="You"
-							className="mt-auto rounded-full ring-offset-2 ring-offset-background hover:ring-2 hover:ring-ring/40"
+							className={cn(
+								"mt-auto rounded-full ring-offset-2 ring-offset-background hover:ring-2 hover:ring-ring/40",
+								settings && "ring-2 ring-ring",
+							)}
 						/>
 					}
 				>

@@ -49,7 +49,7 @@ function Home() {
 								href={page("account/")}
 								className={buttonVariants({ size: "xl" })}
 							>
-								Your sessions
+								Open app
 								<ArrowRight />
 							</a>
 						) : (
