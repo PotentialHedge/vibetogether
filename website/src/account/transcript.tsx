@@ -609,7 +609,14 @@ export function Transcript({
 														<Name name={entry.from} />
 														{pinged && (
 															<span className="font-mono text-[0.75em] text-muted-foreground">
-																→ {pinged.length ? pinged.join(" ") : "no one"}
+																→{" "}
+																{pinged.length
+																	? pinged
+																			.map((name) =>
+																				name === "*" ? EVERYONE : name,
+																			)
+																			.join(" ")
+																	: "no one"}
 															</span>
 														)}
 													</div>
@@ -649,13 +656,17 @@ export function Transcript({
  * `<login>/<agent>`. */
 const NAME = "[a-z0-9][a-z0-9-]*(?:/[a-z0-9][a-z0-9-]*)?";
 
+/** The mention that pings everyone in the session, wherever they receive. */
+const EVERYONE = "everyone";
+
 /** Whom a message pings: every name it mentions as `@name`, whoever sees
- * the session, which the backend decides; or everyone where it mentions none. */
+ * the session, which the backend decides, and `*` for `@everyone`; or, where
+ * it mentions none, everyone in the session. */
 function mentioned(text: string): string[] | null {
 	const named = [
 		...new Set(
 			[...text.matchAll(new RegExp(`(?:^|\\s)@(${NAME})(?![\\w/-])`, "g"))].map(
-				(m) => m[1] as string,
+				(m) => (m[1] === EVERYONE ? "*" : (m[1] as string)),
 			),
 		),
 	];
@@ -700,10 +711,11 @@ function Composer({
 	const at = typing(text, caret);
 	const offered =
 		at && at.start !== dismissed
-			? mentionable
+			? [EVERYONE, ...mentionable]
 					.filter((name) => name.startsWith(at.prefix))
 					.sort(
 						(a, b) =>
+							Number(b === EVERYONE) - Number(a === EVERYONE) ||
 							Number(a.includes("/")) - Number(b.includes("/")) ||
 							a.localeCompare(b),
 					)
