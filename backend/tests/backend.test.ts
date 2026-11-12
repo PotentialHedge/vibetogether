@@ -864,6 +864,13 @@ test("an agent is online while it receives, to its person, their groups and frie
 		got.map((e: any) => [e.text, e.session?.id]),
 		[["Join us.", session.id]],
 	);
+	// Joining the session it was pinged from, it isn't woken by the same ping again.
+	await call(ben.machine, "POST", `${s}/participants?agent=listener`);
+	const there = (
+		await call(ben.machine, "GET", `${s}/entries?agent=listener&wait=0`)
+	).json.entries.find((e: any) => e.text === "Join us.");
+	assert.equal(there.ping, false);
+	await call(ben.machine, "DELETE", `${s}/participants?agent=listener`);
 	await receiving;
 	// Between two receives, moments apart, it stays online.
 	assert.ok(

@@ -267,7 +267,13 @@ type Waiter = {
  * What a waiter found: the entries for it, and the last entry they cover, its own included, and
  * the messages of other sessions that name it.
  */
-type Found = { entries: EntryRow[]; covered: number; mentions: MentionRow[] };
+type Found = {
+	entries: EntryRow[];
+	covered: number;
+	mentions: MentionRow[];
+	/** The entries of its own session that already reached it in another, which ping it no more. */
+	got: Set<number>;
+};
 
 type MentionRow = EntryRow & {
 	id: number;
@@ -368,7 +374,24 @@ function entriesFor(
 		if (!w.reads && !w.own && row.sender === w.name) continue;
 		entries.push(row);
 	}
-	return { entries, covered, mentions: w.reads ? [] : mentionsOf(w) };
+	return {
+		entries,
+		covered,
+		mentions: w.reads ? [] : mentionsOf(w),
+		got: w.reads ? new Set() : gotElsewhere(w),
+	};
+}
+
+/** The entries of the waiter's session that named it and that it already received in another session. */
+function gotElsewhere(
+	w: Pick<Waiter, "session" | "user" | "agent">,
+): Set<number> {
+	const rows = db
+		.prepare(
+			"SELECT n FROM mention WHERE user = ? AND agent = ? AND session = ? AND delivered = 1",
+		)
+		.all(w.user, w.agent, w.session) as { n: number }[];
+	return new Set(rows.map((row) => row.n));
 }
 
 /** The messages of sessions other than the waiter's that name it, which it still sees. */
@@ -402,22 +425,23 @@ setInterval(
 ).unref();
 
 /** Whether `w` has something to return now. */
-function ready(w: Waiter, { entries, mentions }: Found): boolean {
+function ready(w: Waiter, { entries, mentions, got }: Found): boolean {
 	if (w.reads || w.wake !== "ping")
 		return entries.length > 0 || mentions.length > 0;
 	return (
-		entries.some((e) => pings(e.type, w.name)) || mentions.some((m) => m.pinged)
+		entries.some((e) => pings(e.type, w.name) && !got.has(e.n)) ||
+		mentions.some((m) => m.pinged)
 	);
 }
 
 function answerOf(
 	w: Waiter,
-	{ entries, mentions }: Found,
+	{ entries, mentions, got }: Found,
 	presence: Presence,
 ): Answer {
 	const own: Received[] = entries.map((row) => ({
 		...entryJson(row),
-		...(!w.reads && { ping: pings(row.type, w.name) }),
+		...(!w.reads && { ping: pings(row.type, w.name) && !got.has(row.n) }),
 	}));
 	const others: Received[] = mentions.map((row) => ({
 		...entryJson(row),
