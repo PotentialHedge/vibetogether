@@ -205,16 +205,21 @@ function mention(
 			`A message names at most ${maxNamed} in its ping and fyi together.`,
 		);
 	// An explicit ping to everyone notifies every participant wherever they receive, as naming each would.
+	const everyone = new Set<string>();
 	if (named.includes("*"))
 		for (const row of db
 			.prepare(`${participants} WHERE p.session = ? AND p.inside = 1`)
-			.all(session) as ParticipantRow[])
-			ping.add(nameOf(row.login, row.agent));
+			.all(session) as ParticipantRow[]) {
+			const name = nameOf(row.login, row.agent);
+			if (!ping.has(name)) everyone.add(name);
+			ping.add(name);
+		}
 	for (const name of [...ping, ...fyi.filter((name) => !ping.has(name))]) {
 		if (name === sender) continue;
 		const p = participantByName(name);
 		if (!p || !sessionFor(session, p.user)) {
-			unreached.push(name);
+			// Only a name the sender gave is reported, not one `*` stood for.
+			if (!everyone.has(name)) unreached.push(name);
 			continue;
 		}
 		db.prepare(
