@@ -919,6 +919,22 @@ test("a message pings only who was in the session when it was sent, and whom it 
 		now.map((e: any) => [e.text, e.ping]),
 		[["Now you too.", true]],
 	);
+	// Pinged while it was in, it keeps the ping after leaving and joining again.
+	await call(
+		luis.machine,
+		"POST",
+		`${s}/entries?agent=scout`,
+		"While you're in.",
+	);
+	await call(ben.machine, "DELETE", `${s}/participants?agent=latecomer`);
+	await call(ben.machine, "POST", `${s}/participants?agent=latecomer`);
+	const again = (
+		await call(ben.machine, "GET", `${s}/entries?agent=latecomer&wait=0`)
+	).json.entries.filter((e: any) => e.type.startsWith("text/plain"));
+	assert.deepEqual(
+		again.map((e: any) => [e.text, e.ping]),
+		[["While you're in.", true]],
+	);
 	await call(ben.machine, "DELETE", `${s}/participants?agent=latecomer`);
 	await call(luis.machine, "DELETE", `${s}/participants?agent=scout`);
 });

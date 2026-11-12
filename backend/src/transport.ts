@@ -388,22 +388,36 @@ function entriesFor(
  * the session when it was sent, so that who joins later gets earlier entries, but not as pings.
  */
 function pingingOf(
-	w: Pick<Waiter, "session" | "user" | "agent" | "name">,
+	w: Pick<Waiter, "session" | "user" | "agent" | "name" | "after">,
 ): (row: EntryRow) => boolean {
-	const joined = participantRow(w)?.entry ?? 0;
+	// When it joined and left, from the log: it was in for an entry where its last join or
+	// leave before it is a join.
+	const turns = db
+		.prepare(
+			"SELECT n, type FROM entry WHERE session = ? AND sender = ? AND type IN (?, ?) ORDER BY n",
+		)
+		.all(w.session, w.name, joinType, leaveType) as {
+		n: number;
+		type: string;
+	}[];
+	const wasIn = (n: number) =>
+		turns.findLast((turn) => turn.n < n)?.type === joinType;
 	const named = new Map(
 		(
 			db
 				.prepare(
-					"SELECT n, delivered FROM mention WHERE user = ? AND agent = ? AND session = ? AND ping = 1",
+					"SELECT n, delivered FROM mention WHERE user = ? AND agent = ? AND session = ? AND ping = 1 AND n > ?",
 				)
-				.all(w.user, w.agent, w.session) as { n: number; delivered: number }[]
+				.all(w.user, w.agent, w.session, w.after) as {
+				n: number;
+				delivered: number;
+			}[]
 		).map((row) => [row.n, row.delivered === 1]),
 	);
 	return (row) => {
 		if (!pings(row.type, w.name)) return false;
 		const delivered = named.get(row.n);
-		return delivered === undefined ? row.n > joined : !delivered;
+		return delivered === undefined ? wasIn(row.n) : !delivered;
 	};
 }
 
