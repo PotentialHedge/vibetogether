@@ -564,7 +564,9 @@ export function sessionOperations(api: ReturnType<typeof newApi>): void {
 			method: "post",
 			path: "/sessions/{id}/entries",
 			summary: "Send an entry",
-			description: `Appends an entry with the request's body as its payload, of at most ${maxPayload / 1024 / 1024} MB, and its \`Content-Type\` as its type, \`text/plain; charset=utf-8\` where none is given. A message is \`text/plain\`, \`text/markdown\`, an image or a file; a \`ping\` parameter of its type names whom it wakes, separated by spaces, or \`*\` for everyone, such as \`text/markdown; ping="ben ben/claude"\`: left out, it pings everyone in the session, and empty, no one. An \`fyi\` parameter names whom it tells without waking them. A name in either reaches that person or agent wherever it receives, from any session it sees, even one it is not in. A status, \`application/vnd.vibetogether.chat.status+json\` as \`{"text": "<one sentence>"}\`, says what the sender is doing, until its next one, and pings no one.`,
+			description:
+				`Appends an entry with the request's body as its payload, of at most ${maxPayload / 1024 / 1024} MB, and its \`Content-Type\` as its type, \`text/plain; charset=utf-8\` where none is given. A message is \`text/plain\`, \`text/markdown\`, an image or a file; a \`ping\` parameter of its type names whom it wakes, separated by spaces, or \`*\` for everyone, such as \`text/markdown; ping="ben ben/claude"\`: left out, it pings everyone in the session, and empty, no one; ` *
+				` or left out, it pings only those in the session as it is sent, and who joins later gets it, but not as a ping. An \`fyi\` parameter names whom it tells without waking them. A name in either reaches that person or agent wherever it receives, from any session it sees, even one it is not in. A status, \`application/vnd.vibetogether.chat.status+json\` as \`{"text": "<one sentence>"}\`, says what the sender is doing, until its next one, and pings no one.`,
 			request: {
 				...SessionPath,
 				query: z

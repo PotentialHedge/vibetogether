@@ -271,8 +271,8 @@ type Found = {
 	entries: EntryRow[];
 	covered: number;
 	mentions: MentionRow[];
-	/** The entries of its own session that already reached it in another, which ping it no more. */
-	got: Set<number>;
+	/** Which of the entries ping it, for a receive. */
+	pinging: (row: EntryRow) => boolean;
 };
 
 type MentionRow = EntryRow & {
@@ -378,20 +378,33 @@ function entriesFor(
 		entries,
 		covered,
 		mentions: w.reads ? [] : mentionsOf(w),
-		got: w.reads ? new Set() : gotElsewhere(w),
+		pinging: w.reads ? () => false : pingingOf(w),
 	};
 }
 
-/** The entries of the waiter's session that pinged it and that it already received in another session. */
-function gotElsewhere(
-	w: Pick<Waiter, "session" | "user" | "agent">,
-): Set<number> {
-	const rows = db
-		.prepare(
-			"SELECT n FROM mention WHERE user = ? AND agent = ? AND session = ? AND delivered = 1 AND ping = 1",
-		)
-		.all(w.user, w.agent, w.session) as { n: number }[];
-	return new Set(rows.map((row) => row.n));
+/**
+ * Which entries of its session ping a participant: one that names it in its `ping`, until it
+ * received it in another session; any other that pings it, such as by `*`, only where it was in
+ * the session when it was sent, so that who joins later gets earlier entries, but not as pings.
+ */
+function pingingOf(
+	w: Pick<Waiter, "session" | "user" | "agent" | "name">,
+): (row: EntryRow) => boolean {
+	const joined = participantRow(w)?.entry ?? 0;
+	const named = new Map(
+		(
+			db
+				.prepare(
+					"SELECT n, delivered FROM mention WHERE user = ? AND agent = ? AND session = ? AND ping = 1",
+				)
+				.all(w.user, w.agent, w.session) as { n: number; delivered: number }[]
+		).map((row) => [row.n, row.delivered === 1]),
+	);
+	return (row) => {
+		if (!pings(row.type, w.name)) return false;
+		const delivered = named.get(row.n);
+		return delivered === undefined ? row.n > joined : !delivered;
+	};
 }
 
 /** The messages of sessions other than the waiter's that name it, which it still sees. */
@@ -425,23 +438,20 @@ setInterval(
 ).unref();
 
 /** Whether `w` has something to return now. */
-function ready(w: Waiter, { entries, mentions, got }: Found): boolean {
+function ready(w: Waiter, { entries, mentions, pinging }: Found): boolean {
 	if (w.reads || w.wake !== "ping")
 		return entries.length > 0 || mentions.length > 0;
-	return (
-		entries.some((e) => pings(e.type, w.name) && !got.has(e.n)) ||
-		mentions.some((m) => m.pinged)
-	);
+	return entries.some(pinging) || mentions.some((m) => m.pinged);
 }
 
 function answerOf(
 	w: Waiter,
-	{ entries, mentions, got }: Found,
+	{ entries, mentions, pinging }: Found,
 	presence: Presence,
 ): Answer {
 	const own: Received[] = entries.map((row) => ({
 		...entryJson(row),
-		...(!w.reads && { ping: pings(row.type, w.name) && !got.has(row.n) }),
+		...(!w.reads && { ping: pinging(row) }),
 	}));
 	const others: Received[] = mentions.map((row) => ({
 		...entryJson(row),

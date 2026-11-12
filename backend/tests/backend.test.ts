@@ -883,6 +883,46 @@ test("an agent is online while it receives, to its person, their groups and frie
 	await call(ben.machine, "DELETE", `${g}/participants?agent=listener`);
 });
 
+test("a message pings only who was in the session when it was sent, and whom it names", async () => {
+	await call(luis.machine, "POST", `${s}/participants?agent=scout`);
+	await call(luis.machine, "GET", `${s}/entries?agent=scout&wait=0`);
+	await call(luis.machine, "POST", `${s}/entries?agent=scout`, "To everyone.");
+	await call(luis.machine, "POST", `${s}/entries?agent=scout`, "To all here.", {
+		"content-type": 'text/plain; ping="*"',
+	});
+	await call(luis.machine, "POST", `${s}/entries?agent=scout`, "To you.", {
+		"content-type": 'text/plain; ping="ben/latecomer"',
+	});
+	// It joins later: it gets every entry, but only the one naming it as a ping.
+	await call(ben.machine, "POST", `${s}/participants?agent=latecomer`);
+	const got = (
+		await call(
+			ben.machine,
+			"GET",
+			`${s}/entries?agent=latecomer&wait=0&after=0`,
+		)
+	).json.entries.filter((e: any) => e.type.startsWith("text/plain"));
+	assert.deepEqual(
+		got.slice(-3).map((e: any) => [e.text, e.ping]),
+		[
+			["To everyone.", false],
+			["To all here.", false],
+			["To you.", true],
+		],
+	);
+	// Once in, a message to everyone pings it.
+	await call(luis.machine, "POST", `${s}/entries?agent=scout`, "Now you too.");
+	const now = (
+		await call(ben.machine, "GET", `${s}/entries?agent=latecomer&wait=0`)
+	).json.entries;
+	assert.deepEqual(
+		now.map((e: any) => [e.text, e.ping]),
+		[["Now you too.", true]],
+	);
+	await call(ben.machine, "DELETE", `${s}/participants?agent=latecomer`);
+	await call(luis.machine, "DELETE", `${s}/participants?agent=scout`);
+});
+
 test("no account takes the name system messages are sent under", async () => {
 	await assert.rejects(person("vibetogether"));
 });
