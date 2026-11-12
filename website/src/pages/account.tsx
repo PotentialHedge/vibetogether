@@ -150,6 +150,7 @@ function App({ state, reload }: { state: State; reload: () => Promise<void> }) {
 			>
 				<Rail
 					me={me}
+					requests={friends.filter((friend) => friend.state === "asking")}
 					dms={dmsOfFriends}
 					groups={groups}
 					open={dm?.dm.id ?? group?.id}
@@ -159,6 +160,7 @@ function App({ state, reload }: { state: State; reload: () => Promise<void> }) {
 							dm: dmsOfFriends.find(({ dm }) => dm.id === id)?.friend.name,
 						})
 					}
+					act={act}
 					reload={reload}
 				/>
 				{group && (

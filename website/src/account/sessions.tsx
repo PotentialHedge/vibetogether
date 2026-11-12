@@ -34,6 +34,14 @@ import {
 	DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
+import {
+	Popover,
+	PopoverContent,
+	PopoverDescription,
+	PopoverHeader,
+	PopoverTitle,
+	PopoverTrigger,
+} from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
 import { page } from "@/site";
 
@@ -218,22 +226,79 @@ export type DmOfFriend = { dm: Dm; friend: Friend };
 
 /** The person's DMs, one per friend, at the top, then their groups, their own
  * first, and the person's own menu. */
+/** Someone who asked to be friends, at the top of the rail: accepting makes
+ * their DM, which takes their place. */
+function FriendRequest({ friend, act }: { friend: Friend; act: Act }) {
+	return (
+		<Popover>
+			<PopoverTrigger
+				render={
+					<button
+						type="button"
+						title={`${friend.displayName || friend.name} asks to be friends`}
+						aria-label={`Friend request from ${friend.name}`}
+						className="relative rounded-full ring-offset-2 ring-offset-background transition-shadow hover:ring-2 hover:ring-ring/40"
+					/>
+				}
+			>
+				<span className="opacity-60">
+					<Person {...friend} size="lg" />
+				</span>
+				<span className="absolute -right-0.5 -bottom-0.5 flex size-4 items-center justify-center rounded-full bg-primary text-primary-foreground ring-2 ring-card">
+					<Plus className="size-3" />
+				</span>
+			</PopoverTrigger>
+			<PopoverContent side="right" align="start" className="w-64">
+				<PopoverHeader>
+					<PopoverTitle className="flex items-center gap-2">
+						<Person {...friend} size="sm" />
+						<span className="min-w-0 truncate">
+							{friend.displayName || friend.name}
+						</span>
+					</PopoverTitle>
+					<PopoverDescription>
+						<span className="font-mono">{friend.name}</span> asks to be friends,
+						with a DM between you and your agents.
+					</PopoverDescription>
+				</PopoverHeader>
+				<div className="flex gap-2">
+					<Button size="sm" onClick={act(() => api.addFriend(friend.name))}>
+						Accept
+					</Button>
+					<Button
+						variant="ghost"
+						size="sm"
+						onClick={act(() => api.removeFriend(friend.name))}
+					>
+						Decline
+					</Button>
+				</div>
+			</PopoverContent>
+		</Popover>
+	);
+}
+
 export function Rail({
 	me,
+	requests,
 	dms,
 	groups,
 	open,
 	onOpen,
 	onDm,
+	act,
 	reload,
 }: {
 	me: Me;
+	/** Who asked to be friends, waiting for an answer. */
+	requests: Friend[];
 	dms: DmOfFriend[];
 	groups: Group[];
 	/** The open group's id, or the open DM's. */
 	open: string | undefined;
 	onOpen: (group: string) => void;
 	onDm: (dm: string) => void;
+	act: Act;
 	reload: () => Promise<void>;
 }) {
 	const [adding, setAdding] = useState(false);
@@ -243,6 +308,10 @@ export function Rail({
 			aria-label="DMs and groups"
 			className="flex w-16 shrink-0 flex-col items-center gap-2 overflow-y-auto border-r bg-card/40 py-3"
 		>
+			{requests.map((friend) => (
+				<FriendRequest key={friend.name} friend={friend} act={act} />
+			))}
+			{requests.length > 0 && <span className="h-px w-8 shrink-0 bg-border" />}
 			{dms.map(({ dm, friend }) => (
 				<button
 					key={dm.id}
