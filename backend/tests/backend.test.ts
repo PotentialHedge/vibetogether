@@ -771,7 +771,7 @@ test("a ping or an fyi reaches a name in any session it receives in", async () =
 	).json.entries;
 	assert.ok(there.every((e: any) => e.session === undefined));
 
-	// `*` stays inside the session: no one outside it is reached.
+	// `*` reaches every participant, wherever they receive, and no one who isn't one.
 	await call(ben.machine, "POST", `${g}/entries?agent=claude`, "All here.", {
 		"content-type": 'text/plain; ping="*"',
 	});
@@ -780,9 +780,10 @@ test("a ping or an fyi reaches a name in any session it receives in", async () =
 		"content-type": 'text/plain; ping="*"',
 	});
 	assert.deepEqual(
-		(await call(luis.machine, "GET", `${s}/entries?agent=claude&wait=0`)).json
-			.entries,
-		[],
+		(
+			await call(luis.machine, "GET", `${s}/entries?agent=claude&wait=0`)
+		).json.entries.map((e: any) => e.text),
+		["All here."],
 	);
 	await call(luis.machine, "DELETE", `${s}/participants?agent=claude`);
 
@@ -935,6 +936,31 @@ test("a message pings only who was in the session when it was sent, and whom it 
 		again.map((e: any) => [e.text, e.ping]),
 		[["While you're in.", true]],
 	);
+	// An explicit ping to everyone reaches every participant wherever they receive.
+	const elsewhere = (
+		await call(ben.machine, "GET", "/api/overview")
+	).json.groups.find((g: any) => g.own).sessions[0];
+	const e = `/api/sessions/${elsewhere.id}`;
+	await call(ben.machine, "POST", `${s}/participants?agent=latecomer`);
+	await call(ben.machine, "GET", `${s}/entries?agent=latecomer&wait=0`);
+	await call(ben.machine, "POST", `${e}/participants?agent=latecomer`);
+	await call(ben.machine, "GET", `${e}/entries?agent=latecomer&wait=0`);
+	const woken = call(ben.machine, "GET", `${e}/entries?agent=latecomer&wait=5`);
+	await new Promise((r) => setTimeout(r, 50));
+	await call(
+		luis.machine,
+		"POST",
+		`${s}/entries?agent=scout`,
+		"Everyone, wherever.",
+		{
+			"content-type": 'text/plain; ping="*"',
+		},
+	);
+	assert.deepEqual(
+		(await woken).json.entries.map((e: any) => [e.text, e.ping, e.session?.id]),
+		[["Everyone, wherever.", true, session.id]],
+	);
+	await call(ben.machine, "DELETE", `${e}/participants?agent=latecomer`);
 	await call(ben.machine, "DELETE", `${s}/participants?agent=latecomer`);
 	await call(luis.machine, "DELETE", `${s}/participants?agent=scout`);
 });

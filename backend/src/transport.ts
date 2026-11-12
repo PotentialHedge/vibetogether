@@ -180,8 +180,8 @@ function participantByName(
 }
 
 /**
- * Notes entry `n` of `session` for every name its `ping` or `fyi` lists, `*` aside, which sees
- * the session, so that it reaches them in any session they receive in. Returns the participants
+ * Notes entry `n` of `session` for every name its `ping` or `fyi` lists, and for `*` every
+ * participant, which sees the session, so that it reaches them in any session they receive in. Returns the participants
  * noted, and the names that see it not.
  */
 function mention(
@@ -194,7 +194,8 @@ function mention(
 	const unreached: string[] = [];
 	if (!isMessage(type)) return { noted, unreached };
 	const now = new Date();
-	const ping = new Set(namesOf(type, "ping").filter((name) => name !== "*"));
+	const named = namesOf(type, "ping");
+	const ping = new Set(named.filter((name) => name !== "*"));
 	const fyi = [
 		...new Set(namesOf(type, "fyi").filter((name) => !ping.has(name))),
 	];
@@ -203,7 +204,13 @@ function mention(
 			400,
 			`A message names at most ${maxNamed} in its ping and fyi together.`,
 		);
-	for (const name of [...ping, ...fyi]) {
+	// An explicit ping to everyone notifies every participant wherever they receive, as naming each would.
+	if (named.includes("*"))
+		for (const row of db
+			.prepare(`${participants} WHERE p.session = ? AND p.inside = 1`)
+			.all(session) as ParticipantRow[])
+			ping.add(nameOf(row.login, row.agent));
+	for (const name of [...ping, ...fyi.filter((name) => !ping.has(name))]) {
 		if (name === sender) continue;
 		const p = participantByName(name);
 		if (!p || !sessionFor(session, p.user)) {
@@ -390,18 +397,23 @@ function entriesFor(
 function pingingOf(
 	w: Pick<Waiter, "session" | "user" | "agent" | "name" | "after">,
 ): (row: EntryRow) => boolean {
-	// When it joined and left, from the log: it was in for an entry where its last join or
-	// leave before it is a join.
-	const turns = db
-		.prepare(
-			"SELECT n, type FROM entry WHERE session = ? AND sender = ? AND type IN (?, ?) ORDER BY n",
-		)
-		.all(w.session, w.name, joinType, leaveType) as {
-		n: number;
-		type: string;
-	}[];
-	const wasIn = (n: number) =>
-		turns.findLast((turn) => turn.n < n)?.type === joinType;
+	// It is in since its last join, where it is in; for an entry before that, whether it was in
+	// comes from its joins and leaves in the log, read only where needed.
+	const row = participantRow(w);
+	const since = row?.inside ? row.entry : Number.POSITIVE_INFINITY;
+	let turns: { n: number; type: string }[] | undefined;
+	const wasIn = (n: number) => {
+		if (n > since) return true;
+		turns ??= db
+			.prepare(
+				"SELECT n, type FROM entry WHERE session = ? AND sender = ? AND type IN (?, ?) ORDER BY n",
+			)
+			.all(w.session, w.name, joinType, leaveType) as {
+			n: number;
+			type: string;
+		}[];
+		return turns.findLast((turn) => turn.n < n)?.type === joinType;
+	};
 	const named = new Map(
 		(
 			db
