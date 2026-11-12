@@ -684,11 +684,14 @@ function Members({
 	me,
 	group,
 	friends,
+	online,
 	act,
 }: {
 	me: Me;
 	group: Group;
 	friends: Friend[];
+	/** The full names of the online agents the person sees. */
+	online: string[];
 	act: Act;
 }) {
 	const addable = friends.filter(
@@ -705,26 +708,43 @@ function Members({
 			<Heading>Members</Heading>
 			<ul className="flex flex-col">
 				{people.map((name) => (
-					<li
-						key={name}
-						className="group/member flex h-8 items-center gap-2 rounded-md px-2 text-sm"
-					>
-						<Person {...face(name)} size="sm" />
-						<span className="min-w-0 flex-1 truncate font-mono" title={name}>
-							{name}
-						</span>
-						{!group.own && name !== me.name && (
-							<Button
-								variant="ghost"
-								size="icon-xs"
-								aria-label={`Remove ${name}`}
-								// Shown on hover where there is one, always on a touch screen.
-								className="[@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover/member:opacity-100 [@media(hover:hover)]:focus-visible:opacity-100"
-								onClick={act(() => api.removeMember(group.id, name))}
-							>
-								<X />
-							</Button>
-						)}
+					<li key={name} className="flex flex-col">
+						<div className="group/member flex h-8 items-center gap-2 rounded-md px-2 text-sm">
+							<Person {...face(name)} size="sm" />
+							<span className="min-w-0 flex-1 truncate font-mono" title={name}>
+								{name}
+							</span>
+							{!group.own && name !== me.name && (
+								<Button
+									variant="ghost"
+									size="icon-xs"
+									aria-label={`Remove ${name}`}
+									// Shown on hover where there is one, always on a touch screen.
+									className="[@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover/member:opacity-100 [@media(hover:hover)]:focus-visible:opacity-100"
+									onClick={act(() => api.removeMember(group.id, name))}
+								>
+									<X />
+								</Button>
+							)}
+						</div>
+						{online
+							.filter((agent) => agent.startsWith(`${name}/`))
+							.map((agent) => (
+								<div
+									key={agent}
+									className="flex h-6 items-center gap-2 pr-2 pl-9 text-xs text-muted-foreground"
+									title={`${agent} is online`}
+								>
+									<span
+										role="img"
+										aria-label="online"
+										className="size-1.5 shrink-0 rounded-full bg-emerald-500"
+									/>
+									<span className="min-w-0 truncate font-mono">
+										{agent.slice(name.length + 1)}
+									</span>
+								</div>
+							))}
 					</li>
 				))}
 			</ul>
@@ -776,6 +796,7 @@ export function Sidebar({
 	projects,
 	sessions,
 	friends,
+	online,
 	current,
 	onSession,
 	act,
@@ -786,6 +807,8 @@ export function Sidebar({
 	projects: Project[];
 	sessions: Session[];
 	friends: Friend[];
+	/** The full names of the online agents the person sees. */
+	online: string[];
 	current: string | undefined;
 	onSession: (session: string) => void;
 	act: Act;
@@ -913,7 +936,13 @@ export function Sidebar({
 				label="Delete group"
 				onConfirm={act(() => api.deleteGroup(group.id))}
 			/>
-			<Members me={me} group={group} friends={friends} act={act} />
+			<Members
+				me={me}
+				group={group}
+				friends={friends}
+				online={online}
+				act={act}
+			/>
 		</div>
 	);
 }

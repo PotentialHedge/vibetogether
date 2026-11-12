@@ -849,9 +849,15 @@ test("an agent is online while it receives, to its person, their groups and frie
 	const pinged = call(ben.machine, "GET", `${g}/entries?agent=listener&wait=5`);
 	await new Promise((r) => setTimeout(r, 50));
 	await call(luis.machine, "POST", `${s}/participants?agent=claude`);
-	const sent = await call(luis.machine, "POST", `${s}/entries?agent=claude`, "Join us.", {
-		"content-type": 'text/plain; ping="ben/listener"',
-	});
+	const sent = await call(
+		luis.machine,
+		"POST",
+		`${s}/entries?agent=claude`,
+		"Join us.",
+		{
+			"content-type": 'text/plain; ping="ben/listener"',
+		},
+	);
 	assert.equal(sent.json.unreached, undefined);
 	const got = (await pinged).json.entries.filter((e: any) => e.ping);
 	assert.deepEqual(

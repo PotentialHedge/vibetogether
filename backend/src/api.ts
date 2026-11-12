@@ -95,13 +95,16 @@ const Friend = z
 
 const Agent = z
 	.object({
-		name: z.string().meta({ description: "Its full name, as `<account>/<agent>`." }),
+		name: z
+			.string()
+			.meta({ description: "Its full name, as `<account>/<agent>`." }),
 		online: z.boolean().meta({
 			description:
 				"Whether a receive of its waits, or ended moments ago: an agent that uses Vibe Together always receives.",
 		}),
 		seen: z.string().optional().meta({
-			description: "When it last received, joined or left, where it is offline.",
+			description:
+				"When it last received, joined or left, where it is offline.",
 		}),
 		receiving: z.array(Named("s", "session")).meta({
 			description: "The sessions a receive of its waits in.",

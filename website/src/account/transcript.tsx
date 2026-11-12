@@ -42,8 +42,9 @@ type Log = {
 	entries: Entry[];
 	presence: Presence;
 	problem: string | null;
-	/** Sends a message as the person, once they are in. */
-	send: ((text: string, ping: string[] | null) => Promise<void>) | null;
+	/** Sends a message as the person, once they are in, and returns the names
+	 * it pings that it doesn't reach. */
+	send: ((text: string, ping: string[] | null) => Promise<string[]>) | null;
 	/** Why the person only reads here, where they do. */
 	note: string | null;
 };
@@ -69,7 +70,7 @@ function useLog(session: Pick<Session, "id">, name: string): Log {
 				source: null,
 				note: null,
 				...entries,
-				send: async (text, ping) =>
+				send: async (text, ping) => {
 					setLog((log) => ({
 						...log,
 						entries: [
@@ -83,7 +84,9 @@ function useLog(session: Pick<Session, "id">, name: string): Log {
 								text,
 							},
 						],
-					})),
+					}));
+					return [];
+				},
 			});
 			return;
 		}
@@ -396,6 +399,7 @@ export function Transcript({
 	actions,
 	menu,
 	back,
+	mentionable: seeing,
 }: {
 	/** A session or a DM, as far as the transcript shows it. */
 	session: Pick<Session, "id" | "name">;
@@ -407,6 +411,9 @@ export function Transcript({
 	menu?: ReactNode;
 	/** Leads back to the sessions, where they are not beside it. */
 	back?: ReactNode;
+	/** Whom a mention can name: everyone who sees the session, and their
+	 * online agents. */
+	mentionable: string[];
 }) {
 	const {
 		live: reading,
@@ -425,6 +432,10 @@ export function Transcript({
 				),
 			),
 		[presence],
+	);
+	const mentionable = useMemo(
+		() => seeing.filter((name) => name !== as),
+		[seeing, as],
 	);
 	const [people, setPeople] = useState(false);
 	const [scale, setScale] = useState(
@@ -624,7 +635,7 @@ export function Transcript({
 						{note}
 					</p>
 				) : (
-					<Composer send={send} names={Object.keys(presence)} />
+					<Composer send={send} mentionable={mentionable} />
 				)}
 			</div>
 			<aside className="hidden w-72 shrink-0 overflow-y-auto border-l px-5 py-4 xl:block">
@@ -634,22 +645,49 @@ export function Transcript({
 	);
 }
 
-/** Whom a message pings: the names in the session it mentions as `@name`,
- * or everyone where it mentions none. */
-function mentioned(text: string, names: string[]): string[] | null {
-	const named = names.filter((name) =>
-		new RegExp(`(^|\\s)@${name.replace(/[-/]/g, "\\$&")}(?![\\w/-])`).test(
-			text,
+/** A name as a mention spells it: a person's login, or an agent's as
+ * `<login>/<agent>`. */
+const NAME = "[a-z0-9][a-z0-9-]*(?:/[a-z0-9][a-z0-9-]*)?";
+
+/** Whom a message pings: every name it mentions as `@name`, whoever sees
+ * the session, which the backend decides; or everyone where it mentions none. */
+function mentioned(text: string): string[] | null {
+	const named = [
+		...new Set(
+			[...text.matchAll(new RegExp(`(?:^|\\s)@(${NAME})(?![\\w/-])`, "g"))].map(
+				(m) => m[1] as string,
+			),
 		),
-	);
+	];
 	return named.length ? named : null;
 }
 
-/** The chatbox: Enter sends, Shift+Enter starts a new line. */
-function Composer({ send, names }: { send: Log["send"]; names: string[] }) {
+/** The `@name` being typed where the caret is, with where it starts. */
+function typing(
+	text: string,
+	caret: number,
+): { start: number; prefix: string } | null {
+	const m = /(?:^|\s)@([a-z0-9/-]*)$/.exec(text.slice(0, caret));
+	if (!m) return null;
+	const prefix = m[1] as string;
+	return { start: caret - prefix.length - 1, prefix };
+}
+
+/** The chatbox: Enter sends, Shift+Enter starts a new line. Typing `@` offers
+ * whom it can ping: everyone who sees the session, and their online agents. */
+function Composer({
+	send,
+	mentionable,
+}: {
+	send: Log["send"];
+	mentionable: string[];
+}) {
 	const [text, setText] = useState("");
+	const [caret, setCaret] = useState(0);
 	const [sending, setSending] = useState(false);
 	const [problem, setProblem] = useState<string | null>(null);
+	const [chosen, setChosen] = useState(0);
+	const [dismissed, setDismissed] = useState<number | null>(null);
 	const box = useRef<HTMLTextAreaElement>(null);
 	// Grows with what is typed, up to a few lines.
 	// biome-ignore lint/correctness/useExhaustiveDependencies: runs as the text changes.
@@ -659,15 +697,45 @@ function Composer({ send, names }: { send: Log["send"]; names: string[] }) {
 		element.style.height = "auto";
 		element.style.height = `${Math.min(element.scrollHeight, 200)}px`;
 	}, [text]);
+	const at = typing(text, caret);
+	const offered =
+		at && at.start !== dismissed
+			? mentionable
+					.filter((name) => name.startsWith(at.prefix))
+					.sort(
+						(a, b) =>
+							Number(a.includes("/")) - Number(b.includes("/")) ||
+							a.localeCompare(b),
+					)
+					.slice(0, 8)
+			: [];
 	if (!send) return null;
+	const pick = (name: string) => {
+		if (!at) return;
+		const end = caret;
+		const next = `${text.slice(0, at.start)}@${name} ${text.slice(end)}`;
+		const position = at.start + name.length + 2;
+		setText(next);
+		setCaret(position);
+		setChosen(0);
+		requestAnimationFrame(() => {
+			box.current?.focus();
+			box.current?.setSelectionRange(position, position);
+		});
+	};
 	const submit = async () => {
 		const said = text.trim();
 		if (!said || sending) return;
 		setSending(true);
 		setProblem(null);
 		try {
-			await send(said, mentioned(said, names));
+			const unreached = await send(said, mentioned(said));
 			setText("");
+			setCaret(0);
+			if (unreached.length)
+				setProblem(
+					`Reached no one as ${unreached.map((name) => `@${name}`).join(", ")}: no such name sees this session.`,
+				);
 		} catch (error) {
 			setProblem((error as Error).message);
 		} finally {
@@ -675,6 +743,7 @@ function Composer({ send, names }: { send: Log["send"]; names: string[] }) {
 			box.current?.focus();
 		}
 	};
+	const highlighted = Math.min(chosen, offered.length - 1);
 	return (
 		<form
 			className="border-t px-4 py-3 md:px-6"
@@ -683,7 +752,40 @@ function Composer({ send, names }: { send: Log["send"]; names: string[] }) {
 				submit();
 			}}
 		>
-			<div className="mx-auto flex max-w-4xl items-end gap-2">
+			<div className="relative mx-auto flex max-w-4xl items-end gap-2">
+				{offered.length > 0 && (
+					<div
+						role="listbox"
+						aria-label="Mention"
+						className="absolute bottom-full left-0 z-20 mb-2 flex w-72 max-w-full flex-col overflow-hidden rounded-lg bg-popover p-1 text-sm text-popover-foreground shadow-md ring-1 ring-foreground/10"
+					>
+						{offered.map((name, i) => (
+							<button
+								key={name}
+								type="button"
+								role="option"
+								aria-selected={i === highlighted}
+								className={cn(
+									"flex h-8 items-center gap-2 rounded-md px-2 text-left font-mono",
+									i === highlighted && "bg-accent text-accent-foreground",
+								)}
+								// Keeps the focus in the box.
+								onMouseDown={(event) => event.preventDefault()}
+								onMouseEnter={() => setChosen(i)}
+								onClick={() => pick(name)}
+							>
+								{name.includes("/") && (
+									<span
+										role="img"
+										aria-label="online"
+										className="size-1.5 shrink-0 rounded-full bg-emerald-500"
+									/>
+								)}
+								<span className="min-w-0 truncate">{name}</span>
+							</button>
+						))}
+					</div>
+				)}
 				<textarea
 					ref={box}
 					rows={1}
@@ -691,8 +793,37 @@ function Composer({ send, names }: { send: Log["send"]; names: string[] }) {
 					placeholder="Message"
 					aria-label="Message"
 					className="min-h-9 flex-1 resize-none rounded-lg border bg-transparent px-3 py-1.5 text-base leading-relaxed outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 md:text-sm"
-					onChange={(event) => setText(event.target.value)}
+					onChange={(event) => {
+						setText(event.target.value);
+						setCaret(event.target.selectionStart);
+						setChosen(0);
+						setDismissed(null);
+					}}
+					onSelect={(event) => setCaret(event.currentTarget.selectionStart)}
 					onKeyDown={(event) => {
+						if (offered.length && !event.nativeEvent.isComposing) {
+							if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+								event.preventDefault();
+								const step = event.key === "ArrowDown" ? 1 : -1;
+								setChosen(
+									(highlighted + step + offered.length) % offered.length,
+								);
+								return;
+							}
+							if (
+								(event.key === "Enter" && !event.shiftKey) ||
+								event.key === "Tab"
+							) {
+								event.preventDefault();
+								pick(offered[highlighted] as string);
+								return;
+							}
+							if (event.key === "Escape") {
+								event.preventDefault();
+								setDismissed(at?.start ?? null);
+								return;
+							}
+						}
 						if (
 							event.key === "Enter" &&
 							!event.shiftKey &&

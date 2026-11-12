@@ -71,6 +71,23 @@ export type Friend = {
 	state: "friends" | "asked" | "asking";
 };
 
+/** One of the account's agents, as it shows while it receives: an agent
+ * that uses Vibe Together always does. */
+export type Agent = {
+	/** Its full name, as `<account>/<agent>`. */
+	name: string;
+	/** Whether a receive of its waits, or ended moments ago. */
+	online: boolean;
+	/** When it was last seen, where it is offline. */
+	seen?: string;
+	/** The sessions it receives in. */
+	receiving: Named[];
+};
+
+/** The account's own agents, and the full names of every online agent it
+ * sees: its own, its group members' and its friends'. */
+export type Agents = { own: Agent[]; online: string[] };
+
 /** One way in to the account: a sign-in in a browser, a machine's token,
  * which every agent on it shares, or an MCP client's. */
 export type Login = {
@@ -149,6 +166,13 @@ const live = {
 				signal,
 			)
 		).version,
+	agents: async (): Promise<Agents> => {
+		const { agents, online } = await call<{
+			agents: Agent[];
+			online: string[];
+		}>("GET", "api/overview");
+		return { own: agents, online };
+	},
 	groups: () => call<Group[]>("GET", "api/groups"),
 	createGroup: (name: string) => call<Group>("POST", "api/groups", { name }),
 	deleteGroup: (id: string) =>
@@ -349,6 +373,22 @@ function mock(): Api {
 							reject(new DOMException("Aborted", "AbortError")),
 						),
 					),
+		agents: async () => ({
+			own: [
+				{
+					name: "luiswirth/claude",
+					online: true,
+					receiving: [{ id: "s_2", name: "agents" }],
+				},
+				{
+					name: "luiswirth/codex",
+					online: false,
+					seen: new Date(Date.now() - 3 * 3600_000).toISOString(),
+					receiving: [],
+				},
+			],
+			online: ["benarmstrong/claude", "luiswirth/claude", "tristangabl/codex"],
+		}),
 		groups: async () => groups,
 		createGroup: async (name) => {
 			const group = {

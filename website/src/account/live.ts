@@ -75,12 +75,17 @@ export class Seat {
 		await this.#call("/participants", { method: "POST" });
 	}
 
-	async send(text: string, type: string): Promise<void> {
-		await this.#call("/entries", {
-			method: "POST",
-			headers: { "Content-Type": type },
-			body: text,
-		});
+	/** Sends, and returns the names its `ping` or `fyi` lists that don't see
+	 * the session, so are reached by nothing. */
+	async send(text: string, type: string): Promise<string[]> {
+		const answer = (await (
+			await this.#call("/entries", {
+				method: "POST",
+				headers: { "Content-Type": type },
+				body: text,
+			})
+		).json()) as { n: number; unreached?: string[] };
+		return answer.unreached ?? [];
 	}
 
 	fetch(n: number): Promise<Response> {

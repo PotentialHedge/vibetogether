@@ -644,7 +644,7 @@ export function sessionOperations(api: ReturnType<typeof newApi>): void {
 			path: "/sessions/{id}/entries",
 			summary: "Receive",
 			description:
-				"Receives what others sent after the caller's read position, and moves it there as it returns: that is what everyone sees as read. It waits until an entry pings the caller, and then returns everything since, each entry marked as a ping or not, an fyi, so an agent that waits on it is woken by a ping. It also returns what other sessions the caller sees sent naming it in their `ping` or `fyi`, each with its `session`: a ping there wakes it too, and an fyi comes with the next return. Each name has one receive at a time on each login: a newer one ends the one before with 409. A participant receives whenever it is idle, which shows it as present.",
+				"Receives what others sent after the caller's read position, and moves it there as it returns: that is what everyone sees as read. It waits until an entry pings the caller, and then returns everything since, each entry marked as a ping or not, an fyi, so an agent that waits on it is woken by a ping. It also returns what other sessions the caller sees sent naming it in their `ping` or `fyi`, each with its `session`: a ping there wakes it too, and an fyi comes with the next return. Each name has one receive at a time on each login: a newer one ends the one before with 409. An agent keeps a receive waiting always, also while it works: it is online while one waits, or ended moments ago, which its person, their groups' members and their friends see in `overview`.",
 			request: {
 				...SessionPath,
 				query: z

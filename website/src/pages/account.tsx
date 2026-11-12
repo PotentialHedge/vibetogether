@@ -6,6 +6,7 @@
 import { ArrowLeft, MessagesSquare, X } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import {
+	type Agents,
 	api,
 	type Dm,
 	demo,
@@ -42,20 +43,23 @@ type State = {
 	sessions: Session[];
 	friends: Friend[];
 	dms: Dm[];
+	agents: Agents;
 };
 
 async function load(): Promise<State> {
 	// First, so that a change while the rest loads shows as one more.
 	const version = await api.version();
-	const [me, groups, projects, sessions, friends, dms] = await Promise.all([
-		api.me(),
-		api.groups(),
-		api.projects(),
-		api.sessions(),
-		api.friends(),
-		api.dms(),
-	]);
-	return { version, me, groups, projects, sessions, friends, dms };
+	const [me, groups, projects, sessions, friends, dms, agents] =
+		await Promise.all([
+			api.me(),
+			api.groups(),
+			api.projects(),
+			api.sessions(),
+			api.friends(),
+			api.dms(),
+			api.agents(),
+		]);
+	return { version, me, groups, projects, sessions, friends, dms, agents };
 }
 
 /** What is open, kept in the address so that a reload or a link opens it
@@ -88,7 +92,15 @@ function go(place: Place) {
 const LAST = "vibetogether last session";
 
 function App({ state, reload }: { state: State; reload: () => Promise<void> }) {
-	const { me, groups, projects, sessions, friends, dms } = state;
+	const { me, groups, projects, sessions, friends, dms, agents } = state;
+	/** Whom a mention in a session can name: the people who see it, and of
+	 * their agents the online ones. */
+	const mentionable = (people: string[]) => [
+		...people,
+		...agents.online.filter((name) =>
+			people.includes(name.split("/")[0] as string),
+		),
+	];
 	const { problem, act, dismiss } = useActions(reload);
 	const [deletingSession, setDeletingSession] = useState(false);
 	const [place, setPlace] = useState<Place>(() => {
@@ -180,6 +192,7 @@ function App({ state, reload }: { state: State; reload: () => Promise<void> }) {
 						)}
 						sessions={sessions}
 						friends={friends}
+						online={agents.online}
 						current={session?.id}
 						onSession={(id) => open({ session: id })}
 						act={act}
@@ -197,6 +210,7 @@ function App({ state, reload }: { state: State; reload: () => Promise<void> }) {
 					<Transcript
 						key={dm.dm.id}
 						as={me.name}
+						mentionable={mentionable([me.name, dm.friend.name])}
 						session={{
 							id: dm.dm.id,
 							name: dm.friend.displayName || dm.friend.name,
@@ -218,6 +232,11 @@ function App({ state, reload }: { state: State; reload: () => Promise<void> }) {
 					<Transcript
 						key={session.id}
 						as={me.name}
+						mentionable={mentionable(
+							groups.find((g) => g.id === session.group?.id)?.members ?? [
+								me.name,
+							],
+						)}
 						session={session}
 						back={
 							<Button

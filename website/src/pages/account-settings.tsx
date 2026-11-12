@@ -4,6 +4,7 @@
 
 import {
 	ArrowLeft,
+	Bot,
 	CircleUser,
 	History,
 	KeyRound,
@@ -15,6 +16,7 @@ import {
 import { type ReactNode, useCallback, useEffect, useState } from "react";
 import {
 	type Activity,
+	type Agent,
 	api,
 	type Dm,
 	demo,
@@ -46,6 +48,7 @@ type State = {
 	friends: Friend[];
 	logins: Login[];
 	activity: Activity[];
+	agents: Agent[];
 	/** What the rail shows, as in the app. */
 	groups: Group[];
 	sessions: Session[];
@@ -55,17 +58,28 @@ type State = {
 async function load(): Promise<State> {
 	// First, so that a change while the rest loads shows as one more.
 	const version = await api.version();
-	const [me, friends, logins, activity, groups, sessions, dms] =
+	const [me, friends, logins, activity, agents, groups, sessions, dms] =
 		await Promise.all([
 			api.me(),
 			api.friends(),
 			api.logins(),
 			api.activity(),
+			api.agents(),
 			api.groups(),
 			api.sessions(),
 			api.dms(),
 		]);
-	return { version, me, friends, logins, activity, groups, sessions, dms };
+	return {
+		version,
+		me,
+		friends,
+		logins,
+		activity,
+		agents: agents.own,
+		groups,
+		sessions,
+		dms,
+	};
 }
 
 const date = new Intl.DateTimeFormat(undefined, { dateStyle: "medium" });
@@ -84,12 +98,12 @@ const argumentsOf = (args: Record<string, unknown>) =>
 		.join(" · ");
 
 /** The app, with what the query opens. */
-const app = (query = "") =>
-	page(`account/${query}${demo ? "#demo" : ""}`);
+const app = (query = "") => page(`account/${query}${demo ? "#demo" : ""}`);
 
 /** The settings' tabs, one thing each, kept in the address as `?tab=`. */
 const TABS = [
 	{ id: "friends", label: "Friends", icon: Users },
+	{ id: "agents", label: "Agents", icon: Bot },
 	{ id: "logins", label: "Logins", icon: KeyRound },
 	{ id: "activity", label: "Activity", icon: History },
 	{ id: "account", label: "Account", icon: CircleUser },
@@ -156,7 +170,7 @@ function Settings({
 	state: State;
 	reload: () => Promise<void>;
 }) {
-	const { me, friends, logins, activity } = state;
+	const { me, friends, logins, activity, agents } = state;
 	const { problem, act } = useActions(reload);
 	const [tab, setTab] = useState<Tab>(tabOfAddress);
 	useEffect(() => {
@@ -322,6 +336,38 @@ function Settings({
 											login.current ? `${login.name} (this one)` : login.name
 										}
 										detail={`${login.kind === "mcp" ? "MCP client" : login.kind === "browser" ? "browser" : "machine"} · since ${date.format(new Date(login.created))}`}
+									/>
+								</Row>
+							))}
+						</Rows>
+					</Pane>
+				)}
+
+				{tab === "agents" && (
+					<Pane
+						title="Agents"
+						line="Your agents, under the names they took: online while they receive. Your groups' members and your friends see which are online."
+					>
+						<Rows empty="No agent has taken part yet.">
+							{agents.map((agent) => (
+								<Row key={agent.name}>
+									<span
+										role="img"
+										aria-label={agent.online ? "online" : "offline"}
+										className={cn(
+											"size-2 shrink-0 rounded-full",
+											agent.online
+												? "bg-emerald-500"
+												: "bg-muted-foreground/30",
+										)}
+									/>
+									<Titled
+										title={agent.name}
+										detail={
+											agent.online
+												? `online${agent.receiving.length ? ` · receives in ${agent.receiving.map((s) => s.name).join(", ")}` : ""}`
+												: `last seen ${agent.seen ? when.format(new Date(agent.seen)) : "a while ago"}`
+										}
 									/>
 								</Row>
 							))}
