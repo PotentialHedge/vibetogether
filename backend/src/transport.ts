@@ -60,10 +60,19 @@ export type Presence = Record<
 	{ read: number; receiving: boolean; since?: string; status?: string }
 >;
 
+/** An entry as a receive answers it: whether it pings, and the session it was sent in, where that is another. */
+export type Received = Entry & {
+	ping?: boolean;
+	session?: { id: string; name: string };
+};
+
 export type Answer = {
-	entries: (Entry & { ping?: boolean })[];
+	entries: Received[];
 	presence: Presence;
 };
+
+/** The name system messages are sent under. */
+export const systemName = "vibetogether";
 
 /** What wakes a receive: an entry that pings it, any entry, or any change, presence included. */
 export type Wake = "ping" | "entry" | "change";
@@ -123,19 +132,68 @@ function parameterOf(type: string, name: string): string | undefined {
 	return match ? (match[1] ?? match[2] ?? "") : undefined;
 }
 
+/** Whether an entry of `type` is a message, rather than an extension's, of a `vnd.` type. */
+function isMessage(type: string): boolean {
+	const subtype = type.split(";")[0]?.split("/")[1]?.trim().toLowerCase() ?? "";
+	return !subtype.startsWith("vnd.");
+}
+
+/** The names a parameter of `type` lists, separated by spaces. */
+function namesOf(type: string, parameter: string): string[] {
+	return (parameterOf(type, parameter) ?? "").split(/\s+/).filter(Boolean);
+}
+
 /**
  * Whether `entry` pings `name`: a `ping` parameter names whom it pings, or `*` everyone; left
  * out, a message pings everyone, and an entry of an extension, of a `vnd.` type, no one.
  */
 export function pings(type: string, name: string): boolean {
-	const ping = parameterOf(type, "ping");
-	if (ping === undefined) {
-		const subtype =
-			type.split(";")[0]?.split("/")[1]?.trim().toLowerCase() ?? "";
-		return !subtype.startsWith("vnd.");
-	}
-	const names = ping.split(/\s+/).filter(Boolean);
+	if (parameterOf(type, "ping") === undefined) return isMessage(type);
+	const names = namesOf(type, "ping");
 	return names.includes("*") || names.includes(name);
+}
+
+/** A participant a name stands for, as `login` or `login/agent`, where it is an account's. */
+function participantByName(
+	name: string,
+): { user: string; agent: string } | undefined {
+	const [login, agent = "", ...rest] = name.split("/");
+	if (!login || rest.length || (name.includes("/") && !agent)) return undefined;
+	const user = db.prepare("SELECT id FROM user WHERE login = ?").get(login) as
+		| { id: string }
+		| undefined;
+	return user && { user: user.id, agent };
+}
+
+/**
+ * Notes entry `n` of `session` for every name its `ping` or `fyi` lists, `*` aside, which sees
+ * the session, so that it reaches them in any session they receive in. Returns the participants
+ * noted, and the names that see it not.
+ */
+function mention(
+	session: string,
+	n: number,
+	sender: string,
+	type: string,
+): { noted: { user: string; agent: string }[]; unreached: string[] } {
+	const noted: { user: string; agent: string }[] = [];
+	const unreached: string[] = [];
+	if (!isMessage(type)) return { noted, unreached };
+	const ping = new Set(namesOf(type, "ping").filter((name) => name !== "*"));
+	const fyi = namesOf(type, "fyi").filter((name) => !ping.has(name));
+	for (const name of [...ping, ...fyi]) {
+		if (name === sender) continue;
+		const p = participantByName(name);
+		if (!p || !sessionFor(session, p.user)) {
+			unreached.push(name);
+			continue;
+		}
+		db.prepare(
+			"INSERT INTO mention (user, agent, session, n, ping) VALUES (?, ?, ?, ?, ?)",
+		).run(p.user, p.agent, session, n, ping.has(name) ? 1 : 0);
+		noted.push(p);
+	}
+	return { noted, unreached };
 }
 
 /** Who is in the session, with their read position, whether they are receiving, and their status. */
@@ -176,14 +234,30 @@ type Waiter = {
 	end: (outcome: Found | Refused, presence?: Presence) => void;
 };
 
-/** What a waiter found: the entries for it, and the last entry they cover, its own included. */
-type Found = { entries: EntryRow[]; covered: number };
+/**
+ * What a waiter found: the entries for it, and the last entry they cover, its own included, and
+ * the messages of other sessions that name it.
+ */
+type Found = { entries: EntryRow[]; covered: number; mentions: MentionRow[] };
+
+type MentionRow = EntryRow & {
+	id: number;
+	session: string;
+	sessionName: string;
+	pinged: number;
+};
 
 const waiting = new Set<Waiter>();
 
-/** The entries after `after`, the waiter's own left out where it wants them not, about one answer's worth. */
+/**
+ * The entries after `after`, the waiter's own left out where it wants them not, about one
+ * answer's worth, and for a receive the messages of other sessions that name it.
+ */
 function entriesFor(
-	w: Pick<Waiter, "session" | "name" | "own" | "reads" | "after">,
+	w: Pick<
+		Waiter,
+		"session" | "user" | "agent" | "name" | "own" | "reads" | "after"
+	>,
 ): Found {
 	const rows = db
 		.prepare(
@@ -200,21 +274,54 @@ function entriesFor(
 		if (!w.reads && !w.own && row.sender === w.name) continue;
 		entries.push(row);
 	}
-	return { entries, covered };
+	return { entries, covered, mentions: w.reads ? [] : mentionsOf(w) };
+}
+
+/** The messages of sessions other than the waiter's that name it, which it still sees. */
+function mentionsOf(
+	w: Pick<Waiter, "session" | "user" | "agent">,
+): MentionRow[] {
+	const rows = db
+		.prepare(
+			`SELECT m.id, m.session, m.ping AS pinged, s.name AS sessionName,
+			 e.n, e.time, e.sender, e.type, e.size, e.filename, e.text
+			 FROM mention m JOIN entry e ON e.session = m.session AND e.n = m.n
+			 JOIN session s ON s.id = m.session
+			 WHERE m.user = ? AND m.agent = ? AND m.session != ? ORDER BY m.id LIMIT 100`,
+		)
+		.all(w.user, w.agent, w.session) as MentionRow[];
+	return rows.filter((row) => {
+		if (sessionFor(row.session, w.user)) return true;
+		db.prepare("DELETE FROM mention WHERE id = ?").run(row.id);
+		return false;
+	});
 }
 
 /** Whether `w` has something to return now. */
-function ready(w: Waiter, entries: EntryRow[]): boolean {
-	if (w.reads || w.wake !== "ping") return entries.length > 0;
-	return entries.some((e) => pings(e.type, w.name));
+function ready(w: Waiter, { entries, mentions }: Found): boolean {
+	if (w.reads || w.wake !== "ping")
+		return entries.length > 0 || mentions.length > 0;
+	return (
+		entries.some((e) => pings(e.type, w.name)) || mentions.some((m) => m.pinged)
+	);
 }
 
-function answerOf(w: Waiter, { entries }: Found, presence: Presence): Answer {
+function answerOf(
+	w: Waiter,
+	{ entries, mentions }: Found,
+	presence: Presence,
+): Answer {
+	const own: Received[] = entries.map((row) => ({
+		...entryJson(row),
+		...(!w.reads && { ping: pings(row.type, w.name) }),
+	}));
+	const others: Received[] = mentions.map((row) => ({
+		...entryJson(row),
+		ping: row.pinged === 1,
+		session: { id: row.session, name: row.sessionName },
+	}));
 	return {
-		entries: entries.map((row) => ({
-			...entryJson(row),
-			...(!w.reads && { ping: pings(row.type, w.name) }),
-		})),
+		entries: [...own, ...others].sort((a, b) => a.time.localeCompare(b.time)),
 		presence,
 	};
 }
@@ -229,12 +336,25 @@ function notify(session: string, presenceChanged: boolean): void {
 	for (const w of waiting) {
 		if (w.session !== session) continue;
 		const found = entriesFor(w);
-		if (ready(w, found.entries) || (presenceChanged && w.wake === "change"))
+		if (ready(w, found) || (presenceChanged && w.wake === "change"))
 			woken.push([w, found]);
 	}
 	if (!woken.length) return;
 	const presence = presenceOf(session);
 	for (const [w, found] of woken) w.end(found, presence);
+}
+
+/** Wakes the receives of `named` in other sessions than `session` that have something now. */
+function notifyNamed(
+	session: string,
+	named: { user: string; agent: string }[],
+): void {
+	for (const w of [...waiting]) {
+		if (w.reads || w.session === session) continue;
+		if (!named.some((p) => p.user === w.user && p.agent === w.agent)) continue;
+		const found = entriesFor(w);
+		if (ready(w, found)) w.end(found, presenceOf(w.session));
+	}
 }
 
 /** Ends every waiter of `session` that `matches`, with `outcome`. */
@@ -448,7 +568,10 @@ export function leave(
 	return { n };
 }
 
-/** Sends an entry, and returns its number. A status sets the sender's status as well. */
+/**
+ * Sends an entry, and returns its number, and the names its `ping` or `fyi` lists that don't see
+ * the session. A status sets the sender's status as well.
+ */
 export function send(
 	p: Participant,
 	login: string,
@@ -456,7 +579,7 @@ export function send(
 	type: string,
 	payload: Uint8Array,
 	filename: string | null,
-): { n: number } {
+): { n: number; unreached?: string[] } {
 	inside(p, login);
 	if (payload.length > maxPayload)
 		throw new Refused(
@@ -477,16 +600,41 @@ export function send(
 		status = text.trim().slice(0, 500) || null;
 	}
 	adds(p.user, payload.length);
-	const n = transaction(() => {
+	const { n, noted, unreached } = transaction(() => {
 		const n = append(p.session, name, type, payload, filename);
 		if (status !== undefined)
 			db.prepare(
 				"UPDATE participant SET status = ? WHERE session = ? AND user = ? AND agent = ?",
 			).run(status, p.session, p.user, p.agent);
-		return n;
+		return { n, ...mention(p.session, n, name, type) };
 	});
 	notify(p.session, status !== undefined);
-	return { n };
+	notifyNamed(p.session, noted);
+	return { n, ...(unreached.length && { unreached }) };
+}
+
+/**
+ * Posts a system message, from `vibetogether`, to `session`, such as a group's general: markdown,
+ * which pings and tells whom `ping` and `fyi` name, and no one where they are empty.
+ */
+export function announce(
+	session: string,
+	text: string,
+	{ ping = [], fyi = [] }: { ping?: string[]; fyi?: string[] } = {},
+): void {
+	const type = `text/markdown; charset=utf-8; ping="${ping.join(" ")}"${fyi.length ? `; fyi="${fyi.join(" ")}"` : ""}`;
+	const { noted } = transaction(() => {
+		const n = append(
+			session,
+			systemName,
+			type,
+			new TextEncoder().encode(text),
+			null,
+		);
+		return mention(session, n, systemName, type);
+	});
+	notify(session, false);
+	notifyNamed(session, noted);
 }
 
 /**
@@ -561,7 +709,7 @@ function wait(
 ): Promise<Answer> {
 	const waiter = w as Waiter;
 	const found = entriesFor(waiter);
-	if (ready(waiter, found.entries) || seconds === 0)
+	if (ready(waiter, found) || seconds === 0)
 		return Promise.resolve(finish(waiter, found, presenceOf(w.session), false));
 	if (
 		[...waiting].filter((other) => other.user === w.user).length >=
@@ -620,6 +768,13 @@ function finish(
 ): Answer {
 	const answer = answerOf(w, found, presence);
 	if (w.reads) return answer;
+	// The messages that named it are received: those of other sessions it got here, and those of
+	// this one that this receive covers.
+	for (const m of found.mentions)
+		db.prepare("DELETE FROM mention WHERE id = ?").run(m.id);
+	db.prepare(
+		"DELETE FROM mention WHERE user = ? AND agent = ? AND session = ? AND n <= ?",
+	).run(w.user, w.agent, w.session, found.covered);
 	const moved = db
 		.prepare(
 			"UPDATE participant SET read = ? WHERE session = ? AND user = ? AND agent = ? AND read < ?",

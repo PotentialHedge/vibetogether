@@ -11,6 +11,8 @@ export type Entry = {
 	size: number;
 	filename?: string;
 	text?: string;
+	/** Where it was sent in another session, which named the person. */
+	session?: { id: string; name: string };
 };
 
 export type Presence = Record<
@@ -92,7 +94,9 @@ export class Seat {
 
 	#took(entries: Entry[], presence: Presence) {
 		const last = this.log.at(-1)?.n ?? 0;
-		const fresh = entries.filter((entry) => entry.n > last);
+		// A message of another session that named the person shows in that session's own
+		// transcript: this one is this session's log alone.
+		const fresh = entries.filter((entry) => !entry.session && entry.n > last);
 		if (fresh.length) {
 			this.log = [...this.log, ...fresh];
 			for (const s of this.#subscribers) s.entry();

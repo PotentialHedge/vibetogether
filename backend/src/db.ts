@@ -59,7 +59,8 @@ export function createTables(): void {
 			PRIMARY KEY (project, position),
 			UNIQUE (project, repo)
 		);
-		-- A project's session, or a DM, whose project is null and which a row of "dm" names.
+		-- A project's session, or one in no project: a group's own, which a row of "group_session"
+		-- names, or a DM, which a row of "dm" names.
 		CREATE TABLE IF NOT EXISTS session (
 			id TEXT PRIMARY KEY,
 			name TEXT NOT NULL,
@@ -68,6 +69,19 @@ export function createTables(): void {
 			created TEXT NOT NULL
 		);
 		CREATE INDEX IF NOT EXISTS session_of ON session (project);
+		-- A session of a group's own, in no project. "general" marks the one every group has, made
+		-- with it and deleted only with it.
+		CREATE TABLE IF NOT EXISTS group_session (
+			session TEXT PRIMARY KEY REFERENCES session(id) ON DELETE CASCADE,
+			"group" TEXT NOT NULL REFERENCES "group"(id) ON DELETE CASCADE,
+			general INTEGER NOT NULL DEFAULT 0
+		);
+		CREATE INDEX IF NOT EXISTS group_session_of ON group_session ("group");
+		CREATE UNIQUE INDEX IF NOT EXISTS general_of ON group_session ("group") WHERE general = 1;
+		CREATE TRIGGER IF NOT EXISTS group_session_gone AFTER DELETE ON group_session
+		BEGIN
+			DELETE FROM session WHERE id = OLD.session;
+		END;
 		-- Two people's DM, one per pair, "a" the lesser id. It outlasts their friendship.
 		CREATE TABLE IF NOT EXISTS dm (
 			a TEXT NOT NULL REFERENCES user(id) ON DELETE CASCADE,
@@ -119,6 +133,18 @@ export function createTables(): void {
 			PRIMARY KEY (session, user, agent)
 		);
 
+		-- A message that names a participant in its "ping" or "fyi", for it to receive in any session
+		-- it receives in; the row goes once it is received, there or in the message's own session.
+		CREATE TABLE IF NOT EXISTS mention (
+			id INTEGER PRIMARY KEY,
+			user TEXT NOT NULL REFERENCES user(id) ON DELETE CASCADE,
+			agent TEXT NOT NULL,
+			session TEXT NOT NULL REFERENCES session(id) ON DELETE CASCADE,
+			n INTEGER NOT NULL,
+			ping INTEGER NOT NULL
+		);
+		CREATE INDEX IF NOT EXISTS mention_of ON mention (user, agent);
+
 		-- What an agent changed in its person's account, for the person to see.
 		-- "login" and "agent" are the login's id and name as list_logins gives them, kept as they were.
 		CREATE TABLE IF NOT EXISTS activity (
@@ -149,6 +175,34 @@ export function createTables(): void {
 			"from" TEXT NOT NULL
 		);
 	`);
+	// Groups made before general existed get theirs.
+	for (const { id } of db
+		.prepare(
+			`SELECT id FROM "group" g WHERE NOT EXISTS
+			 (SELECT 1 FROM group_session gs WHERE gs."group" = g.id AND gs.general = 1)`,
+		)
+		.all() as { id: string }[])
+		generalOf(id);
+}
+
+/** The group's own session `general`, made where it doesn't exist yet. */
+export function generalOf(group: string): string {
+	const existing = db
+		.prepare(
+			`SELECT session FROM group_session WHERE "group" = ? AND general = 1`,
+		)
+		.get(group) as { session: string } | undefined;
+	if (existing) return existing.session;
+	return transaction(() => {
+		const session = newId("s");
+		db.prepare(
+			"INSERT INTO session (id, name, created) VALUES (?, 'general', ?)",
+		).run(session, new Date().toISOString());
+		db.prepare(
+			`INSERT INTO group_session (session, "group", general) VALUES (?, ?, 1)`,
+		).run(session, group);
+		return session;
+	});
 }
 
 /** Whether `a` and `b` are friends: each has added the other. */
@@ -203,6 +257,7 @@ export function ownGroupOf(user: string): string {
 			id,
 			user,
 		);
+		generalOf(id);
 		return id;
 	});
 }
@@ -216,12 +271,13 @@ export function isMember(group: string, user: string): boolean {
 	);
 }
 
-/** A session as access to it is decided: its project's group, or its DM's two people. */
+/** A session as access to it is decided: its group, its project's or its own, or its DM's two people. */
 export type SessionAccess = {
 	id: string;
 	name: string;
 	project: string | null;
 	group: string | null;
+	general: number;
 	a: string | null;
 	b: string | null;
 };
@@ -233,9 +289,10 @@ export function sessionFor(
 ): SessionAccess | undefined {
 	const session = db
 		.prepare(
-			`SELECT s.id, s.name, s.project, p."group" AS "group", d.a, d.b FROM session s
-			 LEFT JOIN project p ON p.id = s.project LEFT JOIN dm d ON d.session = s.id
-			 WHERE s.id = ?`,
+			`SELECT s.id, s.name, s.project, coalesce(p."group", gs."group") AS "group",
+			 coalesce(gs.general, 0) AS general, d.a, d.b FROM session s
+			 LEFT JOIN project p ON p.id = s.project LEFT JOIN group_session gs ON gs.session = s.id
+			 LEFT JOIN dm d ON d.session = s.id WHERE s.id = ?`,
 		)
 		.get(id) as SessionAccess | undefined;
 	if (!session) return undefined;

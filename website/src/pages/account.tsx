@@ -222,12 +222,15 @@ function App({ state, reload }: { state: State; reload: () => Promise<void> }) {
 						}
 						actions={<CopySessionPrompt session={session} />}
 						menu={
-							<DropdownMenuItem
-								variant="destructive"
-								onClick={() => setDeletingSession(true)}
-							>
-								Delete session
-							</DropdownMenuItem>
+							// A group's general goes only with the group.
+							!session.general && (
+								<DropdownMenuItem
+									variant="destructive"
+									onClick={() => setDeletingSession(true)}
+								>
+									Delete session
+								</DropdownMenuItem>
+							)
 						}
 					/>
 				) : (

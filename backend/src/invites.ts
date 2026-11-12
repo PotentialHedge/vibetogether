@@ -9,9 +9,17 @@ import { randomInt } from "node:crypto";
 import type { Context } from "hono";
 import { callerOf } from "./caller.ts";
 import { config } from "./config.ts";
-import { db, dmOf, isMember, transaction } from "./db.ts";
+import {
+	db,
+	dmOf,
+	generalOf,
+	isMember,
+	ownGroupOf,
+	transaction,
+} from "./db.ts";
 import { type Env, type newApi, operation, z } from "./openapi.ts";
 import { json, Login, path } from "./schemas.ts";
+import { announce } from "./transport.ts";
 
 /** How long an invite lasts. */
 const inviteLifetime = 7 * 24 * 3600_000;
@@ -223,13 +231,28 @@ function acceptInvite(code: string, user: string) {
 				`INSERT OR IGNORE INTO friend ("from", "to", created) VALUES (?, ?, ?)`,
 			).run(from, to, now);
 		const dm = dmOf(row.inviter, user);
-		if (project)
-			db.prepare(
-				`INSERT OR IGNORE INTO group_member ("group", user) VALUES (?, ?)`,
-			).run(project.group, user);
+		const joined = project
+			? db
+					.prepare(
+						`INSERT OR IGNORE INTO group_member ("group", user) VALUES (?, ?)`,
+					)
+					.run(project.group, user).changes > 0
+			: false;
 		db.prepare(
 			"UPDATE invite SET accepted_by = ?, accepted = coalesce(accepted, ?) WHERE code = ?",
 		).run(user, now, row.code);
+		if (!row.accepted_by) {
+			const login = faceOf(user).name;
+			announce(
+				generalOf(ownGroupOf(row.inviter)),
+				`${login} accepted your invite${project ? ` to the project **${project.name}**` : ""}: you are friends, with a DM.`,
+			);
+			if (project && joined)
+				announce(
+					generalOf(project.group),
+					`${login} joined the group, by ${faceOf(row.inviter).name}'s invite to the project **${project.name}**.`,
+				);
+		}
 		return { inviter: faceOf(row.inviter), dm, project: projectRef(project) };
 	});
 }

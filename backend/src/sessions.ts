@@ -3,13 +3,22 @@
  * participants join, send to, receive from and leave (`transport.ts`).
  */
 import type { Context } from "hono";
-import { db, isMember, newId, type SessionAccess, sessionFor } from "./db.ts";
+import {
+	db,
+	generalOf,
+	isMember,
+	newId,
+	type SessionAccess,
+	sessionFor,
+	transaction,
+} from "./db.ts";
 import { isNamePart } from "./names.ts";
 import { type Env, type newApi, operation, z } from "./openapi.ts";
 import { reposOf } from "./repos.ts";
 import { body, count, done, Id, json, Login, Name, path } from "./schemas.ts";
 import {
 	type Answer,
+	announce,
 	join,
 	leave,
 	maxPayload,
@@ -24,7 +33,7 @@ import {
 	sessionGone,
 } from "./transport.ts";
 
-/** The most sessions one project holds. */
+/** The most sessions one project holds, and one group of its own, besides its general. */
 const maxSessions = 20;
 
 export const Session = z
@@ -41,13 +50,20 @@ export const Session = z
 				}),
 			})
 			.nullable()
-			.meta({ description: "The project it belongs to; null for a DM." }),
+			.meta({
+				description:
+					"The project it belongs to; null for a DM and for a group's own session.",
+			}),
 		group: z
 			.object({ id: Id("g", "group"), name: z.string() })
 			.nullable()
 			.meta({
 				description: "The group whose members take part; null for a DM.",
 			}),
+		general: z.boolean().meta({
+			description:
+				"Whether it is its group's `general`, which every group has, for what is about no one project. The general of one's own group is one's inbox from Vibe Together.",
+		}),
 		friend: Login.nullable().meta({
 			description: "For a DM, the other person in it; null otherwise.",
 		}),
@@ -62,14 +78,17 @@ type SessionRow = {
 	projectName: string | null;
 	groupId: string | null;
 	groupName: string | null;
+	general: number | null;
 	creatorLogin: string | null;
 	a: string | null;
 	b: string | null;
 };
 
 const sessions = `SELECT s.id, s.name, s.project, p.name AS projectName, g.id AS groupId,
-	g.name AS groupName, c.login AS creatorLogin, d.a, d.b
-	FROM session s LEFT JOIN project p ON p.id = s.project LEFT JOIN "group" g ON g.id = p."group"
+	g.name AS groupName, gs.general, c.login AS creatorLogin, d.a, d.b
+	FROM session s LEFT JOIN project p ON p.id = s.project
+	LEFT JOIN group_session gs ON gs.session = s.id
+	LEFT JOIN "group" g ON g.id = coalesce(p."group", gs."group")
 	LEFT JOIN user c ON c.id = s.creator LEFT JOIN dm d ON d.session = s.id`;
 
 /** A session as `me` sees it, as the operations answer with it. */
@@ -98,27 +117,39 @@ export function sessionJson(id: string, me: string): z.infer<typeof Session> {
 			row.groupId && row.groupName
 				? { id: row.groupId, name: row.groupName }
 				: null,
+		general: row.general === 1,
 		friend,
 		creator: row.creatorLogin,
 	};
 }
 
-/** The sessions of `me`'s groups, oldest first. */
-export function projectSessionsOf(me: string): string[] {
+/** The sessions of `me`'s groups, each group's general first, then oldest first. */
+export function sessionsOf(me: string): string[] {
 	return (
 		db
 			.prepare(
-				`SELECT s.id FROM session s JOIN project p ON p.id = s.project
-				 JOIN group_member m ON m."group" = p."group" WHERE m.user = ? ORDER BY s.created`,
+				`SELECT s.id FROM session s LEFT JOIN project p ON p.id = s.project
+				 LEFT JOIN group_session gs ON gs.session = s.id
+				 JOIN group_member m ON m."group" = coalesce(p."group", gs."group")
+				 WHERE m.user = ? ORDER BY coalesce(gs.general, 0) DESC, s.created`,
 			)
 			.all(me) as { id: string }[]
 	).map((s) => s.id);
 }
 
-/** The project's session where `me` is in its group: a DM is no group's, so none of these. */
+/** The session of a group where `me` is in it: a DM is no group's, so none of these. */
 function groupSessionFor(id: string, me: string): SessionAccess | undefined {
 	const session = sessionFor(id, me);
 	return session?.group ? session : undefined;
+}
+
+/** Where a session is, for a system message: " in the project **x**", or nothing for a group's own. */
+function whereOf(session: SessionAccess): string {
+	if (!session.project) return "";
+	const project = db
+		.prepare("SELECT name FROM project WHERE id = ?")
+		.get(session.project) as { name: string };
+	return ` in the project **${project.name}**`;
 }
 
 const SessionPath = path({ id: Id("s", "session") });
@@ -144,6 +175,13 @@ const Entry = z
 			description:
 				"Whether it pings the caller, which a receive wakes for; otherwise it is an fyi.",
 		}),
+		session: z
+			.object({ id: Id("s", "session"), name: z.string() })
+			.optional()
+			.meta({
+				description:
+					"Where it was sent in another session, which named the caller in its `ping` or `fyi`: answer there.",
+			}),
 	})
 	.openapi("Entry");
 
@@ -225,12 +263,12 @@ export function sessionOperations(api: ReturnType<typeof newApi>): void {
 			path: "/sessions",
 			summary: "List the sessions",
 			description:
-				"The sessions of the caller's groups, oldest first. DMs are `list_dms`.",
+				"The sessions of the caller's groups, each group's general first, then oldest first. DMs are `list_dms`.",
 			responses: { 200: json(z.array(Session), "The sessions.") },
 		}),
 		(c) =>
 			c.json(
-				projectSessionsOf(c.var.caller.id).map((id) =>
+				sessionsOf(c.var.caller.id).map((id) =>
 					sessionJson(id, c.var.caller.id),
 				),
 				200,
@@ -246,32 +284,61 @@ export function sessionOperations(api: ReturnType<typeof newApi>): void {
 			path: "/sessions",
 			summary: "Create a session",
 			description:
-				"Creates a session in a project, for the members of its group and their agents.",
-			request: body(z.object({ name: Name, project: Id("p", "project") })),
+				"Creates a session in a project, or in a group, in no project, for the members of the group and their agents. Give one of `project` and `group`.",
+			request: body(
+				z.object({
+					name: Name,
+					project: Id("p", "project").optional(),
+					group: Id("g", "group").optional(),
+				}),
+			),
 			responses: { 201: json(Session, "The session.") },
 		}),
 		(c) => {
 			const me = c.var.caller.id;
 			const input = c.req.valid("json");
-			const project = db
-				.prepare(`SELECT id, "group" FROM project WHERE id = ?`)
-				.get(input.project) as { id: string; group: string } | undefined;
-			if (!project || !isMember(project.group, me))
-				return c.text("No such project.", 404);
-			if (
-				count(
-					"SELECT count(*) AS n FROM session WHERE project = ?",
-					project.id,
-				) >= maxSessions
-			)
+			if ((input.project === undefined) === (input.group === undefined))
+				return c.text("Give one of project and group.", 400);
+			let group: string;
+			let project: string | null = null;
+			if (input.project !== undefined) {
+				const row = db
+					.prepare(`SELECT id, "group" FROM project WHERE id = ?`)
+					.get(input.project) as { id: string; group: string } | undefined;
+				if (!row || !isMember(row.group, me))
+					return c.text("No such project.", 404);
+				group = row.group;
+				project = row.id;
+			} else {
+				group = input.group as string;
+				if (!isMember(group, me)) return c.text("No such group.", 404);
+			}
+			const held = project
+				? count("SELECT count(*) AS n FROM session WHERE project = ?", project)
+				: count(
+						`SELECT count(*) AS n FROM group_session WHERE "group" = ? AND general = 0`,
+						group,
+					);
+			if (held >= maxSessions)
 				return c.text(
-					`A project has at most ${maxSessions} sessions: delete one first.`,
+					`A ${project ? "project" : "group"} has at most ${maxSessions} sessions of its own: delete one first.`,
 					403,
 				);
 			const id = newId("s");
-			db.prepare(
-				"INSERT INTO session (id, name, project, creator, created) VALUES (?, ?, ?, ?, ?)",
-			).run(id, input.name, project.id, me, new Date().toISOString());
+			transaction(() => {
+				db.prepare(
+					"INSERT INTO session (id, name, project, creator, created) VALUES (?, ?, ?, ?, ?)",
+				).run(id, input.name, project, me, new Date().toISOString());
+				if (!project)
+					db.prepare(
+						`INSERT INTO group_session (session, "group") VALUES (?, ?)`,
+					).run(id, group);
+			});
+			const session = sessionFor(id, me) as SessionAccess;
+			announce(
+				generalOf(group),
+				`${c.var.caller.login} created the session **${input.name}**${whereOf(session)}.`,
+			);
 			return c.json(sessionJson(id, me), 201);
 		},
 	);
@@ -308,13 +375,15 @@ export function sessionOperations(api: ReturnType<typeof newApi>): void {
 			path: "/sessions/{id}",
 			summary: "Rename a session",
 			description:
-				"Renames a session. Any member of its group does this; a DM has no name.",
+				"Renames a session. Any member of its group does this; a DM has no name, and a group's general stays `general`.",
 			request: { ...SessionPath, ...body(z.object({ name: Name })) },
 			responses: { 200: json(Session, "The session.") },
 		}),
 		(c) => {
 			const session = groupSessionFor(c.req.valid("param").id, c.var.caller.id);
 			if (!session) return c.text("No such session.", 404);
+			if (session.general)
+				return c.text("A group's general stays general.", 403);
 			db.prepare("UPDATE session SET name = ? WHERE id = ?").run(
 				c.req.valid("json").name,
 				session.id,
@@ -332,15 +401,25 @@ export function sessionOperations(api: ReturnType<typeof newApi>): void {
 			path: "/sessions/{id}",
 			summary: "Delete a session",
 			description:
-				"Deletes a session with its log, for everyone. Any member of its group does this; a DM stays.",
+				"Deletes a session with its log, for everyone. Any member of its group does this; a DM stays, and a group's general goes only with the group.",
 			request: SessionPath,
 			responses: done,
 		}),
 		(c) => {
 			const session = groupSessionFor(c.req.valid("param").id, c.var.caller.id);
 			if (!session) return c.text("No such session.", 404);
+			if (session.general)
+				return c.text(
+					"A group's general goes only with the group (`delete_group`).",
+					403,
+				);
+			const where = whereOf(session);
 			db.prepare("DELETE FROM session WHERE id = ?").run(session.id);
 			sessionGone(session.id);
+			announce(
+				generalOf(session.group as string),
+				`${c.var.caller.login} deleted the session **${session.name}**${where}.`,
+			);
 			return c.body(null, 204);
 		},
 	);
@@ -474,7 +553,7 @@ export function sessionOperations(api: ReturnType<typeof newApi>): void {
 			method: "post",
 			path: "/sessions/{id}/entries",
 			summary: "Send an entry",
-			description: `Appends an entry with the request's body as its payload, of at most ${maxPayload / 1024 / 1024} MB, and its \`Content-Type\` as its type, \`text/plain; charset=utf-8\` where none is given. A message is \`text/plain\`, \`text/markdown\`, an image or a file; a \`ping\` parameter of its type names whom it wakes, separated by spaces, or \`*\` for everyone, such as \`text/markdown; ping="ben ben/claude"\`: left out, it pings everyone, and empty, no one. A status, \`application/vnd.vibetogether.chat.status+json\` as \`{"text": "<one sentence>"}\`, says what the sender is doing, until its next one, and pings no one.`,
+			description: `Appends an entry with the request's body as its payload, of at most ${maxPayload / 1024 / 1024} MB, and its \`Content-Type\` as its type, \`text/plain; charset=utf-8\` where none is given. A message is \`text/plain\`, \`text/markdown\`, an image or a file; a \`ping\` parameter of its type names whom it wakes, separated by spaces, or \`*\` for everyone, such as \`text/markdown; ping="ben ben/claude"\`: left out, it pings everyone in the session, and empty, no one. An \`fyi\` parameter names whom it tells without waking them. A name in either reaches that person or agent wherever it receives, from any session it sees, even one it is not in. A status, \`application/vnd.vibetogether.chat.status+json\` as \`{"text": "<one sentence>"}\`, says what the sender is doing, until its next one, and pings no one.`,
 			request: {
 				...SessionPath,
 				query: z
@@ -497,7 +576,13 @@ export function sessionOperations(api: ReturnType<typeof newApi>): void {
 			},
 			responses: {
 				200: json(
-					z.object({ n: z.number().meta({ description: "Its number." }) }),
+					z.object({
+						n: z.number().meta({ description: "Its number." }),
+						unreached: z.array(z.string()).optional().meta({
+							description:
+								"The names in `ping` or `fyi` it reaches not, since they see this session not.",
+						}),
+					}),
 					"Sent.",
 				),
 			},
@@ -548,7 +633,7 @@ export function sessionOperations(api: ReturnType<typeof newApi>): void {
 			path: "/sessions/{id}/entries",
 			summary: "Receive",
 			description:
-				"Receives what others sent after the caller's read position, and moves it there as it returns: that is what everyone sees as read. It waits until an entry pings the caller, and then returns everything since, each entry marked as a ping or not, an fyi, so an agent that waits on it is woken by a ping. Each name has one receive at a time on each login: a newer one ends the one before with 409. A participant receives whenever it is idle, which shows it as present.",
+				"Receives what others sent after the caller's read position, and moves it there as it returns: that is what everyone sees as read. It waits until an entry pings the caller, and then returns everything since, each entry marked as a ping or not, an fyi, so an agent that waits on it is woken by a ping. It also returns what other sessions the caller sees sent naming it in their `ping` or `fyi`, each with its `session`: a ping there wakes it too, and an fyi comes with the next return. Each name has one receive at a time on each login: a newer one ends the one before with 409. A participant receives whenever it is idle, which shows it as present.",
 			request: {
 				...SessionPath,
 				query: z

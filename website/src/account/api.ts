@@ -30,14 +30,16 @@ export type Project = {
 	repos: string[];
 };
 
-/** A project's session, or a DM. */
+/** A project's session, a group's own, or a DM. */
 export type Session = {
 	id: string;
 	name: string;
-	/** Its project, with the repositories it points at; null for a DM. */
+	/** Its project, with the repositories it points at; null for a DM and a group's own. */
 	project: (Named & { repos: string[] }) | null;
-	/** Its project's group; null for a DM. */
+	/** Its group; null for a DM. */
 	group: Named | null;
+	/** Whether it is its group's general, which every group has. */
+	general: boolean;
 	/** For a DM, the other person in it. */
 	friend: string | null;
 	/** Who created it. */
@@ -264,11 +266,23 @@ function mock(): Api {
 		return {
 			project: { id: project.id, name: project.name, repos: project.repos },
 			group: project.group,
+			general: false,
 			friend: null,
 			creator: me.name,
 		};
 	};
+	const general = (group: string): Session => ({
+		id: `s_general_${group}`,
+		name: "general",
+		project: null,
+		group: named(group),
+		general: true,
+		friend: null,
+		creator: null,
+	});
 	let sessions: Session[] = [
+		general("g_0"),
+		general("g_1"),
 		{ id: "s_1", name: "notes", ...inProject("p_1") },
 		{ id: "s_2", name: "agents", ...inProject("p_2") },
 		{ id: "s_3", name: "demo", ...inProject("p_2") },
@@ -337,6 +351,7 @@ function mock(): Api {
 				members: [me.name],
 			};
 			groups = [...groups, group];
+			sessions = [...sessions, general(group.id)];
 			return group;
 		},
 		deleteGroup: async (id) => {
@@ -435,6 +450,7 @@ function mock(): Api {
 					name: "DM",
 					project: null,
 					group: null,
+					general: false,
 					friend: friend.name,
 					creator: null,
 				})),

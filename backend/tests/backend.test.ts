@@ -564,3 +564,169 @@ test("accepting an invite makes friends with a DM, and joins its project's group
 	assert.ok(overview.dms.some((d: any) => d.id === accepted.json.dm));
 	assert.ok(overview.groups.some((g: any) => g.id === group.id));
 });
+
+test("every group has its general, which stays as long as the group", async () => {
+	const zoe = await person("zoe");
+	const overview = (await call(luis.browser, "GET", "/api/overview")).json;
+	for (const g of overview.groups) {
+		assert.equal(g.sessions[0].name, "general");
+		assert.equal(g.sessions[0].general, true);
+		assert.equal(g.sessions[0].project, null);
+		assert.equal(g.sessions[0].group.id, g.id);
+	}
+	const general = overview.groups.find((g: any) => g.id === group.id)
+		.sessions[0];
+	const at = `/api/sessions/${general.id}`;
+	assert.equal(
+		(await call(luis.browser, "PATCH", at, { name: "random" })).status,
+		403,
+	);
+	assert.equal((await call(luis.browser, "DELETE", at)).status, 403);
+	assert.equal((await call(zoe.browser, "GET", at)).status, 404);
+
+	// A session of the group's own, in no project.
+	const own = await call(ben.machine, "POST", "/api/sessions", {
+		name: "lounge",
+		group: group.id,
+	});
+	assert.equal(own.status, 201);
+	assert.equal(own.json.project, null);
+	assert.equal(own.json.group.id, group.id);
+	assert.equal(own.json.general, false);
+	assert.equal(
+		(
+			await call(ben.machine, "POST", "/api/sessions", {
+				name: "both",
+				group: group.id,
+				project: project.id,
+			})
+		).status,
+		400,
+	);
+
+	// What happened in the group is in its general, from vibetogether, pinging no one.
+	const log = (await call(luis.browser, "GET", `${at}/log`)).json.entries;
+	const said = log.map((e: any) => [e.from, e.text]);
+	assert.ok(
+		said.some(
+			([from, text]: string[]) =>
+				from === "vibetogether" &&
+				text === "ben created the session **lounge**.",
+		),
+	);
+	assert.ok(log.every((e: any) => /ping=""/.test(e.type)));
+	assert.equal(
+		(await call(ben.machine, "DELETE", `/api/sessions/${own.json.id}`)).status,
+		204,
+	);
+
+	// A group deleted takes its general with it, and tells its other members in their inbox.
+	const doomed = (
+		await call(luis.browser, "POST", "/api/groups", { name: "doomed" })
+	).json;
+	await call(luis.browser, "PUT", `/api/groups/${doomed.id}/members/ben`);
+	const doomedGeneral = (
+		await call(luis.browser, "GET", "/api/overview")
+	).json.groups.find((g: any) => g.id === doomed.id).sessions[0].id;
+	assert.equal(
+		(await call(ben.browser, "DELETE", `/api/groups/${doomed.id}`)).status,
+		204,
+	);
+	assert.equal(
+		(await call(luis.browser, "GET", `/api/sessions/${doomedGeneral}`)).status,
+		404,
+	);
+	const inbox = (
+		await call(luis.browser, "GET", "/api/overview")
+	).json.groups.find((g: any) => g.own).sessions[0];
+	const mail = (
+		await call(luis.browser, "GET", `/api/sessions/${inbox.id}/log`)
+	).json.entries;
+	assert.equal(mail.at(-1).text, "ben deleted the group **doomed**.");
+});
+
+test("a ping or an fyi reaches a name in any session it receives in", async () => {
+	const overview = (await call(ben.browser, "GET", "/api/overview")).json;
+	const general = overview.groups.find((g: any) => g.id === group.id)
+		.sessions[0];
+	const g = `/api/sessions/${general.id}`;
+	// ben/claude takes part in general only; luis/claude in the project's session only.
+	await call(ben.machine, "POST", `${g}/participants?agent=claude`);
+	await call(luis.machine, "POST", `${s}/participants?agent=claude`);
+	await call(luis.machine, "GET", `${s}/entries?agent=claude&wait=0`);
+
+	// An fyi from general waits quietly, and comes with the ping that wakes it.
+	const fyi = await call(
+		ben.machine,
+		"POST",
+		`${g}/entries?agent=claude`,
+		"FYI.",
+		{
+			"content-type": 'text/plain; ping=""; fyi="luis/claude"',
+		},
+	);
+	assert.equal(fyi.status, 200);
+	const waiting = call(luis.machine, "GET", `${s}/entries?agent=claude&wait=5`);
+	await new Promise((r) => setTimeout(r, 50));
+	const ping = await call(
+		ben.machine,
+		"POST",
+		`${g}/entries?agent=claude`,
+		"Hey, from general.",
+		{
+			"content-type": 'text/plain; ping="luis/claude zoe nobody/x"',
+		},
+	);
+	assert.deepEqual(ping.json.unreached, ["zoe", "nobody/x"]);
+	const received = await waiting;
+	assert.equal(received.status, 200);
+	assert.deepEqual(
+		received.json.entries.map((e: any) => [e.text, e.ping, e.session?.id]),
+		[
+			["FYI.", false, general.id],
+			["Hey, from general.", true, general.id],
+		],
+	);
+	// Received once: it doesn't come again.
+	assert.deepEqual(
+		(await call(luis.machine, "GET", `${s}/entries?agent=claude&wait=0`)).json
+			.entries,
+		[],
+	);
+
+	// The answer in general wakes ben/claude there as usual.
+	const answer = call(ben.machine, "GET", `${g}/entries?agent=claude&wait=5`);
+	await new Promise((r) => setTimeout(r, 50));
+	await call(luis.machine, "POST", `${g}/participants?agent=claude`);
+	await call(luis.machine, "POST", `${g}/entries?agent=claude`, "Got it.", {
+		"content-type": 'text/plain; ping="ben/claude"',
+	});
+	const got = (await answer).json.entries.filter(
+		(e: any) => e.type.startsWith("text/") && e.from !== "vibetogether",
+	);
+	assert.deepEqual(
+		got.map((e: any) => [e.from, e.text, e.ping, e.session]),
+		[["luis/claude", "Got it.", true, undefined]],
+	);
+	// luis/claude, now in general too, gets general's messages there, without the ones it already got.
+	const there = (
+		await call(luis.machine, "GET", `${g}/entries?agent=claude&wait=0&after=0`)
+	).json.entries;
+	assert.ok(there.every((e: any) => e.session === undefined));
+
+	// `*` stays inside the session: no one outside it is reached.
+	await call(ben.machine, "POST", `${g}/entries?agent=claude`, "All here.", {
+		"content-type": 'text/plain; ping="*"',
+	});
+	await call(luis.machine, "DELETE", `${g}/participants?agent=claude`);
+	await call(ben.machine, "POST", `${g}/entries?agent=claude`, "Everyone.", {
+		"content-type": 'text/plain; ping="*"',
+	});
+	assert.deepEqual(
+		(await call(luis.machine, "GET", `${s}/entries?agent=claude&wait=0`)).json
+			.entries,
+		[],
+	);
+	await call(luis.machine, "DELETE", `${s}/participants?agent=claude`);
+	await call(ben.machine, "DELETE", `${g}/participants?agent=claude`);
+});

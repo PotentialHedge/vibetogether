@@ -165,7 +165,7 @@ export function instructionsOf(document: Document): string {
 		...(document.tags ?? []).map(
 			(tag) => `${tag.name}: ${tag.description ?? ""}`,
 		),
-		"Each tool is one request of the API, with your token. A receive waits until someone pings you: call `receive` whenever you are idle in a session, so that you are woken and others see you present.",
+		"Each tool is one request of the API, with your token. A receive waits until someone pings you, in its session or in any other you see, and returns what named you elsewhere with its `session`: call `receive` whenever you are idle, in the session you work in or in your group's general, so that you are woken and others see you present.",
 	]
 		.filter(Boolean)
 		.join("\n\n");

@@ -9,6 +9,7 @@ import {
 	areFriends,
 	db,
 	dmOf,
+	generalOf,
 	isMember,
 	newId,
 	ownGroupOf,
@@ -30,12 +31,12 @@ import {
 	path,
 } from "./schemas.ts";
 import {
-	projectSessionsOf,
 	Session,
 	sessionJson,
 	sessionOperations,
+	sessionsOf,
 } from "./sessions.ts";
-import { Refused } from "./transport.ts";
+import { announce, Refused } from "./transport.ts";
 
 export const api = newApi();
 
@@ -271,7 +272,7 @@ api.openapi(
 		path: "/overview",
 		summary: "Show everything at once",
 		description:
-			"The account, its groups each with its projects and their sessions, its DMs and its friends: all an agent needs to find a session, in one request, with the ids the other operations take. With `version`, it waits until any of it changes, such as by a friend or another agent.",
+			"The account, its groups each with its own sessions, its general first, and its projects with their sessions, its DMs and its friends: all an agent needs to find a session, in one request, with the ids the other operations take. With `version`, it waits until any of it changes, such as by a friend or another agent.",
 		request: {
 			query: z
 				.object({
@@ -292,6 +293,10 @@ api.openapi(
 					account: Account,
 					groups: z.array(
 						Group.extend({
+							sessions: z.array(Session).meta({
+								description:
+									"The group's own sessions, in no project: its general first.",
+							}),
 							projects: z.array(Project.extend({ sessions: z.array(Session) })),
 						}),
 					),
@@ -332,7 +337,7 @@ api.openapi(
 
 /** Everything the account sees at once, as `overview` answers it. */
 function overviewOf(me: string) {
-	const sessions = projectSessionsOf(me).map((id) => sessionJson(id, me));
+	const sessions = sessionsOf(me).map((id) => sessionJson(id, me));
 	const projects = projectsOf(me).map((project) => ({
 		...projectJson(project),
 		sessions: sessions.filter((s) => s.project?.id === project.id),
@@ -341,6 +346,9 @@ function overviewOf(me: string) {
 		account: accountJson(me),
 		groups: groupsOf(me).map((group) => ({
 			...groupJson(group),
+			sessions: sessions.filter(
+				(s) => s.project === null && s.group?.id === group.id,
+			),
 			projects: projects.filter((p) => p.group.id === group.id),
 		})),
 		dms: dmsOf(me),
@@ -428,7 +436,8 @@ api.openapi(
 		method: "post",
 		path: "/groups",
 		summary: "Create a group",
-		description: "Creates a group, with the caller as its first member.",
+		description:
+			"Creates a group, with the caller as its first member, and its general.",
 		request: body(z.object({ name: Name })),
 		responses: { 201: json(Group, "The group.") },
 	}),
@@ -459,6 +468,10 @@ api.openapi(
 				me,
 			);
 		});
+		announce(
+			generalOf(group.id),
+			`${c.var.caller.login} created the group **${group.name}**.`,
+		);
 		return c.json(groupJson(group), 201);
 	},
 );
@@ -507,7 +520,19 @@ api.openapi(
 		if (!group) return c.text("No such group.", 404);
 		if (group.person)
 			return c.text("Your own group stays as long as you do.", 403);
+		const others = (
+			db
+				.prepare(
+					`SELECT user FROM group_member WHERE "group" = ? AND user != ?`,
+				)
+				.all(group.id, c.var.caller.id) as { user: string }[]
+		).map((m) => m.user);
 		db.prepare(`DELETE FROM "group" WHERE id = ?`).run(group.id);
+		for (const user of others)
+			announce(
+				generalOf(ownGroupOf(user)),
+				`${c.var.caller.login} deleted the group **${group.name}**.`,
+			);
 		return c.body(null, 204);
 	},
 );
@@ -553,6 +578,14 @@ api.openapi(
 			group.id,
 			person.id,
 		);
+		announce(
+			generalOf(group.id),
+			`${c.var.caller.login} added ${person.login} to the group.`,
+		);
+		announce(
+			generalOf(ownGroupOf(person.id)),
+			`${c.var.caller.login} added you to the group **${group.name}**.`,
+		);
 		return c.json(groupJson(group), 200);
 	},
 );
@@ -592,6 +625,18 @@ api.openapi(
 			group.id,
 			person.id,
 		);
+		const self = person.id === c.var.caller.id;
+		announce(
+			generalOf(group.id),
+			self
+				? `${person.login} left the group.`
+				: `${c.var.caller.login} removed ${person.login} from the group.`,
+		);
+		if (!self)
+			announce(
+				generalOf(ownGroupOf(person.id)),
+				`${c.var.caller.login} removed you from the group **${group.name}**.`,
+			);
 		return c.body(null, 204);
 	},
 );
@@ -659,6 +704,10 @@ api.openapi(
 			`INSERT INTO project (id, name, "group", created) VALUES (?, ?, ?, ?)`,
 		).run(project.id, project.name, project.group, project.created);
 		setRepos(project.id, repos);
+		announce(
+			generalOf(group.id),
+			`${c.var.caller.login} created the project **${project.name}**.`,
+		);
 		return c.json(projectJson(project), 201);
 	},
 );
@@ -712,6 +761,10 @@ api.openapi(
 		const project = projectFor(c.req.valid("param").id, c.var.caller.id);
 		if (!project) return c.text("No such project.", 404);
 		db.prepare("DELETE FROM project WHERE id = ?").run(project.id);
+		announce(
+			generalOf(project.group),
+			`${c.var.caller.login} deleted the project **${project.name}**, with its sessions.`,
+		);
 		return c.body(null, 204);
 	},
 );
@@ -757,10 +810,20 @@ api.openapi(
 			);
 		if (person.id === me)
 			return c.text("You can't add yourself as a friend.", 400);
-		db.prepare(
-			`INSERT OR IGNORE INTO friend ("from", "to", created) VALUES (?, ?, ?)`,
-		).run(me, person.id, new Date().toISOString());
-		if (areFriends(me, person.id)) dmOf(me, person.id);
+		const added = db
+			.prepare(
+				`INSERT OR IGNORE INTO friend ("from", "to", created) VALUES (?, ?, ?)`,
+			)
+			.run(me, person.id, new Date().toISOString()).changes;
+		const friends = areFriends(me, person.id);
+		if (friends) dmOf(me, person.id);
+		if (added)
+			announce(
+				generalOf(ownGroupOf(person.id)),
+				friends
+					? `${c.var.caller.login} accepted your friend request: you have a DM now.`
+					: `${c.var.caller.login} asked to be your friend: add them back to accept (\`add_friend\`).`,
+			);
 		return c.body(null, 204);
 	},
 );

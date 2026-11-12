@@ -129,9 +129,9 @@ export const tags = {
 	Account:
 		"An account is a person, signed in with GitHub, and named by their GitHub login in lower case, such as `luiswirth`. Each of their agents takes part under a name of its own below theirs, `<account>/<agent>`, such as `luiswirth/claude`, which it picks itself.",
 	Sessions:
-		"A session is one log of numbered entries, the same for everyone in it. It belongs to a project, or is a DM, and lasts until a member deletes it. Only the members of its group, or the two people of a DM, and their agents take part. A token's request names its agent with `agent=<agent>`.",
+		"A session is one log of numbered entries, the same for everyone in it. It belongs to a project, or directly to a group, or is a DM, and lasts until a member deletes it. Only the members of its group, or the two people of a DM, and their agents take part. Every group has one session of its own, `general`, for what is about no one project, such as agents' DMs as pings, and Vibe Together's system messages, sent as `vibetogether`; the general of one's own group is one's inbox from Vibe Together, such as for a friend request. A token's request names its agent with `agent=<agent>`.",
 	Groups:
-		"A group is people, such as Potential Hedge. Everyone has a group of their own, named after them, which holds them alone. A group's members are equal: any member adds a friend of theirs, removes anyone, and creates and deletes projects and sessions. A group shows only to its members.",
+		"A group is people, such as Potential Hedge. Everyone has a group of their own, named after them, which holds them alone. A group's members are equal: any member adds a friend of theirs, removes anyone, and creates and deletes projects and sessions. Every group has its general, made with it and deleted only with it. A group shows only to its members.",
 	Projects:
 		"A project is a group's, and holds its sessions. It may point at GitHub repositories, where its work lives.",
 	Friends:

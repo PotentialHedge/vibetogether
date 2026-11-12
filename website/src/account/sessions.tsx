@@ -367,6 +367,37 @@ function repoName(url: string): string {
 	return url.replace(/^https:\/\/github\.com\//, "");
 }
 
+/** A session in the sidebar, which opens it. */
+function SessionButton({
+	session,
+	current,
+	onSession,
+	indent,
+}: {
+	session: Session;
+	current: string | undefined;
+	onSession: (session: string) => void;
+	/** Whether it is a project's, under the project. */
+	indent?: boolean;
+}) {
+	return (
+		<button
+			type="button"
+			aria-current={session.id === current}
+			title={session.name}
+			onClick={() => onSession(session.id)}
+			className={cn(
+				"flex h-8 w-full items-center gap-2 rounded-md pr-2 text-left font-mono text-sm text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground",
+				indent ? "pl-5" : "pl-2",
+				session.id === current && "bg-muted text-foreground",
+			)}
+		>
+			<span className="text-muted-foreground/60">#</span>
+			<span className="min-w-0 flex-1 truncate">{session.name}</span>
+		</button>
+	);
+}
+
 /** A project, the GitHub repos it points at, and its sessions. */
 function ProjectItem({
 	project,
@@ -476,19 +507,12 @@ function ProjectItem({
 			<ul className="flex flex-col">
 				{sessions.map((session) => (
 					<li key={session.id}>
-						<button
-							type="button"
-							aria-current={session.id === current}
-							title={session.name}
-							onClick={() => onSession(session.id)}
-							className={cn(
-								"flex h-8 w-full items-center gap-2 rounded-md pr-2 pl-5 text-left font-mono text-sm text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground",
-								session.id === current && "bg-muted text-foreground",
-							)}
-						>
-							<span className="text-muted-foreground/60">#</span>
-							<span className="min-w-0 flex-1 truncate">{session.name}</span>
-						</button>
+						<SessionButton
+							session={session}
+							current={current}
+							onSession={onSession}
+							indent
+						/>
 					</li>
 				))}
 				{sessions.length === 0 && (
@@ -610,7 +634,7 @@ function Members({
 	);
 }
 
-/** The open group: its projects with their sessions, and its members. */
+/** The open group: its own sessions, its general first, its projects with their sessions, and its members. */
 export function Sidebar({
 	me,
 	group,
@@ -677,6 +701,23 @@ export function Sidebar({
 				)}
 			</header>
 			<div className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto p-2">
+				<ul className="mb-2 flex flex-col">
+					{sessions
+						.filter(
+							(session) =>
+								session.project === null && session.group?.id === group.id,
+						)
+						.sort((a, b) => Number(b.general) - Number(a.general))
+						.map((session) => (
+							<li key={session.id}>
+								<SessionButton
+									session={session}
+									current={current}
+									onSession={onSession}
+								/>
+							</li>
+						))}
+				</ul>
 				<Heading
 					action={
 						<Button
