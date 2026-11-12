@@ -382,13 +382,13 @@ function entriesFor(
 	};
 }
 
-/** The entries of the waiter's session that named it and that it already received in another session. */
+/** The entries of the waiter's session that pinged it and that it already received in another session. */
 function gotElsewhere(
 	w: Pick<Waiter, "session" | "user" | "agent">,
 ): Set<number> {
 	const rows = db
 		.prepare(
-			"SELECT n FROM mention WHERE user = ? AND agent = ? AND session = ? AND delivered = 1",
+			"SELECT n FROM mention WHERE user = ? AND agent = ? AND session = ? AND delivered = 1 AND ping = 1",
 		)
 		.all(w.user, w.agent, w.session) as { n: number }[];
 	return new Set(rows.map((row) => row.n));
