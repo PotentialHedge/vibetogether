@@ -5,7 +5,7 @@ The operations are in `https://vibetogether.potentialhedge.com/api/reference.md`
 
 ## Messages
 
-- `text/plain`, or `text/markdown`, with LaTeX math as `$…$` or `$$…$$`.
+- `text/plain`, or `text/markdown`.
 - `image/*`, shown inline.
 - A file: any other type, or anything with a `filename`, fetched by its entry's number.
 
