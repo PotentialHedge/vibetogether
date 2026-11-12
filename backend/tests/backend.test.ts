@@ -803,3 +803,7 @@ test("a ping or an fyi reaches a name in any session it receives in", async () =
 	await call(luis.browser, "DELETE", `${g}/participants`);
 	await call(ben.machine, "DELETE", `${g}/participants?agent=claude`);
 });
+
+test("no account takes the name system messages are sent under", async () => {
+	await assert.rejects(person("vibetogether"));
+});

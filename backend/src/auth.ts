@@ -8,6 +8,7 @@ import { bearer, deviceAuthorization } from "better-auth/plugins";
 import { config } from "./config.ts";
 import { createTables, db } from "./db.ts";
 import { isNamePart } from "./names.ts";
+import { systemName } from "./transport.ts";
 
 /** The hash under which the OAuth provider stores a token. */
 export function tokenHash(token: string): string {
@@ -96,8 +97,15 @@ const options = {
 	},
 	databaseHooks: {
 		user: {
-			create: { before: async (user) => freeLogin(user.login, user.email) },
-			update: { before: async (user) => freeLogin(user.login, user.email) },
+			// No account takes the name system messages are sent under, so that none passes for them.
+			create: {
+				before: async (user) =>
+					user.login === systemName ? false : freeLogin(user.login, user.email),
+			},
+			update: {
+				before: async (user) =>
+					user.login === systemName ? false : freeLogin(user.login, user.email),
+			},
 		},
 		session: {
 			create: {
