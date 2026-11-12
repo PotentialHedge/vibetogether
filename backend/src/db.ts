@@ -134,14 +134,17 @@ export function createTables(): void {
 		);
 
 		-- A message that names a participant in its "ping" or "fyi", for it to receive in any session
-		-- it receives in; the row goes once it is received, there or in the message's own session.
+		-- it receives in. "delivered" once received elsewhere; the row goes once received in the
+		-- message's own session, so that a session the person was pinged in shows as such till then.
 		CREATE TABLE IF NOT EXISTS mention (
 			id INTEGER PRIMARY KEY,
 			user TEXT NOT NULL REFERENCES user(id) ON DELETE CASCADE,
 			agent TEXT NOT NULL,
 			session TEXT NOT NULL REFERENCES session(id) ON DELETE CASCADE,
 			n INTEGER NOT NULL,
-			ping INTEGER NOT NULL
+			ping INTEGER NOT NULL,
+			delivered INTEGER NOT NULL DEFAULT 0,
+			created TEXT NOT NULL
 		);
 		CREATE INDEX IF NOT EXISTS mention_of ON mention (user, agent);
 
@@ -168,6 +171,17 @@ export function createTables(): void {
 			accepted_by TEXT REFERENCES user(id) ON DELETE CASCADE,
 			accepted TEXT
 		);
+		-- The group an invite is to, and the session it was made from; a group gone takes its
+		-- invites. An invite made before this table has its project in "invite" instead.
+		CREATE TABLE IF NOT EXISTS invite_group (
+			code TEXT PRIMARY KEY REFERENCES invite(code) ON DELETE CASCADE,
+			"group" TEXT NOT NULL REFERENCES "group"(id) ON DELETE CASCADE,
+			session TEXT REFERENCES session(id) ON DELETE SET NULL
+		);
+		CREATE TRIGGER IF NOT EXISTS invite_group_gone AFTER DELETE ON invite_group
+		BEGIN
+			DELETE FROM invite WHERE code = OLD.code;
+		END;
 		-- When and from where an OTP was asked for, for the person to judge before approving it.
 		CREATE TABLE IF NOT EXISTS otp_request (
 			user_code TEXT PRIMARY KEY,

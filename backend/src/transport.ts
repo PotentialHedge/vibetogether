@@ -6,6 +6,7 @@
 import { statfsSync } from "node:fs";
 import { dirname } from "node:path";
 import { lasts } from "./caller.ts";
+import { written } from "./changes.ts";
 import { config } from "./config.ts";
 import { db, sessionFor, transaction } from "./db.ts";
 
@@ -179,6 +180,11 @@ function mention(
 	const noted: { user: string; agent: string }[] = [];
 	const unreached: string[] = [];
 	if (!isMessage(type)) return { noted, unreached };
+	const now = new Date();
+	// A delivered mention whose session the participant never received in again goes after a week.
+	db.prepare("DELETE FROM mention WHERE delivered = 1 AND created < ?").run(
+		new Date(now.getTime() - 7 * 86400_000).toISOString(),
+	);
 	const ping = new Set(namesOf(type, "ping").filter((name) => name !== "*"));
 	const fyi = namesOf(type, "fyi").filter((name) => !ping.has(name));
 	for (const name of [...ping, ...fyi]) {
@@ -189,8 +195,15 @@ function mention(
 			continue;
 		}
 		db.prepare(
-			"INSERT INTO mention (user, agent, session, n, ping) VALUES (?, ?, ?, ?, ?)",
-		).run(p.user, p.agent, session, n, ping.has(name) ? 1 : 0);
+			"INSERT INTO mention (user, agent, session, n, ping, created) VALUES (?, ?, ?, ?, ?, ?)",
+		).run(
+			p.user,
+			p.agent,
+			session,
+			n,
+			ping.has(name) ? 1 : 0,
+			now.toISOString(),
+		);
 		noted.push(p);
 	}
 	return { noted, unreached };
@@ -287,7 +300,8 @@ function mentionsOf(
 			 e.n, e.time, e.sender, e.type, e.size, e.filename, e.text
 			 FROM mention m JOIN entry e ON e.session = m.session AND e.n = m.n
 			 JOIN session s ON s.id = m.session
-			 WHERE m.user = ? AND m.agent = ? AND m.session != ? ORDER BY m.id LIMIT 100`,
+			 WHERE m.user = ? AND m.agent = ? AND m.session != ? AND m.delivered = 0
+			 ORDER BY m.id LIMIT 100`,
 		)
 		.all(w.user, w.agent, w.session) as MentionRow[];
 	return rows.filter((row) => {
@@ -660,6 +674,8 @@ export function receive(
 				"A newer receive of the same participant replaced this one.",
 			),
 	);
+	const after = Math.min(options.after ?? row.read, lastOf(p.session));
+	seen(p, after);
 	return wait(
 		{
 			session: p.session,
@@ -670,7 +686,7 @@ export function receive(
 			name,
 			wake: options.wake,
 			own: options.own,
-			after: Math.min(options.after ?? row.read, lastOf(p.session)),
+			after,
 		},
 		options.wait,
 		signal,
@@ -757,6 +773,19 @@ function wait(
 }
 
 /**
+ * The participant has received its session up to `n`: what named it there up to it no longer
+ * marks the session as pinging it.
+ */
+function seen(p: Participant, n: number): void {
+	const gone = db
+		.prepare(
+			"DELETE FROM mention WHERE user = ? AND agent = ? AND session = ? AND n <= ?",
+		)
+		.run(p.user, p.agent, p.session, n).changes;
+	if (gone) written();
+}
+
+/**
  * A receive that returns acknowledges what it covers, and ends its receiving: the presence
  * changes where its read position moved, or where it counted as receiving.
  */
@@ -769,12 +798,10 @@ function finish(
 	const answer = answerOf(w, found, presence);
 	if (w.reads) return answer;
 	// The messages that named it are received: those of other sessions it got here, and those of
-	// this one that this receive covers.
+	// this one that this receive covers, which also no longer mark this session as pinging it.
 	for (const m of found.mentions)
-		db.prepare("DELETE FROM mention WHERE id = ?").run(m.id);
-	db.prepare(
-		"DELETE FROM mention WHERE user = ? AND agent = ? AND session = ? AND n <= ?",
-	).run(w.user, w.agent, w.session, found.covered);
+		db.prepare("UPDATE mention SET delivered = 1 WHERE id = ?").run(m.id);
+	seen(w, found.covered);
 	const moved = db
 		.prepare(
 			"UPDATE participant SET read = ? WHERE session = ? AND user = ? AND agent = ? AND read < ?",

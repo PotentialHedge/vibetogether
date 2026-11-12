@@ -47,6 +47,39 @@ import { page } from "@/site";
 
 type Act = (action: () => Promise<unknown>) => () => Promise<void>;
 
+/** Makes an invite to the session, to be friends and join its group, and
+ * copies its link, for the person to send. */
+export function InviteToSession({ session }: { session: { id: string } }) {
+	const [state, setState] = useState<"idle" | "copied" | string>("idle");
+	return (
+		<Button
+			variant="outline"
+			size="sm"
+			title={
+				state === "idle" || state === "copied"
+					? "Copy a link that invites someone to this session"
+					: state
+			}
+			onClick={async () => {
+				try {
+					const { link } = await api.inviteToSession(session.id);
+					await navigator.clipboard.writeText(link);
+					setState("copied");
+					setTimeout(() => setState("idle"), 2000);
+				} catch (error) {
+					setState(error instanceof Error ? error.message : String(error));
+				}
+			}}
+		>
+			{state === "copied"
+				? "Link copied"
+				: state === "idle"
+					? "Invite"
+					: "Can't invite"}
+		</Button>
+	);
+}
+
 /** Copies the prompt that brings an agent into one of the account's sessions,
  * by its id: the agent finds its link through the account itself, so no
  * secret passes through the person's paste. */
@@ -281,6 +314,7 @@ function FriendRequest({ friend, act }: { friend: Friend; act: Act }) {
 export function Rail({
 	me,
 	requests,
+	pinged,
 	dms,
 	groups,
 	open,
@@ -292,6 +326,8 @@ export function Rail({
 	me: Me;
 	/** Who asked to be friends, waiting for an answer. */
 	requests: Friend[];
+	/** The groups with a session that pinged the person. */
+	pinged: Set<string>;
 	dms: DmOfFriend[];
 	groups: Group[];
 	/** The open group's id, or the open DM's. */
@@ -321,11 +357,14 @@ export function Rail({
 					aria-current={dm.id === open}
 					onClick={() => onDm(dm.id)}
 					className={cn(
-						"rounded-full ring-offset-2 ring-offset-background transition-shadow hover:ring-2 hover:ring-ring/40",
+						"relative rounded-full ring-offset-2 ring-offset-background transition-shadow hover:ring-2 hover:ring-ring/40",
 						dm.id === open && "ring-2 ring-ring",
 					)}
 				>
 					<Person {...friend} size="lg" />
+					{dm.pinged && dm.id !== open && (
+						<span className="absolute -top-0.5 -right-0.5 size-2.5 rounded-full bg-primary ring-2 ring-card" />
+					)}
 				</button>
 			))}
 			{dms.length > 0 && <span className="h-px w-8 shrink-0 bg-border" />}
@@ -343,6 +382,9 @@ export function Rail({
 					)}
 				>
 					<GroupFace group={group} />
+					{pinged.has(group.id) && group.id !== open && (
+						<span className="absolute -top-0.5 -right-0.5 size-2.5 rounded-full bg-primary ring-2 ring-card" />
+					)}
 				</button>,
 				// The person's own group stands apart from the groups they share.
 				group.own && (
@@ -463,6 +505,14 @@ function SessionButton({
 		>
 			<span className="text-muted-foreground/60">#</span>
 			<span className="min-w-0 flex-1 truncate">{session.name}</span>
+			{session.pinged && session.id !== current && (
+				<span
+					role="img"
+					aria-label="pinged you"
+					title="A message here pinged you"
+					className="size-2 shrink-0 rounded-full bg-primary"
+				/>
+			)}
 		</button>
 	);
 }

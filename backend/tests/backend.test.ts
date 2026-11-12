@@ -547,22 +547,80 @@ test("an overview with its version waits until it changes", async () => {
 	assert.equal(again.json.version, next.version);
 });
 
-test("accepting an invite makes friends with a DM, and joins its project's group", async () => {
+test("accepting an invite makes friends with a DM, joins its group, and lands in its session", async () => {
 	const tristan = await person("tristan");
 	const invite = (
-		await call(luis.machine, "POST", "/api/invites", { project: project.id })
+		await call(luis.machine, "POST", "/api/invites", { session: session.id })
 	).json;
+	assert.deepEqual(invite.group, { id: group.id, name: "Potential Hedge" });
+	assert.equal(invite.session.id, session.id);
+	const shown = (await call(undefined, "GET", `/api/invites/${invite.code}`))
+		.json;
+	assert.equal(shown.session, "build");
 	const accepted = await call(
 		tristan.browser,
 		"POST",
 		`/api/invites/${invite.code}/accept`,
 	);
 	assert.equal(accepted.status, 200, accepted.text);
-	assert.equal(accepted.json.project.id, project.id);
+	assert.equal(accepted.json.land.id, session.id);
 	const overview = (await call(tristan.machine, "GET", "/api/overview")).json;
 	assert.ok(overview.friends.some((f: any) => f.name === "luis"));
 	assert.ok(overview.dms.some((d: any) => d.id === accepted.json.dm));
 	assert.ok(overview.groups.some((g: any) => g.id === group.id));
+
+	// Friends already: an invite to a group lands in its general; one to friends alone, in the DM.
+	const toGroup = (
+		await call(luis.machine, "POST", "/api/invites", { group: group.id })
+	).json;
+	const again = await call(
+		tristan.browser,
+		"POST",
+		`/api/invites/${toGroup.code}/accept`,
+	);
+	assert.equal(again.status, 200, again.text);
+	assert.equal(again.json.land.general, true);
+	assert.equal(again.json.land.group.id, group.id);
+	const plain = (await call(luis.machine, "POST", "/api/invites", {})).json;
+	assert.equal(plain.group, null);
+	const dm = await call(
+		tristan.browser,
+		"POST",
+		`/api/invites/${plain.code}/accept`,
+	);
+	assert.equal(dm.json.land.id, dm.json.dm);
+
+	// Not to one's own group, nor to a group or session the inviter isn't in.
+	const own = (
+		await call(luis.browser, "GET", "/api/overview")
+	).json.groups.find((g: any) => g.own);
+	assert.equal(
+		(await call(luis.machine, "POST", "/api/invites", { group: own.id }))
+			.status,
+		403,
+	);
+	assert.equal(
+		(
+			await call(luis.machine, "POST", "/api/invites", {
+				session: own.sessions[0].id,
+			})
+		).status,
+		403,
+	);
+	const stranger = await person("stranger");
+	assert.equal(
+		(await call(stranger.machine, "POST", "/api/invites", { group: group.id }))
+			.status,
+		404,
+	);
+	assert.equal(
+		(
+			await call(stranger.machine, "POST", "/api/invites", {
+				session: session.id,
+			})
+		).status,
+		404,
+	);
 });
 
 test("every group has its general, which stays as long as the group", async () => {
@@ -728,5 +786,20 @@ test("a ping or an fyi reaches a name in any session it receives in", async () =
 		[],
 	);
 	await call(luis.machine, "DELETE", `${s}/participants?agent=claude`);
+
+	// A session that pinged the person shows so, until they received there.
+	const pinged = async () =>
+		(await call(luis.browser, "GET", "/api/overview")).json.groups
+			.find((x: any) => x.id === group.id)
+			.sessions.find((x: any) => x.id === general.id).pinged;
+	assert.equal(await pinged(), false);
+	await call(ben.machine, "POST", `${g}/entries?agent=claude`, "Luis?", {
+		"content-type": 'text/plain; ping="luis"',
+	});
+	assert.equal(await pinged(), true);
+	await call(luis.browser, "POST", `${g}/participants`);
+	await call(luis.browser, "GET", `${g}/entries?wait=0`);
+	assert.equal(await pinged(), false);
+	await call(luis.browser, "DELETE", `${g}/participants`);
 	await call(ben.machine, "DELETE", `${g}/participants?agent=claude`);
 });

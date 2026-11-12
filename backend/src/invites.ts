@@ -10,15 +10,18 @@ import type { Context } from "hono";
 import { callerOf } from "./caller.ts";
 import { config } from "./config.ts";
 import {
+	areFriends,
 	db,
 	dmOf,
 	generalOf,
 	isMember,
 	ownGroupOf,
+	sessionFor,
 	transaction,
 } from "./db.ts";
 import { type Env, type newApi, operation, z } from "./openapi.ts";
-import { json, Login, path } from "./schemas.ts";
+import { Id, json, Login, path } from "./schemas.ts";
+import { Session, sessionJson } from "./sessions.ts";
 import { announce } from "./transport.ts";
 
 /** How long an invite lasts. */
@@ -46,32 +49,44 @@ class Refused extends Error {
 type InviteRow = {
 	code: string;
 	inviter: string;
+	/** Only an invite made before invites went to groups: its project's group, landing in its general. */
 	project: string | null;
 	created: string;
 	expires: string;
 	accepted_by: string | null;
 };
 
-type ProjectOf = {
-	id: string;
-	name: string;
+/** The group an invite is to, and the session it was made from, if any. */
+type Target = {
 	group: string;
 	groupName: string;
 	own: number;
+	session: string | null;
+	sessionName: string | null;
 };
 
-function projectOf(id: string): ProjectOf | undefined {
+function targetOf(row: InviteRow): Target | undefined {
+	const to = db
+		.prepare(
+			`SELECT g.id AS "group", g.name AS groupName, g.person IS NOT NULL AS own,
+			 s.id AS session, s.name AS sessionName
+			 FROM invite_group i JOIN "group" g ON g.id = i."group"
+			 LEFT JOIN session s ON s.id = i.session WHERE i.code = ?`,
+		)
+		.get(row.code) as Target | undefined;
+	if (to || !row.project) return to;
 	return db
 		.prepare(
-			`SELECT p.id, p.name, g.id AS "group", g.name AS groupName, g.person IS NOT NULL AS own
+			`SELECT g.id AS "group", g.name AS groupName, g.person IS NOT NULL AS own,
+			 NULL AS session, NULL AS sessionName
 			 FROM project p JOIN "group" g ON g.id = p."group" WHERE p.id = ?`,
 		)
-		.get(id) as ProjectOf | undefined;
+		.get(row.project) as Target | undefined;
 }
 
-/** Any member of a project's group invites to it, never to a person's own group, which is them alone. */
-function mayInviteTo(project: ProjectOf, user: string): boolean {
-	return isMember(project.group, user) && !project.own;
+/** Any member of a group invites to it, never to a person's own group, which is them alone. */
+function mayInviteTo(target: Target, user: string): boolean {
+	return isMember(target.group, user) && !target.own;
 }
 
 const Face = z.object({
@@ -91,43 +106,43 @@ function faceOf(user: string): z.infer<typeof Face> {
 	return { name: row.login, displayName: row.name, image: row.image };
 }
 
-const ProjectRef = z
-	.object({
-		id: z.string(),
-		name: z.string(),
-		group: z.object({ id: z.string(), name: z.string() }),
-	})
-	.nullable();
+const Ref = (prefix: string, what: string) =>
+	z.object({ id: Id(prefix, what), name: z.string() });
 
-function projectRef(
-	project: ProjectOf | undefined,
-): z.infer<typeof ProjectRef> {
-	return project
-		? {
-				id: project.id,
-				name: project.name,
-				group: { id: project.group, name: project.groupName },
-			}
-		: null;
-}
+const GroupRef = Ref("g", "group").nullable().meta({
+	description: "The group it invites to join too; null for friends alone.",
+});
+const SessionRef = Ref("s", "session").nullable().meta({
+	description:
+		"The group's session it was made from, where accepting lands; null for the group's general.",
+});
 
 const Invite = z
 	.object({
 		code: z.string(),
 		link: z.string().meta({ description: "The link to send." }),
-		to: z.enum(["friend", "project"]),
-		project: ProjectRef,
+		group: GroupRef,
+		session: SessionRef,
 		created: z.string(),
 		expires: z.string(),
 	})
 	.openapi("Invite");
 
+function refsOf(target: Target | undefined) {
+	return {
+		group: target ? { id: target.group, name: target.groupName } : null,
+		session:
+			target?.session && target.sessionName
+				? { id: target.session, name: target.sessionName }
+				: null,
+	};
+}
+
 function inviteJson(row: InviteRow): z.infer<typeof Invite> {
 	return {
 		code: row.code,
 		link: `${config.url}/i/${row.code}`,
-		to: row.project ? "project" : "friend",
-		project: projectRef(row.project ? projectOf(row.project) : undefined),
+		...refsOf(targetOf(row)),
 		created: row.created,
 		expires: row.expires,
 	};
@@ -141,16 +156,31 @@ function inviteByCode(code: string): InviteRow | undefined {
 
 function createInvite(
 	inviter: string,
-	project: string | undefined,
+	input: { group?: string | undefined; session?: string | undefined },
 ): z.infer<typeof Invite> {
-	if (project !== undefined) {
-		const p = projectOf(project);
-		if (!p || !isMember(p.group, inviter))
-			throw new Refused(404, "No such project.");
-		if (!mayInviteTo(p, inviter))
+	let group = input.group;
+	let session: string | null = null;
+	if (input.session !== undefined) {
+		const s = sessionFor(input.session, inviter);
+		if (!s?.group) throw new Refused(404, "No such session of a group.");
+		if (group !== undefined && group !== s.group)
+			throw new Refused(400, "The session is another group's.");
+		group = s.group;
+		session = s.id;
+	}
+	if (group !== undefined) {
+		const g = db
+			.prepare(
+				`SELECT id AS "group", name AS groupName, person IS NOT NULL AS own,
+				 NULL AS session, NULL AS sessionName FROM "group" WHERE id = ?`,
+			)
+			.get(group) as Target | undefined;
+		if (!g || !isMember(g.group, inviter))
+			throw new Refused(404, "No such group.");
+		if (!mayInviteTo(g, inviter))
 			throw new Refused(
 				403,
-				"A project of your own group takes no one else: invite to be friends instead.",
+				"Your own group takes no one else: invite to be friends, or to a group you share.",
 			);
 	}
 	const now = new Date();
@@ -169,14 +199,20 @@ function createInvite(
 	const row: InviteRow = {
 		code: randomCode(10),
 		inviter,
-		project: project ?? null,
+		project: null,
 		created: now.toISOString(),
 		expires: new Date(now.getTime() + inviteLifetime).toISOString(),
 		accepted_by: null,
 	};
-	db.prepare(
-		"INSERT INTO invite (code, inviter, project, created, expires) VALUES (?, ?, ?, ?, ?)",
-	).run(row.code, row.inviter, row.project, row.created, row.expires);
+	transaction(() => {
+		db.prepare(
+			"INSERT INTO invite (code, inviter, created, expires) VALUES (?, ?, ?, ?)",
+		).run(row.code, row.inviter, row.created, row.expires);
+		if (group !== undefined)
+			db.prepare(
+				`INSERT INTO invite_group (code, "group", session) VALUES (?, ?, ?)`,
+			).run(row.code, group, session);
+	});
 	return inviteJson(row);
 }
 
@@ -191,16 +227,21 @@ function showInvite(code: string, user: string | undefined) {
 		? row.accepted_by === user
 		: row.expires > new Date().toISOString();
 	if (!usable) return undefined;
-	const project = row.project ? projectOf(row.project) : undefined;
-	if (row.project && !project) return undefined;
+	const target = targetOf(row);
+	if (row.project && !target) return undefined;
 	return {
 		inviter: faceOf(row.inviter),
-		to: row.project ? ("project" as const) : ("friend" as const),
-		project: project ? { name: project.name, group: project.groupName } : null,
+		group: target?.groupName ?? null,
+		session: target?.sessionName ?? null,
 		expires: row.expires,
 	};
 }
 
+/**
+ * Accepts: the two become friends, where they aren't yet, with their DM, and the invited
+ * person joins the group, if any. It lands in the session it was made from, else the group's
+ * general, and without a group their DM.
+ */
 function acceptInvite(code: string, user: string) {
 	return transaction(() => {
 		const row = inviteByCode(code);
@@ -216,13 +257,19 @@ function acceptInvite(code: string, user: string) {
 			);
 		if (row.inviter === user)
 			throw new Refused(400, "This is your own invite: send it to someone.");
-		const project = row.project ? projectOf(row.project) : undefined;
+		const target = targetOf(row);
 		// The inviter may have lost the right to invite since, such as by leaving the group.
-		if (row.project && (!project || !mayInviteTo(project, row.inviter)))
+		if (row.project && !target)
 			throw new Refused(
 				410,
 				"This invite is no longer valid: ask for a new one.",
 			);
+		if (target && !mayInviteTo(target, row.inviter))
+			throw new Refused(
+				410,
+				"This invite is no longer valid: ask for a new one.",
+			);
+		const befriended = !areFriends(row.inviter, user);
 		for (const [from, to] of [
 			[row.inviter, user],
 			[user, row.inviter],
@@ -231,29 +278,36 @@ function acceptInvite(code: string, user: string) {
 				`INSERT OR IGNORE INTO friend ("from", "to", created) VALUES (?, ?, ?)`,
 			).run(from, to, now);
 		const dm = dmOf(row.inviter, user);
-		const joined = project
+		const joined = target
 			? db
 					.prepare(
 						`INSERT OR IGNORE INTO group_member ("group", user) VALUES (?, ?)`,
 					)
-					.run(project.group, user).changes > 0
+					.run(target.group, user).changes > 0
 			: false;
 		db.prepare(
 			"UPDATE invite SET accepted_by = ?, accepted = coalesce(accepted, ?) WHERE code = ?",
 		).run(user, now, row.code);
+		const land = target ? (target.session ?? generalOf(target.group)) : dm;
 		if (!row.accepted_by) {
 			const login = faceOf(user).name;
+			const inviterLogin = faceOf(row.inviter).name;
 			announce(
 				generalOf(ownGroupOf(row.inviter)),
-				`${login} accepted your invite${project ? ` to the project **${project.name}**` : ""}: you are friends, with a DM.`,
+				`${login} accepted your invite${target ? ` to the group **${target.groupName}**` : ""}${befriended ? ": you are friends, with a DM" : ""}.`,
 			);
-			if (project && joined)
+			if (target && joined)
 				announce(
-					generalOf(project.group),
-					`${login} joined the group, by ${faceOf(row.inviter).name}'s invite to the project **${project.name}**.`,
+					generalOf(target.group),
+					`${login} joined the group, by ${inviterLogin}'s invite.`,
 				);
 		}
-		return { inviter: faceOf(row.inviter), dm, project: projectRef(project) };
+		return {
+			inviter: faceOf(row.inviter),
+			dm,
+			...refsOf(target),
+			land: sessionJson(land, user),
+		};
 	});
 }
 
@@ -295,15 +349,19 @@ export function inviteOperations(api: ReturnType<typeof newApi>): void {
 			path: "/invites",
 			summary: "Create an invite",
 			description:
-				"Creates a link that invites one person, new to Vibe Together or not, to be the caller's friend, or with `project` to join that project's group too. Opening it, the person signs in with GitHub and accepts, and then gets the prompt for their own agent. Give the `link` to your person to send.",
+				"Creates a link that invites one person, new to Vibe Together or not, friends already or not, to be the caller's friend, and with `group` or `session` to join that group too. Accepting lands them, and then their agent, in a session: `session`, else the group's general, and without a group their DM. Opening it, the person signs in with GitHub and accepts, and then gets the prompt for their own agent. Give the `link` to your person to send.",
 			request: {
 				body: {
 					required: false,
 					content: {
 						"application/json": {
 							schema: z.object({
-								project: z.string().optional().meta({
-									description: "The project's id, as `p_…`, to invite to.",
+								group: Id("g", "group").optional().meta({
+									description: "The group to invite to join.",
+								}),
+								session: Id("s", "session").optional().meta({
+									description:
+										"A session of a group, to invite to its group and land in.",
 								}),
 							}),
 						},
@@ -314,8 +372,10 @@ export function inviteOperations(api: ReturnType<typeof newApi>): void {
 		}),
 		(c) => {
 			try {
-				const input = c.req.valid("json") as { project?: string } | undefined;
-				return c.json(createInvite(c.var.caller.id, input?.project), 201);
+				const input = c.req.valid("json") as
+					| { group?: string; session?: string }
+					| undefined;
+				return c.json(createInvite(c.var.caller.id, input ?? {}), 201);
 			} catch (error) {
 				return refused(c, error);
 			}
@@ -385,10 +445,12 @@ export function inviteOperations(api: ReturnType<typeof newApi>): void {
 				200: json(
 					z.object({
 						inviter: Face,
-						to: z.enum(["friend", "project"]),
-						project: z
-							.object({ name: z.string(), group: z.string() })
-							.nullable(),
+						group: z.string().nullable().meta({
+							description: "The name of the group it invites to join too.",
+						}),
+						session: z.string().nullable().meta({
+							description: "The name of the session it lands in.",
+						}),
 						expires: z.string(),
 					}),
 					"The invite.",
@@ -415,16 +477,21 @@ export function inviteOperations(api: ReturnType<typeof newApi>): void {
 			path: "/invites/{code}/accept",
 			summary: "Accept an invite",
 			description:
-				"The invited person accepts, signed in in the browser: they become the inviter's friends, with a DM, and for a project members of its group.",
+				"The invited person accepts, signed in in the browser: they become the inviter's friends, where they aren't yet, with a DM, and members of the group, if any. It answers where they land.",
 			request: Code,
 			responses: {
 				200: json(
 					z.object({
 						inviter: Face,
 						dm: z.string().meta({ description: "The DM's session id." }),
-						project: ProjectRef,
+						group: GroupRef,
+						session: SessionRef,
+						land: Session.meta({
+							description:
+								"The session it lands in: the one it was made from, else the group's general, else the DM.",
+						}),
 					}),
-					"What it led to: the DM with the inviter, and the project, if any.",
+					"What it led to.",
 				),
 			},
 		}),

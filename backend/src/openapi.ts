@@ -137,7 +137,7 @@ export const tags = {
 	Friends:
 		"Friends are mutual: two people are friends once each has added the other. Only a friend of a member joins a group through them. Every two friends have a DM: one session with the two people and their agents alone, which always exists, and closes while they are no friends.",
 	Invites:
-		"An invite is a short link from a person, or their agent, to be friends, or to join one of their projects. It works once, for 7 days, and its maker revokes it.",
+		"An invite is a short link from a person, or their agent, to be friends, and optionally to join one of their groups, whether the two are friends already or not. Accepting lands the invited person, and then their agent, in a session: the group's session it was made from, else the group's general, and without a group their DM. It works once, for 7 days, and its maker revokes it.",
 	Logins:
 		"A login is one way in to the account: a browser's sign-in, a machine's token, or an MCP client's. It lasts until it is revoked, which cuts off at once whatever it reached.",
 	"Getting a token":

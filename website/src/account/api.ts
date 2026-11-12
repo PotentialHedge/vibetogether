@@ -40,6 +40,8 @@ export type Session = {
 	group: Named | null;
 	/** Whether it is its group's general, which every group has. */
 	general: boolean;
+	/** Whether a message in it pinged the person, which they haven't seen in it yet. */
+	pinged: boolean;
 	/** For a DM, the other person in it. */
 	friend: string | null;
 	/** Who created it. */
@@ -180,6 +182,9 @@ const live = {
 	/** Deletes the account: only the person, signed in, may. */
 	deleteAccount: () => call<void>("DELETE", "api/me"),
 	dms: () => call<Dm[]>("GET", "api/dms"),
+	/** An invite to be friends and join the session's group, landing in it. */
+	inviteToSession: (session: string) =>
+		call<{ link: string }>("POST", "api/invites", { session }),
 	addFriend: (name: string) =>
 		call<void>("PUT", `api/friends/${encodeURIComponent(name)}`),
 	removeFriend: (name: string) =>
@@ -267,6 +272,7 @@ function mock(): Api {
 			project: { id: project.id, name: project.name, repos: project.repos },
 			group: project.group,
 			general: false,
+			pinged: false,
 			friend: null,
 			creator: me.name,
 		};
@@ -277,6 +283,7 @@ function mock(): Api {
 		project: null,
 		group: named(group),
 		general: true,
+		pinged: group === "g_1",
 		friend: null,
 		creator: null,
 	});
@@ -442,6 +449,9 @@ function mock(): Api {
 			},
 		],
 		deleteAccount: done,
+		inviteToSession: async () => ({
+			link: `${location.origin}/i/demo2invite`,
+		}),
 		dms: async () =>
 			friends
 				.filter((friend) => friend.state === "friends")
@@ -451,6 +461,7 @@ function mock(): Api {
 					project: null,
 					group: null,
 					general: false,
+					pinged: false,
 					friend: friend.name,
 					creator: null,
 				})),

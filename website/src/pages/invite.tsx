@@ -29,14 +29,14 @@ const accepting = `vibetogether accept ${code}`;
 
 /** The invite's title: where it leads, kept short. */
 function what(invite: InviteShown, who: string): string {
-	return invite.project ? `Join ${invite.project.name}` : `${who} invites you`;
+	return invite.group ? `Join ${invite.group}` : `${who} invites you`;
 }
 
-/** What the agent does once set up: going where the invite led. */
+/** What the agent does once set up: joining the session the invite landed in,
+ * by its id alone: its name is the inviter's free text, which the person would
+ * paste to their agent as their own words. */
 function thenFor(accepted: Accepted): string {
-	return accepted.project
-		? `open the project ${accepted.project.name} of ${accepted.project.group.name}`
-		: `join my DM with ${accepted.inviter.name}`;
+	return `join the session ${accepted.land.id}`;
 }
 
 function InvitePage() {
@@ -97,12 +97,22 @@ function InvitePage() {
 			<Frame
 				title="Now connect your agent"
 				description={
-					accepted.project
-						? `You're in ${accepted.project.group.name}. Your agent does the rest.`
+					accepted.group
+						? `You're in ${accepted.group.name}. Your agent does the rest.`
 						: `You and ${who} are friends. Your agent does the rest.`
 				}
 			>
 				<AgentPrompt then={thenFor(accepted)} />
+				<a
+					className="self-start text-sm underline underline-offset-4"
+					href={page(
+						accepted.group
+							? `account/?session=${encodeURIComponent(accepted.land.id)}`
+							: `account/?dm=${encodeURIComponent(accepted.inviter.name)}`,
+					)}
+				>
+					Open {accepted.group ? accepted.land.name : `the DM with ${who}`}
+				</a>
 			</Frame>
 		);
 
@@ -110,8 +120,8 @@ function InvitePage() {
 		<Frame
 			title={what(invite, who)}
 			description={
-				invite.project
-					? `Accepting makes you friends with ${who} and a member of ${invite.project.group}.`
+				invite.group
+					? `Accepting makes you friends with ${who} and a member of ${invite.group}${invite.session ? `, in the session ${invite.session}` : ""}.`
 					: `Accepting makes you friends with ${who}.`
 			}
 			info="Your agents can then talk with theirs. You get one prompt for your own agent, such as Claude Code, which sets everything up."

@@ -21,6 +21,7 @@ import {
 	ConfirmDialog,
 	CopySessionPrompt,
 	type DmOfFriend,
+	InviteToSession,
 	Rail,
 	Sidebar,
 } from "@/account/sessions";
@@ -151,6 +152,13 @@ function App({ state, reload }: { state: State; reload: () => Promise<void> }) {
 				<Rail
 					me={me}
 					requests={friends.filter((friend) => friend.state === "asking")}
+					pinged={
+						new Set(
+							sessions.flatMap((s) =>
+								s.pinged && s.group ? [s.group.id] : [],
+							),
+						)
+					}
 					dms={dmsOfFriends}
 					groups={groups}
 					open={dm?.dm.id ?? group?.id}
@@ -222,7 +230,15 @@ function App({ state, reload }: { state: State; reload: () => Promise<void> }) {
 								<ArrowLeft />
 							</Button>
 						}
-						actions={<CopySessionPrompt session={session} />}
+						actions={
+							<>
+								{session.group &&
+									!groups.find((g) => g.id === session.group?.id)?.own && (
+										<InviteToSession session={session} />
+									)}
+								<CopySessionPrompt session={session} />
+							</>
+						}
 						menu={
 							// A group's general goes only with the group.
 							!session.general && (

@@ -14,20 +14,22 @@ type Face = { name: string; displayName: string; image: string | null };
 /** An invite, as its link shows it before signing in. */
 export type InviteShown = {
 	inviter: Face;
-	to: "friend" | "project";
-	project: { name: string; group: string } | null;
+	/** The name of the group it invites to join too. */
+	group: string | null;
+	/** The name of the session it lands in. */
+	session: string | null;
 	expires: string;
 };
 
-/** What accepting an invite led to. */
+type Named = { id: string; name: string };
+
+/** What accepting an invite led to: the session it lands in. */
 export type Accepted = {
 	inviter: Face;
 	dm: string;
-	project: {
-		id: string;
-		name: string;
-		group: { id: string; name: string };
-	} | null;
+	group: Named | null;
+	session: Named | null;
+	land: Named & { general: boolean };
 };
 
 export const onboarding = {

@@ -60,6 +60,10 @@ export const Session = z
 			.meta({
 				description: "The group whose members take part; null for a DM.",
 			}),
+		pinged: z.boolean().meta({
+			description:
+				"Whether a message in it pinged the caller's person, which they haven't received in it yet.",
+		}),
 		general: z.boolean().meta({
 			description:
 				"Whether it is its group's `general`, which every group has, for what is about no one project. The general of one's own group is one's inbox from Vibe Together.",
@@ -118,6 +122,12 @@ export function sessionJson(id: string, me: string): z.infer<typeof Session> {
 				? { id: row.groupId, name: row.groupName }
 				: null,
 		general: row.general === 1,
+		pinged:
+			db
+				.prepare(
+					"SELECT 1 FROM mention WHERE user = ? AND agent = '' AND session = ? AND ping = 1",
+				)
+				.get(me, id) !== undefined,
 		friend,
 		creator: row.creatorLogin,
 	};
