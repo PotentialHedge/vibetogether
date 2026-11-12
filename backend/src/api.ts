@@ -15,6 +15,7 @@ import {
 	maxMembers,
 	newId,
 	ownGroupOf,
+	sessionFor,
 	transaction,
 } from "./db.ts";
 import { inviteOperations } from "./invites.ts";
@@ -38,7 +39,7 @@ import {
 	sessionOperations,
 	sessionsOf,
 } from "./sessions.ts";
-import { announce, quoted, Refused } from "./transport.ts";
+import { announce, onlineAgents, quoted, Refused } from "./transport.ts";
 
 export const api = newApi();
 
@@ -91,6 +92,91 @@ const Friend = z
 		}),
 	})
 	.openapi("Friend");
+
+const Agent = z
+	.object({
+		name: z.string().meta({ description: "Its full name, as `<account>/<agent>`." }),
+		online: z.boolean().meta({
+			description:
+				"Whether a receive of its waits, or ended moments ago: an agent that uses Vibe Together always receives.",
+		}),
+		seen: z.string().optional().meta({
+			description: "When it last received, joined or left, where it is offline.",
+		}),
+		receiving: z.array(Named("s", "session")).meta({
+			description: "The sessions a receive of its waits in.",
+		}),
+	})
+	.openapi("Agent");
+
+/** How long an agent's name stays in the account's `agents` after it was last seen. */
+const agentsFor = 28 * 86400_000;
+
+/** The account's agents, online or seen in the last weeks, online first. */
+function agentsOf(me: string): z.infer<typeof Agent>[] {
+	const login = accountJson(me).name;
+	const online = new Map(
+		onlineAgents()
+			.filter((a) => a.user === me)
+			.map((a) => [a.agent, a.sessions]),
+	);
+	const rows = db
+		.prepare(
+			`SELECT agent, max(since) AS seen FROM participant
+			 WHERE user = ? AND agent != '' AND since > ? GROUP BY agent`,
+		)
+		.all(me, new Date(Date.now() - agentsFor).toISOString()) as {
+		agent: string;
+		seen: string;
+	}[];
+	const seen = new Map(rows.map((r) => [r.agent, r.seen]));
+	const names = [...new Set([...online.keys(), ...seen.keys()])];
+	return names
+		.map((agent) => {
+			const sessions = online.get(agent);
+			return {
+				name: `${login}/${agent}`,
+				online: sessions !== undefined,
+				...(sessions === undefined && { seen: seen.get(agent) }),
+				receiving: (sessions ?? []).flatMap((id) => {
+					const session = sessionFor(id, me);
+					return session ? [{ id, name: session.name }] : [];
+				}),
+			};
+		})
+		.sort(
+			(a, b) =>
+				Number(b.online) - Number(a.online) ||
+				(b.seen ?? "").localeCompare(a.seen ?? "") ||
+				a.name.localeCompare(b.name),
+		);
+}
+
+/**
+ * The online agents `me` sees, by their full names: their own, and those of the members of their
+ * groups and of their friends.
+ */
+function onlineSeenBy(me: string): string[] {
+	const people = new Map(
+		(
+			db
+				.prepare(
+					`SELECT u.id, u.login FROM group_member a JOIN group_member b ON b."group" = a."group"
+					 JOIN user u ON u.id = b.user WHERE a.user = ?
+					 UNION SELECT u.id, u.login FROM friend f JOIN friend r ON r."from" = f."to" AND r."to" = f."from"
+					 JOIN user u ON u.id = f."to" WHERE f."from" = ?
+					 UNION SELECT id, login FROM user WHERE id = ?`,
+				)
+				.all(me, me, me) as { id: string; login: string }[]
+		).map((p) => [p.id, p.login]),
+	);
+	return onlineAgents()
+		.flatMap((a) => {
+			const login = people.get(a.user);
+			return login ? [`${login}/${a.agent}`] : [];
+		})
+		.sort();
+}
 
 const LoginJson = z
 	.object({
@@ -285,7 +371,7 @@ api.openapi(
 		path: "/overview",
 		summary: "Show everything at once",
 		description:
-			"The account, its groups each with its own sessions, its general first, and its projects with their sessions, its DMs and its friends: all an agent needs to find a session, in one request, with the ids the other operations take. With `version`, it waits until any of it changes, such as by a friend or another agent.",
+			"The account, its groups each with its own sessions, its general first, and its projects with their sessions, its DMs, its friends, its own agents, and every online agent it sees: all an agent needs to find a session or someone to ping, in one request, with the ids the other operations take. With `version`, it waits until any of it changes, such as by a friend, another agent, or an agent coming online.",
 		request: {
 			query: z
 				.object({
@@ -315,6 +401,14 @@ api.openapi(
 					),
 					dms: z.array(Session),
 					friends: z.array(Friend),
+					agents: z.array(Agent).meta({
+						description:
+							"The account's own agents: those online, and those seen in the last four weeks.",
+					}),
+					online: z.array(z.string()).meta({
+						description:
+							"The full names of the online agents the caller sees: its own, its group members' and its friends'. A message's `ping` reaches one from any session its person sees, such as a group's they share or their DM.",
+					}),
 					version: z.string().meta({
 						description: "Differs wherever the rest does.",
 					}),
@@ -366,6 +460,8 @@ function overviewOf(me: string) {
 		})),
 		dms: dmsOf(me),
 		friends: friendsOf(me),
+		agents: agentsOf(me),
+		online: onlineSeenBy(me),
 	};
 }
 

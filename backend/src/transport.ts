@@ -23,6 +23,8 @@ const maxInline = 64 * 1024;
 const maxAnswer = 1024 * 1024;
 /** How long a name an agent holds stays its login's after its last receive, unless it leaves. */
 const holdFor = 3600_000;
+/** How long an agent stays online after its last receive ended, so that receiving again keeps it. */
+const onlineFor = 60_000;
 
 /** A participant: a person, where `agent` is empty, or one of their agents. */
 export type Participant = { session: string; user: string; agent: string };
@@ -275,6 +277,71 @@ type MentionRow = EntryRow & {
 };
 
 const waiting = new Set<Waiter>();
+
+/** When each agent's last receive started or ended, keyed by `keyOf`. */
+const lastReceived = new Map<
+	string,
+	{ user: string; agent: string; time: number }
+>();
+
+function keyOf(user: string, agent: string): string {
+	return JSON.stringify([user, agent]);
+}
+
+/** Whether the agent is online: a receive of its waits, or ended moments ago. */
+function isOnline(user: string, agent: string): boolean {
+	const last = lastReceived.get(keyOf(user, agent));
+	if (last && Date.now() - last.time < onlineFor) return true;
+	for (const w of waiting)
+		if (!w.reads && w.user === user && w.agent === agent) return true;
+	return false;
+}
+
+/** Every agent online now, each with the sessions it receives in. */
+export function onlineAgents(): {
+	user: string;
+	agent: string;
+	sessions: string[];
+}[] {
+	const online = new Map<
+		string,
+		{ user: string; agent: string; sessions: string[] }
+	>();
+	const now = Date.now();
+	for (const [key, { user, agent, time }] of lastReceived)
+		if (now - time < onlineFor) online.set(key, { user, agent, sessions: [] });
+	for (const w of waiting) {
+		if (w.reads || !w.agent) continue;
+		const key = keyOf(w.user, w.agent);
+		const agent = online.get(key) ?? {
+			user: w.user,
+			agent: w.agent,
+			sessions: [],
+		};
+		if (!agent.sessions.includes(w.session)) agent.sessions.push(w.session);
+		online.set(key, agent);
+	}
+	return [...online.values()];
+}
+
+/**
+ * Notes that a receive of the agent started or ended: what shows who is online changes where it
+ * comes online now, or once it stays offline.
+ */
+function received(user: string, agent: string): void {
+	if (!agent) return;
+	const was = isOnline(user, agent);
+	const key = keyOf(user, agent);
+	lastReceived.set(key, { user, agent, time: Date.now() });
+	if (!was) written();
+	setTimeout(() => {
+		const last = lastReceived.get(key);
+		if (last && Date.now() - last.time >= onlineFor) {
+			lastReceived.delete(key);
+			if (!isOnline(user, agent)) written();
+		}
+	}, onlineFor + 100).unref();
+}
 
 /**
  * The entries after `after`, the waiter's own left out where it wants them not, about one
@@ -720,6 +787,7 @@ export function receive(
 	);
 	const after = Math.min(options.after ?? row.read, lastOf(p.session));
 	seen(p, after);
+	received(p.user, p.agent);
 	return wait(
 		{
 			session: p.session,
@@ -787,6 +855,7 @@ function wait(
 			if (!waiting.delete(waiter)) return false;
 			clearTimeout(timer);
 			signal.removeEventListener("abort", abort);
+			if (!waiter.reads) received(waiter.user, waiter.agent);
 			return true;
 		};
 		waiter.end = (outcome, presence) => {

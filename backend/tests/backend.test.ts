@@ -803,6 +803,73 @@ test("a ping or an fyi reaches a name in any session it receives in", async () =
 	await call(ben.machine, "DELETE", `${g}/participants?agent=claude`);
 });
 
+test("an agent is online while it receives, to its person, their groups and friends", async () => {
+	const own = (await call(ben.machine, "GET", "/api/overview")).json;
+	const general = own.groups.find((g: any) => g.own).sessions[0];
+	const g = `/api/sessions/${general.id}`;
+	assert.equal(
+		(await call(ben.machine, "POST", `${g}/participants?agent=listener`))
+			.status,
+		200,
+	);
+	const before = (await call(luis.machine, "GET", "/api/overview")).json;
+	assert.ok(!before.online.includes("ben/listener"));
+	// Coming online wakes an overview that waits.
+	const woken = call(
+		luis.machine,
+		"GET",
+		`/api/overview?version=${before.version}&wait=5`,
+	);
+	const stop = new AbortController();
+	const receiving = call(
+		ben.machine,
+		"GET",
+		`${g}/entries?agent=listener&wait=30`,
+		undefined,
+		{},
+		stop.signal,
+	).catch(() => undefined);
+	assert.ok((await woken).json.online.includes("ben/listener"));
+	// Ben sees where it receives; a stranger sees nothing of it.
+	const mine = (await call(ben.browser, "GET", "/api/overview")).json.agents;
+	assert.deepEqual(
+		mine.find((a: any) => a.name === "ben/listener"),
+		{
+			name: "ben/listener",
+			online: true,
+			receiving: [{ id: general.id, name: "general" }],
+		},
+	);
+	const stranger = await person("nobody");
+	assert.deepEqual(
+		(await call(stranger.browser, "GET", "/api/overview")).json.online,
+		[],
+	);
+	// Luis's agent pings it from a session Ben sees, and it is woken in his own general.
+	const pinged = call(ben.machine, "GET", `${g}/entries?agent=listener&wait=5`);
+	await new Promise((r) => setTimeout(r, 50));
+	await call(luis.machine, "POST", `${s}/participants?agent=claude`);
+	const sent = await call(luis.machine, "POST", `${s}/entries?agent=claude`, "Join us.", {
+		"content-type": 'text/plain; ping="ben/listener"',
+	});
+	assert.equal(sent.json.unreached, undefined);
+	const got = (await pinged).json.entries.filter((e: any) => e.ping);
+	assert.deepEqual(
+		got.map((e: any) => [e.text, e.session?.id]),
+		[["Join us.", session.id]],
+	);
+	await receiving;
+	// Between two receives, moments apart, it stays online.
+	assert.ok(
+		(await call(luis.machine, "GET", "/api/overview")).json.online.includes(
+			"ben/listener",
+		),
+	);
+	stop.abort();
+	await call(luis.machine, "DELETE", `${s}/participants?agent=claude`);
+	await call(ben.machine, "DELETE", `${g}/participants?agent=listener`);
+});
+
 test("no account takes the name system messages are sent under", async () => {
 	await assert.rejects(person("vibetogether"));
 });
