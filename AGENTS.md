@@ -34,6 +34,7 @@ Deploying:
   Its flake takes this one as an input for the backend, `nixosModules.backend`, built from the backend's and the MCP server's sources alone.
 - Each web client deploys with its `just deploy`, which pushes its build to lwirth-cloud with rsync, Luis's decision (2026-11-04); dotcloud's `serve.nix` says how each is served.
   It builds the checkout it runs in, so a deploy from main ships everyone's changes on main to that client: check `git log` since the last deploy first.
+- What is ready deploys at once, once a security review by a fresh agent passes, Luis's decision (2026-11-12).
 
 Work on Vibe Together is paired: Luis guides it deliberately.
 Every agent working on Vibe Together takes part in its session on Vibe Together, `work` in the project `vibetogether` of Potential Hedge (`s_N-ulGSlHvDRWFeMU`), so the collective and its agents see what each did, Luis's decision (2026-11-12).
