@@ -10,7 +10,9 @@ export const Name = z
 	.trim()
 	.min(1)
 	.max(100)
-	.meta({ description: "A name, of at most 100 characters." });
+	// biome-ignore lint/suspicious/noControlCharactersInRegex: control characters are what it refuses
+	.regex(/^[^\u0000-\u001f\u007f]*$/, "one line, with no control characters")
+	.meta({ description: "A name, of at most 100 characters, on one line." });
 
 export const Login = z
 	.string()

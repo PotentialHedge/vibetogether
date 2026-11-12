@@ -15,14 +15,16 @@ import {
 	dmOf,
 	generalOf,
 	isMember,
+	maxGroups,
+	maxMembers,
 	ownGroupOf,
 	sessionFor,
 	transaction,
 } from "./db.ts";
 import { type Env, type newApi, operation, z } from "./openapi.ts";
-import { Id, json, Login, path } from "./schemas.ts";
+import { count, Id, json, Login, path } from "./schemas.ts";
 import { Session, sessionJson } from "./sessions.ts";
-import { announce } from "./transport.ts";
+import { announce, quoted } from "./transport.ts";
 
 /** How long an invite lasts. */
 const inviteLifetime = 7 * 24 * 3600_000;
@@ -258,6 +260,20 @@ function acceptInvite(code: string, user: string) {
 		if (row.inviter === user)
 			throw new Refused(400, "This is your own invite: send it to someone.");
 		const target = targetOf(row);
+		// Accepted already, such as on a reload: it shows where it led, and changes nothing, so
+		// that it never undoes a removal from the group or an unfriending since.
+		if (row.accepted_by === user) {
+			const land =
+				target && isMember(target.group, user)
+					? (target.session ?? generalOf(target.group))
+					: dmOf(row.inviter, user);
+			return {
+				inviter: faceOf(row.inviter),
+				dm: dmOf(row.inviter, user),
+				...refsOf(target),
+				land: sessionJson(land, user),
+			};
+		}
 		// The inviter may have lost the right to invite since, such as by leaving the group.
 		if (row.project && !target)
 			throw new Refused(
@@ -269,6 +285,28 @@ function acceptInvite(code: string, user: string) {
 				410,
 				"This invite is no longer valid: ask for a new one.",
 			);
+		if (target && !isMember(target.group, user)) {
+			if (
+				count(
+					`SELECT count(*) AS n FROM group_member WHERE "group" = ?`,
+					target.group,
+				) >= maxMembers
+			)
+				throw new Refused(
+					403,
+					`The group is full: it has at most ${maxMembers} members.`,
+				);
+			if (
+				count(
+					`SELECT count(*) AS n FROM group_member m JOIN "group" g ON g.id = m."group" WHERE m.user = ? AND g.person IS NULL`,
+					user,
+				) >= maxGroups
+			)
+				throw new Refused(
+					403,
+					`You are in ${maxGroups} groups besides your own: leave one first.`,
+				);
+		}
 		const befriended = !areFriends(row.inviter, user);
 		for (const [from, to] of [
 			[row.inviter, user],
@@ -289,12 +327,12 @@ function acceptInvite(code: string, user: string) {
 			"UPDATE invite SET accepted_by = ?, accepted = coalesce(accepted, ?) WHERE code = ?",
 		).run(user, now, row.code);
 		const land = target ? (target.session ?? generalOf(target.group)) : dm;
-		if (!row.accepted_by) {
+		{
 			const login = faceOf(user).name;
 			const inviterLogin = faceOf(row.inviter).name;
 			announce(
 				generalOf(ownGroupOf(row.inviter)),
-				`${login} accepted your invite${target ? ` to the group **${target.groupName}**` : ""}${befriended ? ": you are friends, with a DM" : ""}.`,
+				`${login} accepted your invite${target ? ` to the group ${quoted(target.groupName)}` : ""}${befriended ? ": you are friends, with a DM" : ""}.`,
 			);
 			if (target && joined)
 				announce(

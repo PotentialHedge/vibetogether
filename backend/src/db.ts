@@ -147,6 +147,7 @@ export function createTables(): void {
 			created TEXT NOT NULL
 		);
 		CREATE INDEX IF NOT EXISTS mention_of ON mention (user, agent);
+		CREATE INDEX IF NOT EXISTS mention_age ON mention (created);
 
 		-- What an agent changed in its person's account, for the person to see.
 		-- "login" and "agent" are the login's id and name as list_logins gives them, kept as they were.
@@ -275,6 +276,10 @@ export function ownGroupOf(user: string): string {
 		return id;
 	});
 }
+
+/** The most groups a person is in besides their own, and the most members of a group. */
+export const maxGroups = 20;
+export const maxMembers = 50;
 
 /** Whether `user` is in `group`. */
 export function isMember(group: string, user: string): boolean {

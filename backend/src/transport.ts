@@ -9,6 +9,7 @@ import { lasts } from "./caller.ts";
 import { written } from "./changes.ts";
 import { config } from "./config.ts";
 import { db, sessionFor, transaction } from "./db.ts";
+import { isNamePart } from "./names.ts";
 
 export const joinType = "application/vnd.vibetogether.join";
 export const leaveType = "application/vnd.vibetogether.leave";
@@ -123,14 +124,20 @@ function lastOf(session: string): number {
 	).n;
 }
 
-/** A MIME type's parameter, such as `ping` of `text/plain; ping="ben ben/claude"`. */
+/**
+ * A MIME type's parameter, such as `ping` of `text/plain; ping="ben ben/claude"`, read as RFC 9110
+ * reads it: a quoted value holds what would otherwise end it, and the first of a name counts.
+ */
 function parameterOf(type: string, name: string): string | undefined {
-	const pattern = new RegExp(
-		`;\\s*${name}\\s*=\\s*(?:"([^"]*)"|([^;\\s]*))`,
-		"i",
-	);
-	const match = type.match(pattern);
-	return match ? (match[1] ?? match[2] ?? "") : undefined;
+	const parameter =
+		/;\s*([^=;\s]+)\s*=\s*(?:"((?:[^"\\]|\\.)*)"|([^;\s]*))\s*/gy;
+	const start = type.indexOf(";");
+	if (start < 0) return undefined;
+	parameter.lastIndex = start;
+	for (let m = parameter.exec(type); m; m = parameter.exec(type))
+		if (m[1]?.toLowerCase() === name)
+			return m[2] !== undefined ? m[2].replace(/\\(.)/g, "$1") : (m[3] ?? "");
+	return undefined;
 }
 
 /** Whether an entry of `type` is a message, rather than an extension's, of a `vnd.` type. */
@@ -154,12 +161,16 @@ export function pings(type: string, name: string): boolean {
 	return names.includes("*") || names.includes(name);
 }
 
+/** The most names one message lists in its `ping` and `fyi` together. */
+const maxNamed = 32;
+
 /** A participant a name stands for, as `login` or `login/agent`, where it is an account's. */
 function participantByName(
 	name: string,
 ): { user: string; agent: string } | undefined {
 	const [login, agent = "", ...rest] = name.split("/");
-	if (!login || rest.length || (name.includes("/") && !agent)) return undefined;
+	if (!login || rest.length || (name.includes("/") && !isNamePart(agent)))
+		return undefined;
 	const user = db.prepare("SELECT id FROM user WHERE login = ?").get(login) as
 		| { id: string }
 		| undefined;
@@ -181,12 +192,15 @@ function mention(
 	const unreached: string[] = [];
 	if (!isMessage(type)) return { noted, unreached };
 	const now = new Date();
-	// A delivered mention whose session the participant never received in again goes after a week.
-	db.prepare("DELETE FROM mention WHERE delivered = 1 AND created < ?").run(
-		new Date(now.getTime() - 7 * 86400_000).toISOString(),
-	);
 	const ping = new Set(namesOf(type, "ping").filter((name) => name !== "*"));
-	const fyi = namesOf(type, "fyi").filter((name) => !ping.has(name));
+	const fyi = [
+		...new Set(namesOf(type, "fyi").filter((name) => !ping.has(name))),
+	];
+	if (ping.size + fyi.length > maxNamed)
+		throw new Refused(
+			400,
+			`A message names at most ${maxNamed} in its ping and fyi together.`,
+		);
 	for (const name of [...ping, ...fyi]) {
 		if (name === sender) continue;
 		const p = participantByName(name);
@@ -310,6 +324,15 @@ function mentionsOf(
 		return false;
 	});
 }
+
+// A mention not received in its own session for a week goes, delivered elsewhere or not.
+setInterval(
+	() =>
+		db
+			.prepare("DELETE FROM mention WHERE created < ?")
+			.run(new Date(Date.now() - 7 * 86400_000).toISOString()),
+	3600_000,
+).unref();
 
 /** Whether `w` has something to return now. */
 function ready(w: Waiter, { entries, mentions }: Found): boolean {
@@ -628,14 +651,35 @@ export function send(
 }
 
 /**
+ * A name as a system message quotes it: a code span, so that a group's or session's name, which
+ * its maker chose, reads as a name and never as more of the message.
+ */
+export function quoted(name: string): string {
+	return `\`${name.replace(/[`\s]+/g, " ").trim()}\``;
+}
+
+/** The most system messages one session gets in an hour; past it, they are dropped. */
+const maxAnnounced = 60;
+const announced = new Map<string, { start: number; n: number }>();
+
+/**
  * Posts a system message, from `vibetogether`, to `session`, such as a group's general: markdown,
- * which pings and tells whom `ping` and `fyi` name, and no one where they are empty.
+ * which pings and tells whom `ping` and `fyi` name, and no one where they are empty. Every name in
+ * `text` goes through `quoted`.
  */
 export function announce(
 	session: string,
 	text: string,
 	{ ping = [], fyi = [] }: { ping?: string[]; fyi?: string[] } = {},
 ): void {
+	const now = Date.now();
+	let count = announced.get(session);
+	if (!count || now - count.start > 3600_000) {
+		if (announced.size > 10_000) announced.clear();
+		count = { start: now, n: 0 };
+		announced.set(session, count);
+	}
+	if (++count.n > maxAnnounced) return;
 	const type = `text/markdown; charset=utf-8; ping="${ping.join(" ")}"${fyi.length ? `; fyi="${fyi.join(" ")}"` : ""}`;
 	const { noted } = transaction(() => {
 		const n = append(

@@ -26,6 +26,7 @@ import {
 	type Participant,
 	payloadOf,
 	presenceOf,
+	quoted,
 	Refused,
 	read,
 	receive,
@@ -159,7 +160,7 @@ function whereOf(session: SessionAccess): string {
 	const project = db
 		.prepare("SELECT name FROM project WHERE id = ?")
 		.get(session.project) as { name: string };
-	return ` in the project **${project.name}**`;
+	return ` in the project ${quoted(project.name)}`;
 }
 
 const SessionPath = path({ id: Id("s", "session") });
@@ -347,7 +348,7 @@ export function sessionOperations(api: ReturnType<typeof newApi>): void {
 			const session = sessionFor(id, me) as SessionAccess;
 			announce(
 				generalOf(group),
-				`${c.var.caller.login} created the session **${input.name}**${whereOf(session)}.`,
+				`${c.var.caller.login} created the session ${quoted(input.name)}${whereOf(session)}.`,
 			);
 			return c.json(sessionJson(id, me), 201);
 		},
@@ -428,7 +429,7 @@ export function sessionOperations(api: ReturnType<typeof newApi>): void {
 			sessionGone(session.id);
 			announce(
 				generalOf(session.group as string),
-				`${c.var.caller.login} deleted the session **${session.name}**${where}.`,
+				`${c.var.caller.login} deleted the session ${quoted(session.name)}${where}.`,
 			);
 			return c.body(null, 204);
 		},

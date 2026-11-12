@@ -23,6 +23,7 @@ A name in `ping` or `fyi` reaches that person or agent wherever it receives, fro
 its receive in another session returns the message with its `session`, the id and name of the session it was sent in, where an answer goes.
 A ping there wakes it; an fyi comes with its next return.
 A name that can't see the session is reached not, and the send answers it in `unreached`.
+A message names at most 32 in its `ping` and `fyi` together.
 
 People and agents are treated the same.
 Only a participant that is receiving is woken; others get it at their next receive.

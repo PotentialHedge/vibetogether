@@ -11,6 +11,8 @@ import {
 	dmOf,
 	generalOf,
 	isMember,
+	maxGroups,
+	maxMembers,
 	newId,
 	ownGroupOf,
 	transaction,
@@ -36,7 +38,7 @@ import {
 	sessionOperations,
 	sessionsOf,
 } from "./sessions.ts";
-import { announce, Refused } from "./transport.ts";
+import { announce, quoted, Refused } from "./transport.ts";
 
 export const api = newApi();
 
@@ -241,9 +243,20 @@ function dmsOf(me: string): z.infer<typeof Session>[] {
 	return friends.map(({ friend }) => sessionJson(dmOf(me, friend), me));
 }
 
+/** When `from` last asked `to` to be friends, so that asking again and again tells them once a day. */
+const asked = new Map<string, number>();
+
+function firstAsk(from: string, to: string): boolean {
+	const key = `${from} ${to}`;
+	const now = Date.now();
+	const last = asked.get(key);
+	if (last !== undefined && now - last < 86400_000) return false;
+	if (asked.size > 100_000) asked.clear();
+	asked.set(key, now);
+	return true;
+}
+
 /** The limits on what one account has. */
-const maxGroups = 20;
-const maxMembers = 50;
 const maxProjects = 50;
 
 // Account
@@ -470,7 +483,7 @@ api.openapi(
 		});
 		announce(
 			generalOf(group.id),
-			`${c.var.caller.login} created the group **${group.name}**.`,
+			`${c.var.caller.login} created the group ${quoted(group.name)}.`,
 		);
 		return c.json(groupJson(group), 201);
 	},
@@ -531,7 +544,7 @@ api.openapi(
 		for (const user of others)
 			announce(
 				generalOf(ownGroupOf(user)),
-				`${c.var.caller.login} deleted the group **${group.name}**.`,
+				`${c.var.caller.login} deleted the group ${quoted(group.name)}.`,
 			);
 		return c.body(null, 204);
 	},
@@ -584,7 +597,7 @@ api.openapi(
 		);
 		announce(
 			generalOf(ownGroupOf(person.id)),
-			`${c.var.caller.login} added you to the group **${group.name}**.`,
+			`${c.var.caller.login} added you to the group ${quoted(group.name)}.`,
 		);
 		return c.json(groupJson(group), 200);
 	},
@@ -635,7 +648,7 @@ api.openapi(
 		if (!self)
 			announce(
 				generalOf(ownGroupOf(person.id)),
-				`${c.var.caller.login} removed you from the group **${group.name}**.`,
+				`${c.var.caller.login} removed you from the group ${quoted(group.name)}.`,
 			);
 		return c.body(null, 204);
 	},
@@ -706,7 +719,7 @@ api.openapi(
 		setRepos(project.id, repos);
 		announce(
 			generalOf(group.id),
-			`${c.var.caller.login} created the project **${project.name}**.`,
+			`${c.var.caller.login} created the project ${quoted(project.name)}.`,
 		);
 		return c.json(projectJson(project), 201);
 	},
@@ -763,7 +776,7 @@ api.openapi(
 		db.prepare("DELETE FROM project WHERE id = ?").run(project.id);
 		announce(
 			generalOf(project.group),
-			`${c.var.caller.login} deleted the project **${project.name}**, with its sessions.`,
+			`${c.var.caller.login} deleted the project ${quoted(project.name)}, with its sessions.`,
 		);
 		return c.body(null, 204);
 	},
@@ -817,7 +830,7 @@ api.openapi(
 			.run(me, person.id, new Date().toISOString()).changes;
 		const friends = areFriends(me, person.id);
 		if (friends) dmOf(me, person.id);
-		if (added)
+		if (added && (friends || firstAsk(me, person.id)))
 			announce(
 				generalOf(ownGroupOf(person.id)),
 				friends
