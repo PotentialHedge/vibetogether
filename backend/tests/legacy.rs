@@ -25,7 +25,18 @@ async fn the_accounts_and_machines_tokens_come_over_once() {
 
   let server = server_on(database.clone()).await;
   assert!(!dir.join("backend-legacy.db").exists());
-  assert!(dir.join("backend-legacy-imported.db").exists());
+  // The file kept holds no secret, nor its WAL.
+  let kept = std::fs::read(dir.join("backend-legacy-imported.db")).unwrap();
+  let wal = std::fs::read(dir.join("backend-legacy-imported.db-wal")).unwrap_or_default();
+  for secret in [
+    "AGDek2NG0aCyeRhK2TqlaSC58sWnEQ1F",
+    "pHv8UOJruhnH60k4ODn8kD27ECqo4HER",
+    "rJfmpSNATlAQ2TbEKKv2R8Tz3kZRykaX",
+    "gho_x",
+  ] {
+    let found = |bytes: &[u8]| bytes.windows(secret.len()).any(|w| w == secret.as_bytes());
+    assert!(!found(&kept) && !found(&wal), "{secret}");
+  }
 
   // A machine's token is an agent token of the same account now.
   let token = Client::new(&server.url, Some("AGDek2NG0aCyeRhK2TqlaSC58sWnEQ1F".into()));

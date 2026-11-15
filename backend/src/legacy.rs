@@ -4,9 +4,9 @@
 //! state starts empty.
 //!
 //! At start, a database of the old schema is set aside as `<name>-legacy.db`, a new one takes its
-//! place, and the import runs from it in one transaction. Once it is done, the file is renamed to
-//! `<name>-legacy-imported.db`, so that the import runs once, and a crash before then runs it
-//! again, adding nothing twice.
+//! place, and the import runs from it in one transaction. Once it is done, every secret is wiped
+//! from the file, and it is renamed to `<name>-legacy-imported.db`, so that the import runs once,
+//! and a crash before then runs it again, adding nothing twice.
 
 use std::path::{Path, PathBuf};
 
@@ -87,6 +87,9 @@ pub async fn import(pool: &SqlitePool, legacy: &Path) -> Result<(), String> {
     .await
     .map_err(|e| e.to_string())?;
   let (accounts, tokens) = imported.map_err(|e| format!("importing {}: {e}", legacy.display()))?;
+  scrub(legacy)
+    .await
+    .map_err(|e| format!("wiping the secrets of {}: {e}", legacy.display()))?;
   let done = sibling(legacy, "-imported");
   std::fs::rename(legacy, &done).map_err(|e| e.to_string())?;
   tracing::info!(
@@ -95,6 +98,47 @@ pub async fn import(pool: &SqlitePool, legacy: &Path) -> Result<(), String> {
     done.display()
   );
   Ok(())
+}
+
+/// What holds a secret in the old schema: its tokens, codes and keys, each wiped where its
+/// table is there.
+const SECRETS: [(&str, &str); 9] = [
+  ("login", "DELETE FROM login"),
+  ("verification", "DELETE FROM verification"),
+  ("deviceCode", r#"DELETE FROM "deviceCode""#),
+  ("oauthAccessToken", r#"DELETE FROM "oauthAccessToken""#),
+  ("oauthRefreshToken", r#"DELETE FROM "oauthRefreshToken""#),
+  ("otp_request", "DELETE FROM otp_request"),
+  ("invite", "DELETE FROM invite"),
+  (
+    "account",
+    r#"UPDATE account SET "accessToken" = NULL, "refreshToken" = NULL, "idToken" = NULL, password = NULL"#,
+  ),
+  (
+    "oauthClient",
+    r#"UPDATE "oauthClient" SET "clientSecret" = NULL"#,
+  ),
+];
+
+/// Wipes every secret from the imported database, so that the file kept holds none: no row or
+/// value of `SECRETS`, nor any page they were on, which `VACUUM` rewrites.
+async fn scrub(legacy: &Path) -> Result<(), sqlx::Error> {
+  let mut db =
+    SqliteConnection::connect_with(&SqliteConnectOptions::new().filename(legacy)).await?;
+  let tables: Vec<String> =
+    sqlx::query_scalar("SELECT name FROM sqlite_master WHERE type = 'table'")
+      .fetch_all(&mut db)
+      .await?;
+  for (table, wipe) in SECRETS {
+    if tables.iter().any(|t| t == table) {
+      sqlx::query(wipe).execute(&mut db).await?;
+    }
+  }
+  sqlx::query("VACUUM").execute(&mut db).await?;
+  sqlx::query("PRAGMA wal_checkpoint(TRUNCATE)")
+    .execute(&mut db)
+    .await?;
+  db.close().await
 }
 
 #[derive(sqlx::FromRow)]
