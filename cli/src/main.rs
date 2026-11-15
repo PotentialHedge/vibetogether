@@ -1,5 +1,7 @@
 //! `vibetogether`: Vibe Together's command line, one command per operation, over the client
-//! library.
+//! library, and the agent's inbox on its machine.
+
+mod inbox;
 
 use std::{
   fs,
@@ -21,7 +23,8 @@ use vibetogether_protocol::{
 /// sessions.
 ///
 /// Every command is one operation of the API, and prints its answer as JSON on stdout; a
-/// refusal's sentence goes to stderr. Exit codes: 0 done, 2 usage, 3 refused, 4 network.
+/// refusal's sentence goes to stderr. Exit codes: 0 done, 1 the inbox failed, 2 usage, 3
+/// refused, 4 network.
 ///
 /// The token is VIBETOGETHER_TOKEN, else the file ~/.config/vibetogether/token, which `login`
 /// writes. An agent token acts only for agents: a participant's command names its agent with
@@ -40,12 +43,27 @@ struct Cli {
   /// The agent to act as, by its id, such as a_k3x9q2mf; left out with a person token.
   #[arg(long, global = true, env = "VIBETOGETHER_AGENT")]
   agent: Option<String>,
+  /// The agent's inbox, by convention `~/.agents/inbox/<agent>/`.
+  #[arg(long, global = true, env = "AGENT_INBOX")]
+  inbox: Option<PathBuf>,
   #[command(subcommand)]
   command: Command,
 }
 
 #[derive(Subcommand)]
 enum Command {
+  /// The agent's inbox: a directory, made at first use, that Vibe Together delivers into, and
+  /// anything else on the machine may too. `new/` holds the items not yet taken in, `cur/` the
+  /// taken ones, `tmp/` the ones being written; the file `wake` is the doorbell, and the agent is
+  /// awake while a lock on the file `awake` is held. Each item is one file, named
+  /// `<time>.<sender>.<ext>`, with the time in UTC. Delivering is quiet: the agent sees the item
+  /// at its next step; ringing the bell also wakes an agent that is idle. Anything can deliver
+  /// without this command, by writing a file into `tmp/` and renaming it into `new/`, and ring
+  /// with `touch wake`.
+  Inbox {
+    #[command(subcommand)]
+    command: inbox::Command,
+  },
   /// Gets a token by an OTP, which the person approves at the link it prints, and writes it to
   /// the token file. It waits until the person decides, at most 15 minutes.
   Login {
@@ -266,6 +284,8 @@ enum Held {
 enum Exit {
   Usage(String),
   Failed(Error),
+  /// The inbox failed, such as a directory that can't be written.
+  Inbox(io::Error),
 }
 
 impl From<Error> for Exit {
@@ -413,6 +433,16 @@ async fn run(cli: Cli) -> Result<(), Exit> {
   let client = Client::new(&cli.server, token()).acting_as(cli.agent);
   let c = &client;
   match cli.command {
+    Command::Inbox { command } => {
+      let root = cli
+        .inbox
+        .ok_or_else(|| Exit::Usage("No inbox: set AGENT_INBOX or pass --inbox.".into()))?;
+      return match inbox::run(&vibetogether_inbox::Inbox::new(root), command, c).await {
+        Ok(()) => Ok(()),
+        Err(inbox::Failure::Refused(error)) => Err(error.into()),
+        Err(inbox::Failure::Inbox(error)) => Err(Exit::Inbox(error)),
+      };
+    }
     Command::Login {
       name,
       person,
@@ -532,6 +562,10 @@ async fn main() -> ExitCode {
     Err(Exit::Usage(message)) => {
       eprintln!("vibetogether: {message}");
       ExitCode::from(2)
+    }
+    Err(Exit::Inbox(error)) => {
+      eprintln!("vibetogether: {error}");
+      ExitCode::FAILURE
     }
     Err(Exit::Failed(error)) => {
       eprintln!("vibetogether: {error}");

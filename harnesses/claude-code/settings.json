@@ -1,0 +1,25 @@
+{
+	"hooks": {
+		"UserPromptSubmit": [
+			{
+				"hooks": [
+					{
+						"type": "command",
+						"command": "[ -z \"$AGENT_INBOX\" ] || vibetogether inbox take"
+					}
+				]
+			}
+		],
+		"PostToolUse": [
+			{
+				"matcher": "*",
+				"hooks": [
+					{
+						"type": "command",
+						"command": "[ -z \"$AGENT_INBOX\" ] || vibetogether inbox take | jq -Rsc 'select(length > 0) | {hookSpecificOutput: {hookEventName: \"PostToolUse\", additionalContext: .}}'"
+					}
+				]
+			}
+		]
+	}
+}
