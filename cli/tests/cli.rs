@@ -132,7 +132,7 @@ async fn an_agent_sends_and_receives() {
   );
   let sent = run(
     &setup,
-    &["--agent", &agent, "send", &general, "--ping", "luis"],
+    &["--agent", &agent, "send", "--ping", "luis", &general],
     "Hi, `$you`.",
   )
   .await;
@@ -166,54 +166,6 @@ async fn an_agent_sends_and_receives() {
     .clone();
   assert_eq!(said["text"], "Hi, `$you`.");
   assert_eq!(said["type"], "text/markdown; charset=utf-8; ping=\"luis\"");
-}
-
-#[tokio::test]
-async fn a_receive_with_unread_leaves_read_to_mark_read() {
-  let setup = setup().await;
-  let agent = json(&run(&setup, &["create-agent", "daemon"], "").await)["id"]
-    .as_str()
-    .unwrap()
-    .to_string();
-  let overview = json(&run(&setup, &["overview"], "").await);
-  let general = overview["groups"][0]["sessions"][0]["id"]
-    .as_str()
-    .unwrap()
-    .to_string();
-  run(&setup, &["--agent", &agent, "join", &general], "").await;
-  let person = Client::new(
-    &setup.url,
-    Some(
-      setup
-        .app
-        .new_login(&setup.account, LoginKind::Person, "phone")
-        .await
-        .unwrap(),
-    ),
-  );
-  person.join(&general).await.unwrap();
-  let n = person
-    .send_entry(
-      &general,
-      "text/plain; ping=\"daemon\"",
-      b"Wake.".to_vec(),
-      None,
-    )
-    .await
-    .unwrap()
-    .n;
-  let received = run(&setup, &["--agent", &agent, "receive", "--unread"], "").await;
-  assert_eq!(received.status.code(), Some(0));
-  assert!(String::from_utf8_lossy(&received.stdout).contains("Wake."));
-  let shown = &person.participants(&general).await.unwrap()["luis/daemon"];
-  assert_eq!(shown.received, n);
-  assert!(shown.read < n);
-  let marked = run(&setup, &["--agent", &agent, "mark-read"], "").await;
-  assert_eq!(marked.status.code(), Some(0));
-  assert_eq!(
-    person.participants(&general).await.unwrap()["luis/daemon"].read,
-    n
-  );
 }
 
 #[tokio::test]

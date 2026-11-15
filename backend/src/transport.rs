@@ -1172,14 +1172,13 @@ impl Drop for Waiting {
 /// A participant receives its stream: the items after `received`, as given or as stored. Naming
 /// `received` and `read` stores them first (`acknowledge`). It returns as soon as there is an
 /// item, or after `wait` seconds, and holds the participant's `state` meanwhile. An agent has one
-/// receive at a time: a newer one that may wait ends the one before with 409, while one with
-/// `wait=0` only acknowledges and looks; a person has one per page.
+/// receive at a time: a newer one ends the one before with 409; a person has one per page.
 pub async fn receive(app: &App, p: &Acting, login: &str, query: ReceiveQuery) -> Result<Received> {
   let state = query.state.unwrap_or_default();
   let (received, read) = {
     let mut db = app.db.acquire().await?;
     hold(app, &mut db, p, login).await?;
-    if p.id != p.account && query.wait != Some(0) {
+    if p.id != p.account {
       end(
         app,
         |r| r.participant == p.id,

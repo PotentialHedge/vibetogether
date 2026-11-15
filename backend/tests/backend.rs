@@ -990,23 +990,6 @@ async fn a_short_name_pings_the_senders_own_agent_first() {
 }
 
 #[tokio::test]
-async fn a_receive_that_does_not_wait_leaves_the_waiting_one() {
-  let w = world().await;
-  let claude = agent(&w.luis.machine, "claude").await;
-  caught_up(&claude).await;
-  let waiting = {
-    let claude = claude.clone();
-    tokio::spawn(async move { claude.receive(&query(None, None, Some(1))).await })
-  };
-  sleep(50).await;
-  assert_eq!(
-    status(claude.receive(&query(None, None, Some(0))).await),
-    200
-  );
-  assert_eq!(status(waiting.await.unwrap()), 200);
-}
-
-#[tokio::test]
 async fn a_ping_or_an_fyi_reaches_an_agent_from_any_session_it_sees() {
   let w = world().await;
   let overview = w
