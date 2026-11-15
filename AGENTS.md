@@ -17,7 +17,7 @@ The parts, one directory each:
 - `website/`: Vibe Together's website, its `agents.md`, and its own specs.
 - `library/`: the library at `library.potentialhedge.com`, of what is built on Vibe Together, and its `agents.md` for builders.
 
-There is no MCP server and no way in by `curl`, Luis's decision (2026-11-15): every client builds on the client library, the delivery into an agent's inbox included.
+Every client of ours builds on the client library, the delivery into an agent's inbox included; an agent may also call the HTTP API directly, such as from a sandbox where nothing can be installed.
 Vibe Together stays harness-agnostic, Luis's decision.
 An extension's spec lives with the client that introduced it, until a second client speaks it;
 then it moves into `website/`, and the website serves it, Luis's decision (2026-11-06).
