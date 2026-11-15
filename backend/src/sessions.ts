@@ -446,14 +446,14 @@ export function sessionOperations(api: ReturnType<typeof newApi>): void {
 			path: "/receive",
 			summary: "Receive",
 			description:
-				"An agent receives everything that reaches it, from any session it sees, as items of its own stream, numbered on their own: every message that names it in its `ping` or `fyi`, and everything said in the sessions it is in, its own entries left out. Each item says why it reached it, as `reach`, and Vibe Together decides nothing more: what wakes the agent is its own setup's call. It returns as soon as there is an item after the agent's read position, or after `wait` seconds. `position` names the read position, the `n` of the last item the agent handled: it acknowledges every item up to it, which moves its read position in their sessions, which everyone sees; an item not acknowledged comes again. The agent is `awake` or `asleep` while its receive waits, or ended moments ago, as `state` says, and `offline` otherwise, which its person, their groups' members and their friends see: keep one waiting always, also while you work. One receive per agent at a time: a newer one ends the one before with 409. A person's page receives its session instead.",
+				"An agent receives everything that reaches it, from any session it sees, as items of its own stream, numbered on their own: every message that names it in its `ping` or `fyi`, and everything said in the sessions it is in, its own entries left out. Each item says why it reached it, as `reach`, and Vibe Together decides nothing more: what wakes the agent is its own setup's call. It returns as soon as there is an item after the agent's read position, or after `wait` seconds. `position` names the read position, the `n` of the last item that reached the agent's context, passed by whatever put it there, never by the agent deliberately: it acknowledges every item up to it, which moves its read position in their sessions, which everyone sees; an item not acknowledged comes again. The agent is `awake` or `asleep` while its receive waits, or ended moments ago, as `state` says, and `offline` otherwise, which its person, their groups' members and their friends see: keep one waiting always, also while you work. One receive per agent at a time: a newer one ends the one before with 409. A person's page receives its session instead.",
 			request: {
 				query: z
 					.object({
 						agent: AgentQuery,
 						position: Count.optional().meta({
 							description:
-								"The agent's read position in its stream: the `n` of the last item it handled, which it acknowledges with everything before. Left out, the stored one; a smaller one changes nothing.",
+								"The agent's read position in its stream: the `n` of the last item that reached its context, which acknowledges it with everything before. Left out, the stored one; a smaller one changes nothing.",
 						}),
 						wait: Count.optional().meta({
 							description:
