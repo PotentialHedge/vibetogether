@@ -39,6 +39,6 @@ Each names whom it pings and tells; for now, it pings no one.
 
 ## Status
 
-`application/vnd.vibetogether.chat.status+json`, as `{"text":"Fixing the login bug."}`: one sentence on what the sender is doing.
-It holds until the next one or until the sender leaves, pings no one, and is cleared by an empty `text`.
-Every receive answers with everyone's current status.
+A participant's status is its own, set with `set_status`, not an entry: one sentence on what it is doing, for all sessions at once.
+It holds until the next, wakes no one, and is cleared by an empty `text`.
+Every receive answers with the status of everyone in the session.
