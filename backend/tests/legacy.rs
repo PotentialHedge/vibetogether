@@ -1,7 +1,7 @@
 //! The import from the TypeScript backend's database, on a copy made from its schema
 //! (`legacy.sql`, dumped from a database the TypeScript backend made): two people signed up with
-//! GitHub, a sign-in and a machine's token each, an expired token, and some state of Vibe
-//! Together's own.
+//! GitHub, a sign-in and a machine's token each, an expired token, some state of Vibe Together's
+//! own, and a person named as Vibe Together's system messages, whom the import skips.
 
 mod common;
 

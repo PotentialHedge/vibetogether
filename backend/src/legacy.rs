@@ -13,6 +13,8 @@ use std::path::{Path, PathBuf};
 use jiff::Timestamp;
 use sqlx::{Connection, SqliteConnection, SqlitePool, sqlite::SqliteConnectOptions};
 
+use vibetogether_protocol::SYSTEM_NAME;
+
 use crate::{auth, db};
 
 fn sibling(path: &Path, suffix: &str) -> PathBuf {
@@ -126,6 +128,12 @@ async fn copy(conn: &mut SqliteConnection) -> Result<(usize, usize), String> {
     let Ok(github) = person.github.parse::<i64>() else {
       continue;
     };
+    if person.login.eq_ignore_ascii_case(SYSTEM_NAME) {
+      tracing::warn!(
+        "skipped the account named {SYSTEM_NAME}, the name system messages are sent under"
+      );
+      continue;
+    }
     let account = auth::account_of(
       &mut tx,
       github,

@@ -1658,3 +1658,17 @@ async fn a_payload_past_the_most_is_refused() {
     .await
     .unwrap();
 }
+
+#[tokio::test]
+async fn adding_a_member_keeps_to_their_limit_of_groups() {
+  let w = world().await;
+  // Ben is in Potential Hedge already.
+  for i in 0..19 {
+    w.ben.browser.create_group(&format!("g{i}")).await.unwrap();
+  }
+  let group = w.luis.browser.create_group("one more").await.unwrap();
+  assert_eq!(
+    status(w.luis.browser.add_member(&group.id, "ben").await),
+    403
+  );
+}

@@ -317,6 +317,11 @@ pub async fn add_member(
       "Only a friend of yours becomes a member through you: an invite to the group (create_invite with group) makes them both.",
     ));
   }
+  if groups_besides_own(&mut db, &person).await? >= MAX_GROUPS {
+    return Err(Refusal::forbidden(format!(
+      "{login} is in {MAX_GROUPS} groups besides their own: they leave one first."
+    )));
+  }
   if db::count(
     &mut db,
     r#"SELECT count(*) FROM group_member WHERE "group" = ?"#,
