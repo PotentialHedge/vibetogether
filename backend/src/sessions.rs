@@ -13,8 +13,8 @@ use axum::{
 use serde_json::json;
 use sqlx::Connection;
 use vibetogether_protocol::{
-  AgentQuery, CreateSession, Joined, Left, Log, LogQuery, MAX_PAYLOAD, MAX_WAIT, NameBody,
-  Participant, ReceiveQuery, Received, SendQuery, Sent, Session, SessionProject,
+  CreateSession, Joined, Left, Log, LogQuery, MAX_PAYLOAD, MAX_WAIT, NameBody, Participant,
+  ReceiveQuery, Received, SendQuery, Sent, Session, SessionProject,
 };
 
 use crate::{
@@ -352,11 +352,10 @@ pub async fn join(
   State(app): State<App>,
   caller: Caller,
   Path(id): Path<String>,
-  Query(query): Query<AgentQuery>,
 ) -> Result<Json<Joined>> {
   let mut db = app.db.acquire().await?;
   let session = accessible(&mut db, &id, &caller).await?;
-  let p = transport::acting(&mut db, &caller, query.agent.as_deref()).await?;
+  let p = transport::acting(&caller);
   let n = transport::join(&app, &mut db, &p, &session.id, &caller.login).await?;
   Ok(Json(Joined {
     n: n as u64,
@@ -370,11 +369,10 @@ pub async fn leave(
   State(app): State<App>,
   caller: Caller,
   Path(id): Path<String>,
-  Query(query): Query<AgentQuery>,
 ) -> Result<Json<Left>> {
   let mut db = app.db.acquire().await?;
   let session = accessible(&mut db, &id, &caller).await?;
-  let p = transport::acting(&mut db, &caller, query.agent.as_deref()).await?;
+  let p = transport::acting(&caller);
   let n = transport::leave(&app, &mut db, &p, &session.id, &caller.login).await?;
   Ok(Json(Left { n: n as u64 }))
 }
@@ -402,7 +400,7 @@ pub async fn send(
     .unwrap_or("text/plain; charset=utf-8");
   let mut db = app.db.acquire().await?;
   let session = accessible(&mut db, &id, &caller).await?;
-  let p = transport::acting(&mut db, &caller, query.agent.as_deref()).await?;
+  let p = transport::acting(&caller);
   let sent = transport::send(
     &app,
     &mut db,
@@ -505,10 +503,7 @@ pub async fn receive(
   Query(query): Query<ReceiveQuery>,
 ) -> Result<Json<Received>> {
   checked_wait(query.wait)?;
-  let p = {
-    let mut db = app.db.acquire().await?;
-    transport::acting(&mut db, &caller, query.agent.as_deref()).await?
-  };
+  let p = transport::acting(&caller);
   Ok(Json(
     transport::receive(&app, &p, &caller.login, query).await?,
   ))

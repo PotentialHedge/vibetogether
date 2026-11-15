@@ -62,7 +62,7 @@ async fn vibe_together_delivers_into_the_inbox() {
   let machine = Client::new(&setup.url, Some(setup.token.clone()));
   let agent = machine.create_agent("scout").await.unwrap().id;
   let scout = machine.clone().acting_as(Some(agent.clone()));
-  let general = machine.overview(&Default::default()).await.unwrap().groups[0].sessions[0]
+  let general = scout.overview(&Default::default()).await.unwrap().groups[0].sessions[0]
     .id
     .clone();
   scout.join(&general).await.unwrap();

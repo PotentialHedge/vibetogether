@@ -18,7 +18,9 @@ pub struct Setup {
   /// The home of every run, so that no run reads the machine's own token.
   pub home: PathBuf,
   pub account: String,
+  /// An agent token, which `run` acts with as the agent `laptop`.
   pub token: String,
+  pub agent: String,
 }
 
 pub async fn setup() -> Setup {
@@ -46,12 +48,18 @@ pub async fn setup() -> Setup {
     .new_login(&account, LoginKind::Agent, "laptop")
     .await
     .unwrap();
+  let agent = vibetogether_client::Client::new(&url, Some(token.clone()))
+    .create_agent("laptop")
+    .await
+    .unwrap()
+    .id;
   Setup {
     url,
     app,
     home,
     account,
     token,
+    agent,
   }
 }
 
@@ -74,6 +82,7 @@ pub fn command(home: &Path, url: &str, token: Option<&str>, args: &[&str]) -> Co
 
 pub async fn run(setup: &Setup, args: &[&str], stdin: &str) -> Output {
   let mut child = command(&setup.home, &setup.url, Some(&setup.token), args)
+    .env("VIBETOGETHER_AGENT", &setup.agent)
     .spawn()
     .unwrap();
   child

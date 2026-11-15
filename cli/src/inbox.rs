@@ -161,7 +161,6 @@ async fn receive(inbox: &Inbox, client: &Client) -> Result<(), Failure> {
     };
     if issue {
       let query = ReceiveQuery {
-        agent: None,
         received: stream.received,
         read: stream.read,
         wait: Some(WAIT),

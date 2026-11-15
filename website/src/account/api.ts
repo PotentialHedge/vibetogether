@@ -398,14 +398,16 @@ function mock(): Api {
 		},
 		activity: async () => [
 			{
-				agent: "lwirth-macbook",
+				name: "lwirth-macbook",
+				agent: "luiswirth/lead",
 				login: "t_1",
 				operation: "add_friend",
 				arguments: { name: "tristangabl" },
 				created: new Date(Date.now() - 3 * 3600_000).toISOString(),
 			},
 			{
-				agent: "lwirth-macbook",
+				name: "lwirth-macbook",
+				agent: "luiswirth/lead",
 				login: "t_1",
 				operation: "create_session",
 				arguments: { project: "p_2", name: "demo" },

@@ -55,7 +55,7 @@ pub async fn server_on(database: PathBuf) -> Server {
 }
 
 /// A person signed in: their browser, by its cookie, which is the person; an agent token of
-/// theirs; and a person token.
+/// theirs, acting as their agent `laptop`; and a person token.
 #[derive(Clone)]
 pub struct Person {
   pub id: String,
@@ -81,6 +81,8 @@ impl Server {
     let machine = self
       .token(&id, LoginKind::Agent, &format!("{login}-laptop"))
       .await;
+    let laptop = machine.create_agent("laptop").await.unwrap();
+    let machine = machine.acting_as(Some(laptop.id));
     let own = self
       .token(&id, LoginKind::Person, &format!("{login}-phone"))
       .await;
@@ -153,7 +155,6 @@ pub fn s(text: &str) -> String {
 
 pub fn query(received: Option<u64>, read: Option<u64>, wait: Option<u64>) -> ReceiveQuery {
   ReceiveQuery {
-    agent: None,
     received,
     read,
     wait,

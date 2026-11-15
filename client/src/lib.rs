@@ -4,7 +4,7 @@
 //!
 //! A client acts as one participant: the person, by the browser's cookie or a person token, or
 //! one of their agents, by an agent token and the agent's id, which the client names in every
-//! request a participant makes.
+//! request.
 
 #[cfg(target_arch = "wasm32")]
 mod web;
@@ -144,14 +144,10 @@ impl Client {
     if let Some(token) = &self.token {
       request = request.bearer_auth(token);
     }
-    Ok(request)
-  }
-
-  /// The agent this client acts as, as the query of a participant's request.
-  fn agent_query(&self) -> AgentQuery {
-    AgentQuery {
-      agent: self.agent.clone(),
+    if let Some(agent) = &self.agent {
+      request = request.query(&[("agent", agent)]);
     }
+    Ok(request)
   }
 
   /// The answer, where it is a success of this client's version of the API.
@@ -321,10 +317,9 @@ impl Client {
 
   /// Sets the status of the participant this client acts as; empty clears it.
   pub async fn set_status(&self, text: &str) -> Result<()> {
-    let request = self
-      .request(Method::PUT, &["status"])?
-      .query(&self.agent_query());
-    Self::send(request.json(&StatusBody { text: text.into() })).await
+    self
+      .json(Method::PUT, &["status"], &StatusBody { text: text.into() })
+      .await
   }
 
   // Sessions.
@@ -364,21 +359,15 @@ impl Client {
   }
 
   pub async fn join(&self, id: &str) -> Result<Joined> {
-    Self::send(
-      self
-        .request(Method::POST, &["sessions", id, "participants"])?
-        .query(&self.agent_query()),
-    )
-    .await
+    self
+      .bare(Method::POST, &["sessions", id, "participants"])
+      .await
   }
 
   pub async fn leave(&self, id: &str) -> Result<Left> {
-    Self::send(
-      self
-        .request(Method::DELETE, &["sessions", id, "participants"])?
-        .query(&self.agent_query()),
-    )
-    .await
+    self
+      .bare(Method::DELETE, &["sessions", id, "participants"])
+      .await
   }
 
   /// Sends `payload` of type `ty`, such as a message of `text/markdown; ping="ben"`, named as a
@@ -391,7 +380,6 @@ impl Client {
     filename: Option<&str>,
   ) -> Result<Sent> {
     let query = SendQuery {
-      agent: self.agent.clone(),
       filename: filename.map(str::to_string),
     };
     let request = self
@@ -435,14 +423,9 @@ impl Client {
     self.query(&["sessions", id, "log"], query).await
   }
 
-  /// Receives the stream of the participant this client acts as; the query's `agent` is the
-  /// client's.
+  /// Receives the stream of the participant this client acts as.
   pub async fn receive(&self, query: &ReceiveQuery) -> Result<Received> {
-    let query = ReceiveQuery {
-      agent: self.agent.clone(),
-      ..query.clone()
-    };
-    self.query(&["receive"], &query).await
+    self.query(&["receive"], query).await
   }
 
   // Friends.

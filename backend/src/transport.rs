@@ -16,9 +16,9 @@ use axum::http::StatusCode;
 use sqlx::Connection;
 use tokio::{sync::oneshot, time::Instant};
 use vibetogether_protocol::{
-  Entry, Item, JOIN_TYPE, LEAVE_TYPE, LogQuery, LoginKind, MAX_NAMED, MAX_PAYLOAD, Named,
-  Participant, Presence, Reach, ReceiveQuery, Received, SYSTEM_NAME, Sent, State, is_message,
-  is_name_part, names_of,
+  Entry, Item, JOIN_TYPE, LEAVE_TYPE, LogQuery, MAX_NAMED, MAX_PAYLOAD, Named, Participant,
+  Presence, Reach, ReceiveQuery, Received, SYSTEM_NAME, Sent, State, is_message, is_name_part,
+  names_of,
 };
 
 use crate::{
@@ -54,40 +54,20 @@ pub struct Acting {
   pub name: String,
 }
 
-/// The participant a request acts as: a browser or a person token is the person, and an agent
-/// token one of their agents, by its id.
-pub async fn acting(db: &mut Db, caller: &Caller, agent: Option<&str>) -> Result<Acting> {
-  if caller.kind != LoginKind::Agent {
-    return match agent {
-      Some(_) => Err(Refusal::bad(
-        "The person takes part as themselves, with no agent.",
-      )),
-      None => Ok(Acting {
-        account: caller.account.clone(),
-        id: caller.account.clone(),
-        name: caller.person.clone(),
-      }),
-    };
+/// The participant a request acts as: the agent an agent token names, else the person.
+pub fn acting(caller: &Caller) -> Acting {
+  match &caller.agent {
+    Some(agent) => Acting {
+      account: caller.account.clone(),
+      id: agent.id.clone(),
+      name: agent.name.clone(),
+    },
+    None => Acting {
+      account: caller.account.clone(),
+      id: caller.account.clone(),
+      name: caller.person.clone(),
+    },
   }
-  let Some(agent) = agent else {
-    return Err(Refusal::bad(
-      "An agent token acts only for agents: name yours by its id with agent=<id>, such as agent=a_k3x9q2mf, which create_agent gives.",
-    ));
-  };
-  let name: Option<String> =
-    sqlx::query_scalar("SELECT name FROM agent WHERE id = ? AND account = ?")
-      .bind(agent)
-      .bind(&caller.account)
-      .fetch_optional(db)
-      .await?;
-  let name = name.ok_or_else(|| {
-    Refusal::not_found("No such agent of this account: create_agent creates one.")
-  })?;
-  Ok(Acting {
-    account: caller.account.clone(),
-    id: agent.to_string(),
-    name: format!("{}/{name}", caller.person),
-  })
 }
 
 /// The participant a name stands for now: `login` the person, `login/name` their agent of that

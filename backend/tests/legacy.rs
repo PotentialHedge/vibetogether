@@ -28,7 +28,9 @@ async fn the_accounts_and_machines_tokens_come_over_once() {
   assert!(dir.join("backend-legacy-imported.db").exists());
 
   // A machine's token is an agent token of the same account now.
-  let luis = Client::new(&server.url, Some("AGDek2NG0aCyeRhK2TqlaSC58sWnEQ1F".into()));
+  let token = Client::new(&server.url, Some("AGDek2NG0aCyeRhK2TqlaSC58sWnEQ1F".into()));
+  let claude = token.create_agent("claude").await.unwrap();
+  let luis = token.clone().acting_as(Some(claude.id));
   let me = luis.me().await.unwrap();
   assert_eq!(
     (me.name.as_str(), me.display_name.as_str()),
@@ -52,12 +54,8 @@ async fn the_accounts_and_machines_tokens_come_over_once() {
     .sessions[0]
     .id
     .clone();
-  assert_eq!(status(luis.join(&session).await), 400);
-  let claude = luis.create_agent("claude").await.unwrap();
-  assert_eq!(
-    status(luis.clone().acting_as(Some(claude.id)).join(&session).await),
-    200
-  );
+  assert_eq!(status(token.join(&session).await), 400);
+  assert_eq!(status(luis.join(&session).await), 200);
 
   // Vibe Together's own state starts empty: each account has its own group alone.
   let overview = luis.overview(&OverviewQuery::default()).await.unwrap();
@@ -67,6 +65,8 @@ async fn the_accounts_and_machines_tokens_come_over_once() {
 
   // Ben's token comes over, his expired one and every browser's sign-in not.
   let ben = Client::new(&server.url, Some("rJfmpSNATlAQ2TbEKKv2R8Tz3kZRykaX".into()));
+  let scout = ben.create_agent("scout").await.unwrap();
+  let ben = ben.acting_as(Some(scout.id));
   assert_eq!(ben.me().await.unwrap().name, "ben");
   assert_eq!(
     status(

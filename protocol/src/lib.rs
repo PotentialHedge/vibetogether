@@ -3,9 +3,9 @@
 //! only way to call it.
 //!
 //! A request is made by a login: the person's browser by its cookie, or a token as
-//! `Authorization: Bearer <token>`. An agent token acts only for the person's agents, and names
-//! the one it acts as with `agent=<id>` wherever a participant acts; a browser or a person token
-//! is the person. A refusal is a status with one sentence as plain text.
+//! `Authorization: Bearer <token>`. An agent token acts only for the person's agents, and every
+//! request of it names the one it acts as with `agent=<id>`, but the one that creates it; a
+//! browser or a person token is the person. A refusal is a status with one sentence as plain text.
 
 mod mime;
 mod types;

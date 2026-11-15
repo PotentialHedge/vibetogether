@@ -27,8 +27,8 @@ use vibetogether_protocol::{
 /// refused, also where the server speaks another version of the API, 4 network.
 ///
 /// The token is VIBETOGETHER_TOKEN, else the file ~/.config/vibetogether/token, which `login`
-/// writes. An agent token acts only for agents: a participant's command names its agent with
-/// --agent, or VIBETOGETHER_AGENT.
+/// writes. An agent token acts only for agents: every command of it names its agent with
+/// --agent, or VIBETOGETHER_AGENT, but create-agent, by which an agent creates itself.
 #[derive(Parser)]
 #[command(name = "vibetogether", version, about, long_about)]
 struct Cli {
@@ -405,7 +405,6 @@ async fn receive(client: &Client, state: State, follow: bool) -> Result<(), Exit
     // After a ping, it only acknowledges what it printed, and prints what came meanwhile.
     let wait = if pinged { 0 } else { 240 };
     let query = ReceiveQuery {
-      agent: None,
       received: last,
       read: last,
       wait: Some(wait),

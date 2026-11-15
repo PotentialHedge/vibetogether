@@ -5,8 +5,9 @@ use axum::{
   http::{Method, StatusCode, header, request::Parts},
 };
 use axum_extra::extract::CookieJar;
+use serde::Deserialize;
 use serde_json::Value;
-use vibetogether_protocol::LoginKind;
+use vibetogether_protocol::{LoginKind, Named};
 
 use crate::{
   App, auth,
@@ -26,6 +27,14 @@ pub struct Caller {
   pub kind: LoginKind,
   /// The login's name, as its OTP gave it.
   pub name: String,
+  /// The agent an agent token's request names, by its id, with its name as `<account>/<agent>`.
+  pub agent: Option<Named>,
+}
+
+/// The agent a request names, as `agent=<id>`.
+#[derive(Deserialize)]
+struct AgentParam {
+  agent: Option<String>,
 }
 
 /// The name of the cookie a browser's sign-in is held in: over HTTPS `__Host-`, Secure and for
@@ -63,8 +72,9 @@ pub fn kind_of(kind: &str) -> LoginKind {
 }
 
 /// The login a request is made by, while it lasts: a bearer token is a token's, a cookie a
-/// browser's. A browser's sign-in lasts 90 days from when it was last used.
-async fn caller_of(app: &App, parts: &Parts) -> Result<Option<Caller>> {
+/// browser's. A browser's sign-in lasts 90 days from when it was last used. An agent token's
+/// request names its agent with `agent=<id>`, unless `unnamed`; the person's names none.
+async fn caller_of(app: &App, parts: &Parts, unnamed: bool) -> Result<Option<Caller>> {
   let bearer = parts
     .headers
     .get(header::AUTHORIZATION)
@@ -116,25 +126,76 @@ async fn caller_of(app: &App, parts: &Parts) -> Result<Option<Caller>> {
       .execute(&mut *db)
       .await?;
   }
+  let named = axum::extract::Query::<AgentParam>::try_from_uri(&parts.uri)
+    .map_err(|e| Refusal::bad(e.body_text()))?
+    .0
+    .agent;
+  let agent = match (kind, named) {
+    (LoginKind::Agent, Some(id)) => {
+      let name: Option<String> =
+        sqlx::query_scalar("SELECT name FROM agent WHERE id = ? AND account = ?")
+          .bind(&id)
+          .bind(&row.account)
+          .fetch_optional(&mut *db)
+          .await?;
+      let name = name.ok_or_else(|| {
+        Refusal::not_found("No such agent of this account: create_agent creates one.")
+      })?;
+      Some(Named {
+        id,
+        name: format!("{}/{name}", row.person),
+      })
+    }
+    (LoginKind::Agent, None) if unnamed => None,
+    (LoginKind::Agent, None) => {
+      return Err(Refusal::bad(
+        "An agent token acts only for agents: name yours by its id with agent=<id>, such as agent=a_k3x9q2mf, which create_agent gives.",
+      ));
+    }
+    (_, Some(_)) => {
+      return Err(Refusal::bad(
+        "The person acts as themselves, with no agent.",
+      ));
+    }
+    (_, None) => None,
+  };
   Ok(Some(Caller {
     account: row.account,
     person: row.person,
     login: row.id,
     kind,
     name: row.name,
+    agent,
   }))
+}
+
+fn unauthorized() -> Refusal {
+  Refusal::new(
+    StatusCode::UNAUTHORIZED,
+    "Sign in on the website, or send a token as Authorization: Bearer <token>.",
+  )
 }
 
 impl FromRequestParts<App> for Caller {
   type Rejection = Refusal;
 
   async fn from_request_parts(parts: &mut Parts, app: &App) -> Result<Self> {
-    caller_of(app, parts).await?.ok_or_else(|| {
-      Refusal::new(
-        StatusCode::UNAUTHORIZED,
-        "Sign in on the website, or send a token as Authorization: Bearer <token>.",
-      )
-    })
+    caller_of(app, parts, false).await?.ok_or_else(unauthorized)
+  }
+}
+
+/// A caller whose agent token may name no agent: only to create one, which it then names.
+pub struct Unnamed(pub Caller);
+
+impl FromRequestParts<App> for Unnamed {
+  type Rejection = Refusal;
+
+  async fn from_request_parts(parts: &mut Parts, app: &App) -> Result<Self> {
+    Ok(Unnamed(
+      caller_of(app, parts, true)
+        .await?
+        .ok_or_else(unauthorized)?,
+    ))
   }
 }
 
@@ -142,7 +203,7 @@ impl OptionalFromRequestParts<App> for Caller {
   type Rejection = Refusal;
 
   async fn from_request_parts(parts: &mut Parts, app: &App) -> Result<Option<Self>> {
-    caller_of(app, parts).await
+    caller_of(app, parts, false).await
   }
 }
 
@@ -194,8 +255,8 @@ impl Caller {
   }
 
   /// Records a change a token made to the account, for its person to see: the operation and its
-  /// arguments. The person, in the browser, is not recorded, nor is what is said in a session,
-  /// which its log holds.
+  /// arguments, and the agent that made it. The person, in the browser, is not recorded, nor is
+  /// what is said in a session, which its log holds.
   pub async fn record(&self, db: &mut Db, operation: &str, arguments: Value) -> Result<()> {
     if self.kind == LoginKind::Browser {
       return Ok(());
@@ -203,11 +264,12 @@ impl Caller {
     let mut arguments = arguments.to_string();
     arguments.truncate(arguments.floor_char_boundary(2000));
     sqlx::query(
-      "INSERT INTO activity (account, login, name, operation, arguments, created) VALUES (?, ?, ?, ?, ?, ?)",
+      "INSERT INTO activity (account, login, name, agent, operation, arguments, created) VALUES (?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(&self.account)
     .bind(&self.login)
     .bind(&self.name)
+    .bind(self.agent.as_ref().map(|a| &a.id))
     .bind(operation)
     .bind(arguments)
     .bind(db::now())

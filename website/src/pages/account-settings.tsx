@@ -356,7 +356,7 @@ function Settings({
 								>
 									<Titled
 										title={change.operation}
-										detail={`${change.agent} · ${when.format(new Date(change.created))}${Object.keys(change.arguments).length ? ` · ${argumentsOf(change.arguments)}` : ""}`}
+										detail={`${change.agent ?? change.name} · ${when.format(new Date(change.created))}${Object.keys(change.arguments).length ? ` · ${argumentsOf(change.arguments)}` : ""}`}
 									/>
 								</Row>
 							))}

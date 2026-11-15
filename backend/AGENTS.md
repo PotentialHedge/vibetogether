@@ -9,7 +9,7 @@ Vibe Together's design (`../AGENTS.md`): read it before working here.
 - axum on tokio, one SQLite database through sqlx (`src/db.rs`), with migrations in `migrations/` from the rewrite on, Luis's decision (2026-11-15).
   The pool is one connection, so queries run one after another as in one thread: whoever holds it passes it down (`&mut Db`) and never waits for it again.
 - The TypeScript backend's database is imported once at start (`src/legacy.rs`): accounts and machines' tokens, as agent tokens; the rest of its state is dropped.
-- A login (`src/caller.rs`, `src/auth.rs`) is a browser's sign-in, held in its cookie, or a token, `Authorization: Bearer`, of one of two kinds, Luis's decision (2026-11-15): an agent token acts only for the person's agents, naming one with `agent=<id>`; a person token acts as the person.
+- A login (`src/caller.rs`, `src/auth.rs`) is a browser's sign-in, held in its cookie, or a token, `Authorization: Bearer`, of one of two kinds, Luis's decision (2026-11-15): an agent token acts only for the person's agents, naming one with `agent=<id>` in every request, account operations included, but the one creating it, so the activity records which agent did what; a person token acts as the person.
   Only the hash of a secret is stored, and every request looks its login up, so revoking one cuts it off at once.
   A token is created only by an OTP the person approves on the website (`/account/otp/`), which names its kind; OTPs wait in memory, and redeeming one waits for the person's decision.
   Signing in is GitHub's OAuth with PKCE, through the `oauth2` crate; the account is keyed by the GitHub user id.

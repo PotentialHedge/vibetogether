@@ -173,7 +173,6 @@ wire! {
   }
 
   #[derive(Default)]
-  #[serde(deny_unknown_fields)]
   pub struct OverviewQuery {
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub version: Option<String>,
@@ -186,7 +185,10 @@ wire! {
     /// The id of the login that made it.
     pub login: String,
     /// The login's name, such as the machine's.
-    pub agent: String,
+    pub name: String,
+    /// The agent an agent token acted as, by its name now, `<account>/<agent>`.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub agent: Option<String>,
     /// The operation, such as `add_friend`.
     pub operation: String,
     #[cfg_attr(feature = "tsify", tsify(type = "Record<string, unknown>"))]
@@ -259,14 +261,6 @@ wire! {
     pub text: String,
   }
 
-  /// The agent a request acts as, for a token; left out by the person.
-  #[derive(Default)]
-  #[serde(deny_unknown_fields)]
-  pub struct AgentQuery {
-    #[serde(skip_serializing_if = "Option::is_none", default)]
-    pub agent: Option<String>,
-  }
-
   /// An entry of a session's log.
   #[serde(rename_all = "camelCase")]
   pub struct Entry {
@@ -318,7 +312,6 @@ wire! {
   }
 
   #[derive(Default)]
-  #[serde(deny_unknown_fields)]
   pub struct LogQuery {
     /// Reads after this entry; from the start where left out.
     #[serde(skip_serializing_if = "Option::is_none", default)]
@@ -359,10 +352,7 @@ wire! {
   }
 
   #[derive(Default)]
-  #[serde(deny_unknown_fields)]
   pub struct ReceiveQuery {
-    #[serde(skip_serializing_if = "Option::is_none", default)]
-    pub agent: Option<String>,
     /// The last item that reached the participant's side; the stored one where left out.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub received: Option<u64>,
@@ -388,10 +378,7 @@ wire! {
   }
 
   #[derive(Default)]
-  #[serde(deny_unknown_fields)]
   pub struct SendQuery {
-    #[serde(skip_serializing_if = "Option::is_none", default)]
-    pub agent: Option<String>,
     /// Names the payload as a file.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub filename: Option<String>,

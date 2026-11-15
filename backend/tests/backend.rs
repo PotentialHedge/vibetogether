@@ -103,7 +103,11 @@ async fn an_agent_token_names_its_agent_and_a_person_is_themselves() {
   let claude = agent(&w.luis.machine, "claude").await;
   let ben = agent(&w.ben.machine, "claude").await;
   assert!(id(&claude).starts_with("a_") && id(&claude).len() == 10);
-  assert_eq!(status(w.luis.machine.join(&w.session.id).await), 400);
+  // An agent token names its agent in every request, but the one that creates it.
+  let unnamed = w.luis.machine.clone().acting_as(None);
+  assert_eq!(status(unnamed.join(&w.session.id).await), 400);
+  assert_eq!(status(unnamed.me().await), 400);
+  assert_eq!(status(unnamed.create_group("x").await), 400);
   // An agent is created explicitly: its name, or an id of another account, is no agent.
   let named = w.luis.machine.clone().acting_as(Some(s("claude")));
   assert_eq!(status(named.join(&w.session.id).await), 404);
@@ -275,7 +279,14 @@ async fn the_person_receives_their_stream_and_an_agent_token_its_agents() {
     400
   );
   assert_eq!(
-    status(w.luis.machine.receive(&query(None, None, Some(0))).await),
+    status(
+      w.luis
+        .machine
+        .clone()
+        .acting_as(None)
+        .receive(&query(None, None, Some(0)))
+        .await
+    ),
     400
   );
   assert_eq!(
@@ -328,7 +339,7 @@ async fn a_member_observes_the_log_without_joining_and_fetches_payloads() {
     .bearer_auth(
       w.server
         .app
-        .new_login(&w.luis.id, LoginKind::Agent, "raw")
+        .new_login(&w.luis.id, LoginKind::Person, "raw")
         .await
         .unwrap(),
     )
@@ -529,12 +540,15 @@ async fn a_tokens_changes_show_in_the_activity_its_sends_dont() {
   claude.join(&w.session.id).await.unwrap();
   send(&claude, &w.session.id, "hi", "text/plain").await;
   let activity = w.luis.browser.activity().await.unwrap();
+  assert!(activity.iter().any(|a| a.operation == "add_group_member"
+    && a.name == "luis-laptop"
+    && a.agent.as_deref() == Some("luis/laptop")));
+  // An agent that creates itself, naming none yet, is recorded as itself.
   assert!(
     activity
       .iter()
-      .any(|a| a.operation == "add_group_member" && a.agent == "luis-laptop")
+      .any(|a| a.operation == "create_agent" && a.agent.as_deref() == Some("luis/laptop"))
   );
-  assert!(activity.iter().any(|a| a.operation == "create_agent"));
   assert!(
     !activity
       .iter()

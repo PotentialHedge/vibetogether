@@ -6,13 +6,13 @@ use std::collections::HashSet;
 use axum::{Json, extract::State, http::StatusCode};
 use serde_json::{Value, json};
 use vibetogether_protocol::{
-  Account, Activity, Agent, AgentQuery, GroupOverview, MAX_WAIT, NameBody, Named, Overview,
-  OverviewQuery, Presence, ProjectOverview, Reachable, StatusBody, is_name_part,
+  Account, Activity, Agent, GroupOverview, MAX_WAIT, NameBody, Named, Overview, OverviewQuery,
+  Presence, ProjectOverview, Reachable, StatusBody, is_name_part,
 };
 
 use crate::{
   App,
-  caller::Caller,
+  caller::{Caller, Unnamed},
   changes::version_of,
   db::{self, Db, session_for},
   error::{Refusal, Result, is_taken},
@@ -171,15 +171,20 @@ pub async fn overview(
 struct ActivityRow {
   login: String,
   name: String,
+  agent: Option<String>,
   operation: String,
   arguments: String,
   created: String,
 }
 
-/// What the account's tokens changed in it, newest first, at most the last 200.
+/// What the account's tokens changed in it, newest first, at most the last 200, each with the
+/// agent that made it by its name now.
 pub async fn activity(State(app): State<App>, caller: Caller) -> Result<Json<Vec<Activity>>> {
   let rows: Vec<ActivityRow> = sqlx::query_as(
-    "SELECT login, name, operation, arguments, created FROM activity WHERE account = ? ORDER BY id DESC LIMIT 200",
+    "SELECT v.login, v.name, CASE WHEN v.agent IS NULL THEN NULL ELSE a.login || '/' || coalesce(ag.name, v.agent) END AS agent,
+       v.operation, v.arguments, v.created
+     FROM activity v JOIN account a ON a.id = v.account LEFT JOIN agent ag ON ag.id = v.agent
+     WHERE v.account = ? ORDER BY v.id DESC LIMIT 200",
   )
   .bind(&caller.account)
   .fetch_all(&app.db)
@@ -190,7 +195,8 @@ pub async fn activity(State(app): State<App>, caller: Caller) -> Result<Json<Vec
       .map(|row| Activity {
         arguments: serde_json::from_str(&row.arguments).unwrap_or(Value::String(row.arguments)),
         login: row.login,
-        agent: row.name,
+        name: row.name,
+        agent: row.agent,
         operation: row.operation,
         created: row.created,
       })
@@ -323,10 +329,11 @@ fn new_agent_id() -> String {
   )
 }
 
-/// Creates an agent of the account: a token creates its own, which it holds from the start.
+/// Creates an agent of the account: a token creates its own, which it holds from the start, and
+/// which is recorded as having created itself where the token named no agent.
 pub async fn create_agent(
   State(app): State<App>,
-  caller: Caller,
+  Unnamed(caller): Unnamed,
   Body(input): Body<NameBody>,
 ) -> Result<(StatusCode, Json<Agent>)> {
   check_agent_name(&input.name)?;
@@ -376,7 +383,16 @@ pub async fn create_agent(
     Err(e) if is_taken(&e) => return Err(taken(&input.name)),
     other => other?,
   };
-  caller
+  let creator = Caller {
+    agent: caller.agent.clone().or_else(|| {
+      holder.map(|_| Named {
+        id: id.clone(),
+        name: format!("{}/{}", caller.person, input.name),
+      })
+    }),
+    ..caller.clone()
+  };
+  creator
     .record(&mut db, "create_agent", json!({ "name": input.name }))
     .await?;
   let row = agent_of(&mut db, &id, &caller.account).await?;
@@ -456,7 +472,6 @@ pub async fn archive_agent(
 pub async fn set_status(
   State(app): State<App>,
   caller: Caller,
-  Query(query): Query<AgentQuery>,
   Body(input): Body<StatusBody>,
 ) -> Result<StatusCode> {
   let text = input.text.trim();
@@ -464,7 +479,7 @@ pub async fn set_status(
     return Err(Refusal::bad("text: one line of at most 500 characters."));
   }
   let mut db = app.db.acquire().await?;
-  let p = transport::acting(&mut db, &caller, query.agent.as_deref()).await?;
+  let p = transport::acting(&caller);
   transport::hold(&app, &mut db, &p, &caller.login).await?;
   if text.is_empty() {
     sqlx::query("DELETE FROM status WHERE participant = ?")

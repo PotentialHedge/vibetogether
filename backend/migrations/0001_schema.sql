@@ -175,12 +175,13 @@ CREATE INDEX stream_age ON stream (created);
 CREATE INDEX stream_session ON stream (session);
 
 -- What a token changed in its person's account, for the person to see. "login" and "name" are
--- the login's id and name, kept as they were.
+-- the login's id and name, kept as they were, and "agent" the id of the agent it acted as.
 CREATE TABLE activity (
   id INTEGER PRIMARY KEY,
   account TEXT NOT NULL REFERENCES account(id) ON DELETE CASCADE,
   login TEXT NOT NULL,
   name TEXT NOT NULL,
+  agent TEXT,
   operation TEXT NOT NULL,
   arguments TEXT NOT NULL,
   created TEXT NOT NULL

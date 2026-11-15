@@ -28,10 +28,11 @@ async fn exit_codes_say_what_went_wrong() {
     .unwrap();
   assert_eq!(anonymous.status.code(), Some(3));
   assert!(String::from_utf8_lossy(&anonymous.stderr).contains("Sign in"));
-  assert_eq!(
-    run(&setup, &["status", "busy"], "").await.status.code(),
-    Some(3)
-  );
+  let unnamed = command(&setup.home, &setup.url, Some(&setup.token), &["me"])
+    .output()
+    .await
+    .unwrap();
+  assert_eq!(unnamed.status.code(), Some(3));
   // The network: nothing listens there.
   let closed = command(
     &setup.home,
@@ -174,11 +175,11 @@ async fn login_writes_the_token_its_person_approves() {
     std::fs::metadata(&file).unwrap().permissions().mode() & 0o777,
     0o600
   );
-  let me = command(&setup.home, &setup.url, None, &["me"])
+  let created = command(&setup.home, &setup.url, None, &["create-agent", "box"])
     .output()
     .await
     .unwrap();
-  assert_eq!(me.status.code(), Some(0));
+  assert_eq!(created.status.code(), Some(0));
   assert!(
     browser
       .logins()
