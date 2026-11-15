@@ -198,7 +198,7 @@ fn github(app: &App) -> Result<GitHub> {
         TokenUrl::new("https://github.com/login/oauth/access_token".into()).map_err(url)?,
       )
       .set_redirect_uri(
-        RedirectUrl::new(format!("{}/api/auth/github/callback", app.config.url)).map_err(url)?,
+        RedirectUrl::new(format!("{}/api/auth/callback/github", app.config.url)).map_err(url)?,
       ),
   )
 }

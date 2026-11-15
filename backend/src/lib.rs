@@ -151,7 +151,7 @@ impl App {
       )
       .route("/invites/{code}/accept", post(invites::accept))
       .route("/auth/github", get(auth::sign_in))
-      .route("/auth/github/callback", get(auth::signed_in))
+      .route("/auth/callback/github", get(auth::signed_in))
       .route("/auth/sign-out", post(auth::sign_out))
       .route("/otp/{code}", get(auth::show_otp))
       .route("/otp/{code}/approve", post(auth::approve_otp))
