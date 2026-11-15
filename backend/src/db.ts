@@ -139,7 +139,7 @@ export function createTables(): void {
 		);
 		-- A participant in a session, by its id ("id"), with its person ("user").
 		-- "inside" while joined; "entry" its last join or leave.
-		-- "read" its read position; an agent's follows from what it acknowledged in its stream.
+		-- "received" and "read" the last entries of the session it received and read, from its stream.
 		-- "since" is when its last receive ended, or when it joined.
 		CREATE TABLE IF NOT EXISTS participant (
 			session TEXT NOT NULL REFERENCES session(id) ON DELETE CASCADE,
@@ -147,48 +147,34 @@ export function createTables(): void {
 			user TEXT NOT NULL REFERENCES user(id) ON DELETE CASCADE,
 			inside INTEGER NOT NULL,
 			entry INTEGER NOT NULL,
+			received INTEGER NOT NULL,
 			read INTEGER NOT NULL,
 			since TEXT NOT NULL,
 			PRIMARY KEY (session, id)
 		);
 
-		-- An agent's stream: everything that reaches it, numbered on its own ("n"), each item pointing
-		-- at its session's entry, with why it reached it ("reach": ping, fyi or session).
-		-- An item goes once acknowledged, or unacknowledged after a week.
+		-- Each participant's stream, a person's or an agent's: its last item's number, and its
+		-- received and read positions.
+		CREATE TABLE IF NOT EXISTS stream_head (
+			participant TEXT PRIMARY KEY,
+			user TEXT NOT NULL REFERENCES user(id) ON DELETE CASCADE,
+			last INTEGER NOT NULL,
+			received INTEGER NOT NULL,
+			read INTEGER NOT NULL
+		);
+		-- A stream's unread items: everything that reached the participant, numbered on its own ("n"),
+		-- each pointing at its session's entry, with why it reached it ("reach": ping, fyi or session).
+		-- An item goes once read, or after a week.
 		CREATE TABLE IF NOT EXISTS stream (
-			agent TEXT NOT NULL REFERENCES agent(id) ON DELETE CASCADE,
+			participant TEXT NOT NULL REFERENCES stream_head(participant) ON DELETE CASCADE,
 			n INTEGER NOT NULL,
 			session TEXT NOT NULL REFERENCES session(id) ON DELETE CASCADE,
 			entry INTEGER NOT NULL,
 			reach TEXT NOT NULL,
 			created TEXT NOT NULL,
-			PRIMARY KEY (agent, n)
+			PRIMARY KEY (participant, n)
 		) WITHOUT ROWID;
 		CREATE INDEX IF NOT EXISTS stream_age ON stream (created);
-		-- Each agent's stream: its last item's number, and its read position, up to which it
-		-- acknowledged its items.
-		CREATE TABLE IF NOT EXISTS stream_head (
-			agent TEXT PRIMARY KEY REFERENCES agent(id) ON DELETE CASCADE,
-			last INTEGER NOT NULL,
-			position INTEGER NOT NULL
-		);
-
-		-- A message that names a person in its "ping" or "fyi", for them to receive in any session
-		-- they receive in; an agent gets an item of its stream instead. "delivered" once received
-		-- elsewhere; the row goes once received in the message's own session, so that a session the
-		-- person was pinged in shows as such till then.
-		CREATE TABLE IF NOT EXISTS mention (
-			id INTEGER PRIMARY KEY,
-			participant TEXT NOT NULL,
-			user TEXT NOT NULL REFERENCES user(id) ON DELETE CASCADE,
-			session TEXT NOT NULL REFERENCES session(id) ON DELETE CASCADE,
-			n INTEGER NOT NULL,
-			ping INTEGER NOT NULL,
-			delivered INTEGER NOT NULL DEFAULT 0,
-			created TEXT NOT NULL
-		);
-		CREATE INDEX IF NOT EXISTS mention_of ON mention (participant);
-		CREATE INDEX IF NOT EXISTS mention_age ON mention (created);
 
 		-- What an agent changed in its person's account, for the person to see.
 		-- "login" and "agent" are the login's id and name as list_logins gives them, kept as they were.

@@ -1,5 +1,6 @@
-/** A session as the page takes part in it: as the person, by the page's own
- * sign-in, through the same requests an agent makes with its token. */
+/** A session as the page takes part in it, and the person's own stream: as
+ * the person, by the page's own sign-in, through the same requests an agent
+ * makes with its token. */
 
 import { page } from "@/site";
 
@@ -11,14 +12,15 @@ export type Entry = {
 	size: number;
 	filename?: string;
 	text?: string;
-	/** Where it was sent in another session, which named the person. */
-	session?: { id: string; name: string };
 };
 
 export type Presence = Record<
 	string,
 	{
 		id: string;
+		/** The last entry that reached its side. */
+		received: number;
+		/** The last entry that reached its context, or that the person saw. */
 		read: number;
 		/** Awake or asleep while its receive waits, or ended moments ago. */
 		presence: "awake" | "asleep" | "offline";
@@ -55,7 +57,7 @@ export type Subscriber = {
 };
 
 /** The person in a session: its log so far, and who is in it, kept current
- * while the page receives. */
+ * while the page observes it. */
 export class Seat {
 	log: Entry[] = [];
 	presence: Presence = {};
@@ -103,63 +105,43 @@ export class Seat {
 		return () => this.#subscribers.delete(subscriber);
 	}
 
-	#took(entries: Entry[], presence: Presence) {
-		const last = this.log.at(-1)?.n ?? 0;
-		// A message of another session that named the person shows in that session's own
-		// transcript: this one is this session's log alone.
-		const fresh = entries.filter((entry) => !entry.session && entry.n > last);
-		if (fresh.length) {
-			this.log = [...this.log, ...fresh];
-			for (const s of this.#subscribers) s.entry();
-		}
-		this.presence = presence;
-		for (const s of this.#subscribers) s.presence(presence);
-	}
-
-	/** Reads the log so far, then receives every change while the page is
-	 * open, which shows the person as present. */
+	/** Observes the session: reads the log so far, then waits for each change
+	 * of it or of who is in it, while the page is open. */
 	async start(): Promise<void> {
 		this.close();
 		const stop = new AbortController();
 		this.#stop = stop;
-		try {
-			for (;;) {
-				const after = this.log.at(-1)?.n ?? 0;
-				const answer = (await (
-					await this.#call(`/log?after=${after}`, { signal: stop.signal })
-				).json()) as { entries: Entry[]; presence: Presence };
-				this.#took(answer.entries, answer.presence);
-				if (!answer.entries.length) break;
-			}
-			let failures = 0;
-			while (!stop.signal.aborted) {
-				const after = this.log.at(-1)?.n ?? 0;
-				try {
-					const answer = (await (
-						await this.#call(`/entries?wake=change&own=1&after=${after}`, {
-							signal: stop.signal,
-						})
-					).json()) as { entries: Entry[]; presence: Presence };
-					failures = 0;
-					this.#took(answer.entries, answer.presence);
-				} catch (error) {
-					if (stop.signal.aborted) return;
-					// A newer receive of the same sign-in, such as in another tab, or
-					// a refusal: this one stops until the page is used again.
-					if (error instanceof LiveError && error.status < 500) throw error;
-					failures += 1;
-					await new Promise((r) =>
-						setTimeout(r, Math.min(30_000, 1000 * 2 ** failures)),
-					);
+		let version = "";
+		let failures = 0;
+		while (!stop.signal.aborted) {
+			const after = this.log.at(-1)?.n ?? 0;
+			try {
+				const log = (await (
+					await this.#call(
+						`/log?after=${after}${version && `&version=${version}`}`,
+						{ signal: stop.signal },
+					)
+				).json()) as { entries: Entry[]; presence: Presence; version: string };
+				failures = 0;
+				version = log.version;
+				if (log.entries.length) {
+					this.log = [...this.log, ...log.entries];
+					for (const s of this.#subscribers) s.entry();
 				}
+				this.presence = log.presence;
+				for (const s of this.#subscribers) s.presence(log.presence);
+			} catch (error) {
+				if (stop.signal.aborted) return;
+				// A refusal: this one stops until the page is used again.
+				if (error instanceof LiveError && error.status < 500) {
+					for (const s of this.#subscribers) s.end(error.message);
+					return;
+				}
+				failures += 1;
+				await new Promise((r) =>
+					setTimeout(r, Math.min(30_000, 1000 * 2 ** failures)),
+				);
 			}
-		} catch (error) {
-			if (stop.signal.aborted) return;
-			const why =
-				error instanceof LiveError && error.status === 409
-					? "This session is open in another tab."
-					: String(error instanceof Error ? error.message : error);
-			for (const s of this.#subscribers) s.end(why);
 		}
 	}
 
@@ -167,4 +149,83 @@ export class Seat {
 		this.#stop?.abort();
 		this.#stop = null;
 	}
+}
+
+/** The person's own stream, received while the page is open, which shows
+ * them awake: its unread items, by their session, and its positions, once
+ * the first answer gave them. */
+const stream = {
+	unread: [] as { n: number; session: string }[],
+	received: undefined as number | undefined,
+	read: 0,
+	/** The session open and visible, whose items are read. */
+	shown: null as string | null,
+	/** The receive waiting, which a change of `read` issues again. */
+	request: null as AbortController | null,
+};
+
+/** The highest item with every one before it read: the unread ones of the
+ * session shown go. */
+function readNow(): number {
+	const shown = document.visibilityState === "visible" ? stream.shown : null;
+	stream.unread = stream.unread.filter((item) => item.session !== shown);
+	return (stream.unread[0]?.n ?? (stream.received ?? 0) + 1) - 1;
+}
+
+/** Issues the receive again where the read position moved. */
+function reread() {
+	if (stream.received !== undefined && readNow() !== stream.read)
+		stream.request?.abort();
+}
+
+async function receiving() {
+	document.addEventListener("visibilitychange", reread);
+	let failures = 0;
+	for (;;) {
+		const request = new AbortController();
+		stream.request = request;
+		// The first receive gets every unread item.
+		if (stream.received !== undefined) stream.read = readNow();
+		const positions =
+			stream.received === undefined
+				? "received=0"
+				: `received=${stream.received}&read=${stream.read}`;
+		try {
+			const answer = (await (
+				await checked(
+					await fetch(page(`api/receive?${positions}&state=awake`), {
+						credentials: "same-origin",
+						signal: request.signal,
+					}),
+				)
+			).json()) as {
+				items: { n: number; session: { id: string } }[];
+				received: number;
+			};
+			failures = 0;
+			stream.unread.push(
+				...answer.items.map((item) => ({
+					n: item.n,
+					session: item.session.id,
+				})),
+			);
+			stream.received = Math.max(answer.received, answer.items.at(-1)?.n ?? 0);
+		} catch (error) {
+			if (request.signal.aborted) continue;
+			if (error instanceof LiveError && error.status < 500) return;
+			failures += 1;
+			await new Promise((r) =>
+				setTimeout(r, Math.min(30_000, 1000 * 2 ** failures)),
+			);
+		}
+	}
+}
+
+/** Shows the session `id` in the page, or none: while the page is visible,
+ * its items in the person's stream are read. The first call starts receiving
+ * the stream. */
+export function showSession(id: string | null) {
+	if (stream.request === null) receiving();
+	stream.shown = id;
+	reread();
 }

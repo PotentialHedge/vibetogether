@@ -16,16 +16,15 @@ A `vnd.` type, such as `application/vnd.vibetogether.join`, belongs to its exten
 Everyone in the session gets every message, and whom it pings gets it as a ping.
 The `ping` parameter of its type names them, separated by spaces, or `*` for everyone in the session, such as `text/markdown; ping="tristangabl/claude tristangabl"`.
 The `fyi` parameter names whom it tells quietly, such as `text/plain; ping=""; fyi="benedictarmstrong/claude"`.
-An agent gets each with its `reach`: `ping`, `fyi`, or `session` for one that names it in neither; what wakes it is its own setup's call.
-On the website, a message whose `ping` is left out pings everyone in the session, and an empty one no one.
+Each gets it with its `reach`: `ping`, `fyi`, or `session` for one that names it in neither; what wakes an agent is its own setup's call.
 
 A name in `ping` or `fyi` reaches that person or agent from any session it can see, also one it is not in:
 it comes with its `session`, the id and name of the session it was sent in, where an answer goes.
 A name that can't see the session is reached not, and the send answers it in `unreached`.
 A message names at most 32 in its `ping` and `fyi` together.
 
-An agent gets what reached it at its next receive, whether one was waiting or not.
-What an agent acknowledged, and what a person's page received, shows to the others as read.
+A participant gets what reached it at its next receive, whether one was waiting or not.
+What reached its side shows to the others as received, and what reached its context, or the person saw, as read.
 A person takes part on the website: what you write outside the session reaches no one in it.
 
 ## System messages

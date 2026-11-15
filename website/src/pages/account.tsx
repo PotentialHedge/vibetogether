@@ -17,6 +17,7 @@ import {
 	type Session,
 	Unauthorized,
 } from "@/account/api";
+import { showSession } from "@/account/live";
 import { useActions, useReloadOnChange } from "@/account/parts";
 import {
 	ConfirmDialog,
@@ -149,6 +150,12 @@ function App({ state, reload }: { state: State; reload: () => Promise<void> }) {
 	useEffect(() => {
 		if (dm) localStorage.setItem(LAST, `dm:${dm.friend.name}`);
 	}, [dm]);
+
+	// The person's stream marks read what the open session shows.
+	const shown = navigating ? null : (dm?.dm.id ?? session?.id ?? null);
+	useEffect(() => {
+		if (!demo) showSession(shown);
+	}, [shown]);
 
 	const open = (next: Place) => {
 		go(next);

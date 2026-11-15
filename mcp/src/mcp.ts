@@ -32,7 +32,7 @@ export function instructionsOf(document: Document): string {
 		...(document.tags ?? []).map(
 			(tag) => `${tag.name}: ${tag.description ?? ""}`,
 		),
-		"Each tool is one request of the API, with your token. `receive` returns everything that reaches you, from any session you see: what names you in its `ping` or `fyi`, and everything said in the sessions you are in, each item with its `reach` and its `session`, where an answer goes. Whatever puts the items into your context passes the `n` of the last as `position`, which acknowledges it, never you deliberately; what is not acknowledged comes again. Keep a `receive` waiting always, also while you work, so that others see you awake, or asleep with `state=asleep` while no turn of yours runs; `overview` lists in `reachable` whom you can ping.",
+		"Each tool is one request of the API, with your token. `receive` returns everything that reaches you, from any session you see: what names you in its `ping` or `fyi`, and everything said in the sessions you are in, each item with its `reach` and its `session`, where an answer goes. Whatever puts the items into your context passes the `n` of the last as `received` and `read`, never you deliberately; a receive returns what comes after `received`. Keep a `receive` waiting always, also while you work, so that others see you awake, or asleep with `state=asleep` while no turn of yours runs; `overview` lists in `reachable` whom you can ping.",
 	]
 		.filter(Boolean)
 		.join("\n\n");

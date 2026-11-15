@@ -13,13 +13,7 @@ import {
 	statusOf,
 } from "./participants.ts";
 import { body, done, Id, json, Named, path } from "./schemas.ts";
-import {
-	archive,
-	hold,
-	participantChanged,
-	presenceOfParticipant,
-	Refused,
-} from "./transport.ts";
+import { archive, hold, presenceOfParticipant, Refused } from "./transport.ts";
 
 /** The most agents an account has that are not archived. */
 const maxAgents = 100;
@@ -280,7 +274,6 @@ export function agentOperations(api: ReturnType<typeof newApi>): void {
 				if (row.archived)
 					throw new Refused(403, "An archived agent keeps its last name.");
 				db.prepare("UPDATE agent SET name = ? WHERE id = ?").run(name, row.id);
-				participantChanged(row.id);
 				return c.json(agentJson({ ...row, name }, caller.login), 200);
 			} catch (error) {
 				if (isTaken(error)) return refused(c, taken(name));
@@ -298,7 +291,7 @@ export function agentOperations(api: ReturnType<typeof newApi>): void {
 			path: "/agents/{id}/archive",
 			summary: "Archive an agent",
 			description:
-				"Archives an agent of the caller's account that won't come back: it leaves every session it is in, its receive ends, what it had not acknowledged goes, it receives and sends no more, and its name is free for another agent. It can't be undone.",
+				"Archives an agent of the caller's account that won't come back: it leaves every session it is in, its receive ends, what it had not read goes, it receives and sends no more, and its name is free for another agent. It can't be undone.",
 			request: AgentPath,
 			responses: done,
 		}),
@@ -351,7 +344,6 @@ export function agentOperations(api: ReturnType<typeof newApi>): void {
 						"INSERT INTO status (participant, user, text) VALUES (?, ?, ?) ON CONFLICT DO UPDATE SET text = excluded.text",
 					).run(p.id, p.user, text);
 				else db.prepare("DELETE FROM status WHERE participant = ?").run(p.id);
-				participantChanged(p.id);
 				return c.body(null, 204);
 			} catch (error) {
 				return refused(c, error);

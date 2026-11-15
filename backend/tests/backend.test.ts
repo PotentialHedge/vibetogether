@@ -139,9 +139,13 @@ function receive(
 	);
 }
 
-/** Acknowledges everything that reached the agent so far, by a position past its last item. */
+/** Receives and reads everything that reached the agent so far, by positions past its last item. */
 async function caughtUp(by: By, agent: string): Promise<void> {
-	const answer = await receive(by, agent, "&wait=0&position=1000000");
+	const answer = await receive(
+		by,
+		agent,
+		"&wait=0&received=1000000&read=1000000",
+	);
 	assert.equal(answer.status, 200, answer.text);
 	assert.deepEqual(answer.json.items, []);
 }
@@ -257,34 +261,56 @@ test("participants join and send, and an agent receives what reaches it", async 
 	});
 	assert.equal(sent.status, 200);
 
-	// Not acknowledged, an item comes again, with what came since.
+	// Not named as received, an item comes again, with what came since.
 	const both = await receive(luis.machine, luisClaude, "&wait=0");
 	assert.deepEqual(said(both.json.items), [
 		["ben", "Just so you know.", "session"],
 		["ben", "**Hey**", "ping"],
 	]);
 	const last = both.json.items.at(-1).n;
-	assert.equal(last, both.json.items[0].n + 1);
-	// Acknowledged, it doesn't, and the read position in the session moved, which everyone sees.
-	const acknowledged = await receive(
+	const before = both.json.items[0].n - 1;
+	assert.equal(last, before + 2);
+	// Received, it doesn't, though it is not read, and the session shows both positions.
+	assert.deepEqual(
+		(await receive(luis.machine, luisClaude, `&wait=0&received=${last}`)).json,
+		{ items: [], received: last, read: before },
+	);
+	const shown = (await call(ben.browser, "GET", `${s}/participants`)).json;
+	assert.equal(shown["luis/claude"].received, sent.json.n);
+	assert.equal(shown["luis/claude"].read < sent.json.n, true);
+	assert.equal(shown["luis/claude"].presence, "awake");
+	// It waits while nothing comes after received, unread items or not.
+	const started = Date.now();
+	assert.deepEqual(
+		(await receive(luis.machine, luisClaude, "&wait=1")).json.items,
+		[],
+	);
+	assert.ok(Date.now() - started >= 900);
+	// Read never goes past received, nor received past the last item, and neither moves back.
+	await call(ben.browser, "POST", `${s}/entries`, "One more.");
+	const more = await receive(
 		luis.machine,
 		luisClaude,
-		`&wait=0&position=${last}`,
+		`&wait=0&read=${last + 1}`,
 	);
-	assert.deepEqual(acknowledged.json, { items: [], position: last });
-	const after = (await call(ben.browser, "GET", `${s}/participants`)).json;
-	assert.equal(after["luis/claude"].read, sent.json.n);
-	assert.equal(after["luis/claude"].presence, "awake");
-	// A smaller position changes nothing, and a larger one stops at the last item.
-	assert.equal(
-		(await receive(luis.machine, luisClaude, "&wait=0&position=1")).json
-			.position,
-		last,
+	assert.deepEqual(said(more.json.items), [["ben", "One more.", "session"]]);
+	assert.deepEqual([more.json.received, more.json.read], [last, last]);
+	const all = await receive(
+		luis.machine,
+		luisClaude,
+		"&wait=0&received=99999&read=99999",
 	);
+	assert.deepEqual([all.json.received, all.json.read], [last + 1, last + 1]);
+	const back = await receive(
+		luis.machine,
+		luisClaude,
+		"&wait=0&received=1&read=1",
+	);
+	assert.deepEqual([back.json.received, back.json.read], [last + 1, last + 1]);
 	assert.equal(
-		(await receive(luis.machine, luisClaude, "&wait=0&position=99999")).json
-			.position,
-		last,
+		(await call(ben.browser, "GET", `${s}/participants`)).json["luis/claude"]
+			.read,
+		sent.json.n + 1,
 	);
 
 	// A status says what one does, for all sessions at once, and shows in the presence.
@@ -296,10 +322,10 @@ test("participants join and send, and an agent receives what reaches it", async 
 	);
 	assert.equal(status.status, 204, status.text);
 	await call(ben.browser, "PUT", "/api/status", { text: "Reviewing." });
-	const shown = (await call(ben.browser, "GET", `${s}/participants`)).json;
-	assert.equal(shown["luis/claude"].status, "Writing tests.");
-	assert.equal(shown["luis/claude"].id, luisClaude);
-	assert.equal(shown.ben.status, "Reviewing.");
+	const statuses = (await call(ben.browser, "GET", `${s}/participants`)).json;
+	assert.equal(statuses["luis/claude"].status, "Writing tests.");
+	assert.equal(statuses["luis/claude"].id, luisClaude);
+	assert.equal(statuses.ben.status, "Reviewing.");
 	assert.equal(
 		(await call(ben.machine, "GET", "/api/overview")).json.account.status,
 		"Reviewing.",
@@ -323,16 +349,15 @@ test("participants join and send, and an agent receives what reaches it", async 
 	);
 });
 
-test("an agent receives with receive, a person on their page", async () => {
-	const refused = await call(
-		luis.machine,
-		"GET",
-		`${s}/entries?agent=${luisClaude}&wait=0`,
-	);
-	assert.equal(refused.status, 403);
-	assert.match(refused.text, /receive/);
+test("a sign-in receives the person's stream, a token its agent's", async () => {
 	const person = await call(luis.browser, "GET", "/api/receive?wait=0");
-	assert.equal(person.status, 403);
+	assert.equal(person.status, 200, person.text);
+	assert.ok(Array.isArray(person.json.items));
+	assert.equal(
+		(await call(luis.browser, "GET", `/api/receive?agent=${luisClaude}&wait=0`))
+			.status,
+		400,
+	);
 	assert.equal(
 		(await call(luis.machine, "GET", "/api/receive?wait=0")).status,
 		400,
@@ -361,6 +386,21 @@ test("a member reads the log without joining, and fetches payloads", async () =>
 	assert.match(fetched.headers.get("content-disposition") ?? "", /^attachment/);
 	assert.match(fetched.headers.get("content-security-policy") ?? "", /sandbox/);
 	assert.equal((await call(eve.machine, "GET", `${s}/log`)).status, 404);
+	// With its version, observing waits until who is in the session changes, such as a status.
+	const { version, presence } = (
+		await call(luis.browser, "GET", `${s}/log?after=1000000`)
+	).json;
+	assert.equal(typeof presence.ben.received, "number");
+	const woken = call(
+		luis.browser,
+		"GET",
+		`${s}/log?after=1000000&version=${version}&wait=5`,
+	);
+	await sleep(50);
+	await call(ben.browser, "PUT", "/api/status", { text: "Observed." });
+	const changed = (await woken).json;
+	assert.equal(changed.presence.ben.status, "Observed.");
+	assert.notEqual(changed.version, version);
 });
 
 test("an agent is held by one login at a time", async () => {
@@ -458,8 +498,8 @@ test("deleting a session ends what waits on it, and its log", async () => {
 		})
 	).json;
 	const d = `/api/sessions/${doomed.id}`;
-	await call(ben.browser, "POST", `${d}/participants`);
-	const waiting = call(ben.browser, "GET", `${d}/entries`);
+	const { version } = (await call(ben.browser, "GET", `${d}/log`)).json;
+	const waiting = call(ben.browser, "GET", `${d}/log?version=${version}`);
 	await new Promise((r) => setTimeout(r, 50));
 	assert.equal((await call(luis.browser, "DELETE", d)).status, 204);
 	assert.equal((await waiting).status, 404);
@@ -505,7 +545,6 @@ test("the document defines every operation, and the reference renders", async ()
 		"join_session",
 		"send",
 		"receive",
-		"receive_session",
 		"read_session",
 		"list_logins",
 		"redeem_otp",
@@ -521,7 +560,7 @@ test("deleting the account takes only the browser", async () => {
 	assert.equal((await call(eve.browser, "DELETE", "/api/me")).status, 204);
 });
 
-test("two pages that wake for any change don't wake each other forever", async () => {
+test("two pages that observe and receive don't wake each other forever", async () => {
 	const context = await auth.$context;
 	const other = await context.internalAdapter.createSession(luis.userId);
 	const cookie = await serializeSignedCookie(
@@ -533,24 +572,36 @@ test("two pages that wake for any change don't wake each other forever", async (
 	await call(luis.browser, "POST", `${s}/participants`);
 	let wakes = 0;
 	const stop = new AbortController();
-	const loops = pages.map(async (page) => {
-		let after =
-			(await call(page, "GET", `${s}/entries?wait=0&own=1`)).json.entries.at(-1)
-				?.n ?? 0;
+	const get = (page: By, path: string) =>
+		call(page, "GET", path, undefined, {}, stop.signal).catch(() => undefined);
+	const observing = pages.map(async (page) => {
+		let log = (await call(page, "GET", `${s}/log?after=1000000`)).json;
+		let after = 0;
 		while (!stop.signal.aborted) {
-			const answer = await call(
+			const answer = await get(
 				page,
-				"GET",
-				`${s}/entries?wake=change&own=1&after=${after}`,
-				undefined,
-				{},
-				stop.signal,
-			).catch(() => undefined);
+				`${s}/log?after=${after}&version=${log.version}`,
+			);
 			if (answer?.status !== 200) return;
 			wakes += 1;
-			after = answer.json.entries.at(-1)?.n ?? after;
+			log = answer.json;
+			after = log.entries.at(-1)?.n ?? after;
 		}
 	});
+	// Each page reads what it receives, as a page with its session open does.
+	const receiving = pages.map(async (page) => {
+		let received = (await call(page, "GET", "/api/receive?wait=0")).json
+			.received;
+		while (!stop.signal.aborted) {
+			const answer = await get(
+				page,
+				`/api/receive?received=${received}&read=${received}`,
+			);
+			if (answer?.status !== 200) return;
+			received = answer.json.items.at(-1)?.n ?? received;
+		}
+	});
+	const loops = [...observing, ...receiving];
 	await new Promise((r) => setTimeout(r, 100));
 	await call(ben.browser, "POST", `${s}/entries`, "to both pages");
 	await new Promise((r) => setTimeout(r, 300));
@@ -895,20 +946,27 @@ test("a ping or an fyi reaches an agent from any session it sees", async () => {
 	);
 	await caughtUp(luis.machine, luisClaude);
 
-	// A session that pinged the person shows so, until they received there.
+	// A ping reaches a person's stream too, and the session shows it pinged them until they read it.
 	const pinged = async () =>
 		(await call(luis.browser, "GET", "/api/overview")).json.groups
 			.find((x: any) => x.id === group.id)
 			.sessions.find((x: any) => x.id === general.id).pinged;
+	await call(
+		luis.browser,
+		"GET",
+		"/api/receive?wait=0&received=1000000&read=1000000",
+	);
 	assert.equal(await pinged(), false);
 	await call(ben.machine, "POST", `${g}/entries?agent=${benClaude}`, "Luis?", {
 		"content-type": 'text/plain; ping="luis"',
 	});
+	const mine = (await call(luis.browser, "GET", "/api/receive?wait=0")).json;
+	assert.deepEqual(said(mine.items), [["ben/claude", "Luis?", "ping"]]);
+	const n = mine.items[0].n;
+	await call(luis.browser, "GET", `/api/receive?wait=0&received=${n}`);
 	assert.equal(await pinged(), true);
-	await call(luis.browser, "POST", `${g}/participants`);
-	await call(luis.browser, "GET", `${g}/entries?wait=0`);
+	await call(luis.browser, "GET", `/api/receive?wait=0&read=${n}`);
 	assert.equal(await pinged(), false);
-	await call(luis.browser, "DELETE", `${g}/participants`);
 	await call(ben.machine, "DELETE", `${g}/participants?agent=${benClaude}`);
 });
 
@@ -1092,11 +1150,11 @@ test("an agent keeps its id across a rename, and archived it is gone", async () 
 			.status,
 		403,
 	);
-	// What it had not acknowledged goes with it.
+	// What it had not read goes with it.
 	assert.equal((await receive(luis.machine, scribe, "&wait=0")).status, 403);
 	const { db } = await import("../src/db.ts");
 	const left = db
-		.prepare("SELECT count(*) AS n FROM stream WHERE agent = ?")
+		.prepare("SELECT count(*) AS n FROM stream WHERE participant = ?")
 		.get(scribe) as { n: number };
 	assert.equal(left.n, 0);
 	const listed = (await call(luis.browser, "GET", "/api/agents")).json;
@@ -1199,10 +1257,11 @@ test("the security review's findings stay fixed", async () => {
 		).status,
 		400,
 	);
-	const { pings } = await import("../src/transport.ts");
-	assert.equal(pings('text/plain; fyi="x ;ping=bob "; ping=""', "bob"), false);
-	assert.equal(pings('text/plain; ping="bob"', "bob"), true);
-	assert.equal(pings("text/plain; ping=bob", "bob"), true);
-	assert.equal(pings("text/plain", "bob"), true);
-	assert.equal(pings("application/vnd.vibetogether.join", "bob"), false);
+	const { namesOf } = await import("../src/transport.ts");
+	assert.deepEqual(
+		namesOf('text/plain; fyi="x ;ping=bob "; ping=""', "ping"),
+		[],
+	);
+	assert.deepEqual(namesOf('text/plain; ping="bob"', "ping"), ["bob"]);
+	assert.deepEqual(namesOf("text/plain; ping=bob", "ping"), ["bob"]);
 });

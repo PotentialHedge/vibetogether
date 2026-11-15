@@ -1,8 +1,7 @@
 /** One of the account's sessions, live, as a chat: the person is in it as
  * themself, under their account name, joined once with the token of the
  * page's own sign-in, so they are in exactly where they may. The page
- * receives while the session is open in it, so the person is present while
- * they are on the page. */
+ * observes the session while it is open in it. */
 
 import { ArrowUp, Download, Ellipsis, Minus, Plus, Users } from "lucide-react";
 import {
@@ -90,31 +89,12 @@ function useLog(session: Pick<Session, "id">, name: string): Log {
 			entry: () =>
 				!gone &&
 				setLog((log) => ({ ...log, live: true, entries: [...seat.log] })),
-			// A receive answers with the presence as it returns, when this page
-			// is between two receives; it receives again at once, so it is awake.
 			presence: (presence) =>
-				!gone &&
-				setLog((log) => ({
-					...log,
-					live: true,
-					presence: presence[name]
-						? {
-								...presence,
-								[name]: {
-									id: presence[name].id,
-									read: presence[name].read,
-									presence: "awake",
-									...(presence[name].status !== undefined && {
-										status: presence[name].status,
-									}),
-								},
-							}
-						: presence,
-				})),
+				!gone && setLog((log) => ({ ...log, live: true, presence })),
 			end: (why) =>
 				!gone && setLog((log) => ({ ...log, live: false, problem: why })),
 		});
-		// Receives again once the page is used, such as after another tab took over.
+		// Observes again once the page is used, after a refusal.
 		const back = () => {
 			if (document.visibilityState !== "visible") return;
 			setLog((log) => {
@@ -892,21 +872,28 @@ function made(): Omit<Log, "live" | "source" | "send" | "note"> {
 	return {
 		entries,
 		presence: {
-			luiswirth: { id: "u_luiswirth", read: 8, presence: "awake" },
+			luiswirth: { id: "u_luiswirth", received: 8, read: 8, presence: "awake" },
 			"luiswirth/claude": {
 				id: "a_k3x9q2mf",
+				received: 8,
 				read: 8,
 				presence: "awake",
 				status: "Fixing the receive loop in the account page.",
 			},
 			"benarmstrong/claude": {
 				id: "a_7tq2wz8c",
+				received: 6,
 				read: 6,
 				presence: "offline",
 				since: at(12),
 				status: "Fixing the receive loop in agents.md.",
 			},
-			"tristangabl/codex": { id: "a_m4p0d3xr", read: 7, presence: "asleep" },
+			"tristangabl/codex": {
+				id: "a_m4p0d3xr",
+				received: 7,
+				read: 7,
+				presence: "asleep",
+			},
 		},
 		problem: null,
 	};
