@@ -799,6 +799,8 @@ export function join(
 	name: string,
 ): { n: number; name: string; read: number } {
 	hold(p.user, p.id, login);
+	// A join is an entry that reaches every agent in the session, so it counts as one sent.
+	adds(p.user, 0);
 	const result = transaction(() => {
 		const row = participantRow(p);
 		if (row?.inside) return { n: row.entry, read: row.read };
@@ -834,6 +836,7 @@ export function leave(
 	if (row && !row.inside) return { n: row.entry };
 	hold(p.user, p.id, login);
 	inside(p);
+	adds(p.user, 0);
 	return leaveAs(p, name);
 }
 
@@ -1158,6 +1161,18 @@ function acknowledge(id: string, position: number | undefined): number {
  * longer go.
  */
 function itemsOf(user: string, id: string, position: number): Item[] {
+	for (;;) {
+		const { items, dropped } = batchOf(user, id, position);
+		// A batch all of sessions it sees no longer went: the next may hold what it sees.
+		if (items.length || !dropped) return items;
+	}
+}
+
+function batchOf(
+	user: string,
+	id: string,
+	position: number,
+): { items: Item[]; dropped: boolean } {
 	const rows = db
 		.prepare(
 			`SELECT st.n AS item, st.reach, st.session, s.name AS sessionName,
@@ -1170,6 +1185,7 @@ function itemsOf(user: string, id: string, position: number): Item[] {
 	const sees = new Map<string, string | undefined>();
 	const items: Item[] = [];
 	let bytes = 0;
+	let dropped = false;
 	for (const row of rows) {
 		if (!sees.has(row.session))
 			sees.set(row.session, sessionFor(row.session, user)?.name);
@@ -1179,6 +1195,7 @@ function itemsOf(user: string, id: string, position: number): Item[] {
 				id,
 				row.item,
 			);
+			dropped = true;
 			continue;
 		}
 		bytes += (row.text?.length ?? 0) + 200;
@@ -1190,7 +1207,7 @@ function itemsOf(user: string, id: string, position: number): Item[] {
 			entry: entryJson(row),
 		});
 	}
-	return items;
+	return { items, dropped };
 }
 
 // An item unacknowledged for a week goes.

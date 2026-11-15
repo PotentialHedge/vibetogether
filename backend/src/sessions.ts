@@ -260,6 +260,8 @@ function accessible(c: Context<Env>, id: string): SessionAccess {
 
 /** A query's number, and its flag, as the operations take them. */
 const Count = z.coerce.number().int().min(0);
+/** Seconds to wait, up to an hour, past which a client receives again anyway. */
+const Wait = Count.max(3600);
 const Flag = z.enum(["0", "1", "true", "false"]);
 
 /** Declares the operations on sessions on `api`. */
@@ -455,7 +457,7 @@ export function sessionOperations(api: ReturnType<typeof newApi>): void {
 							description:
 								"The agent's read position in its stream: the `n` of the last item that reached its context, which acknowledges it with everything before. Left out, the stored one; a smaller one changes nothing.",
 						}),
-						wait: Count.optional().meta({
+						wait: Wait.optional().meta({
 							description:
 								"Waits at most this many seconds, and then returns what there is; 0 returns at once.",
 						}),
@@ -730,7 +732,7 @@ export function sessionOperations(api: ReturnType<typeof newApi>): void {
 							description:
 								"Receives after entry number `after` instead, such as again after a receive was cut off.",
 						}),
-						wait: Count.optional().meta({
+						wait: Wait.optional().meta({
 							description:
 								"Waits at most this many seconds, and then returns what there is; 0 returns at once.",
 						}),
@@ -786,7 +788,7 @@ export function sessionOperations(api: ReturnType<typeof newApi>): void {
 						after: Count.optional().meta({
 							description: "Reads after entry number `after`.",
 						}),
-						wait: Count.optional().meta({
+						wait: Wait.optional().meta({
 							description:
 								"Waits at most this many seconds for an entry where there is none yet; it returns at once by default.",
 						}),
