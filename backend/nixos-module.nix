@@ -1,6 +1,6 @@
-# The backend as a NixOS service, the MCP server in it. It acts for no one, so
-# it runs as a user of its own, which reaches nothing but its database. It
-# listens on 127.0.0.1 only: the host proxies /api/, /mcp and /.well-known/ to it.
+# The backend as a NixOS service. It acts for no one, so it runs as a user of
+# its own, which reaches nothing but its database. It listens on 127.0.0.1
+# only: the host proxies /api/ to it.
 self: {
   config,
   lib,
@@ -38,9 +38,9 @@ in {
     environment = {
       BACKEND_URL = cfg.url;
       BACKEND_PORT = toString cfg.port;
+      # A database of the TypeScript backend's is imported at the first start
+      # (backend/src/legacy.rs), and kept beside it as backend-legacy-imported.db.
       BACKEND_DATABASE = "/var/lib/vibetogether-backend/backend.db";
-      # The key that signs sign-ins, which the backend makes on its first start.
-      BACKEND_SECRET_FILE = "/var/lib/vibetogether-backend/secret";
       GITHUB_CLIENT_ID = cfg.github.clientId;
     };
     serviceConfig = {

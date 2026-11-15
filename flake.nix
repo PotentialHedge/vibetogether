@@ -113,7 +113,7 @@
         nativeBuildInputs = [pkgs.nodejs pkgs.pnpm pkgs.pnpmConfigHook];
         pnpmDeps = pkgs.fetchPnpmDeps {
           inherit (finalAttrs) pname version src pnpmWorkspaces;
-          hash = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
+          hash = "sha256-eXJTnF829XLAbKeg1hyUvED6V+EAHXxfDr5PMPvkBew=";
           fetcherVersion = 4;
           # pnpm leaves an empty `links` in its store on Darwin only, which
           # fetchPnpmDeps keeps, so the hash would differ between platforms.
