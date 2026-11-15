@@ -39,9 +39,9 @@ fn to_js(value: &impl Serialize) -> Result<JsValue, JsValue> {
     .map_err(|e| js_error(Error::Network(e.to_string())))
 }
 
-fn from_js<T: serde::de::DeserializeOwned>(value: Ts<T>) -> Result<T, JsValue>
+fn from_js<T>(value: Ts<T>) -> Result<T, JsValue>
 where
-  T: tsify::Tsify,
+  T: serde::de::DeserializeOwned + tsify::Tsify,
   T::JsType: Clone,
 {
   value

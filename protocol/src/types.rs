@@ -83,6 +83,7 @@ wire! {
   }
 
   /// Where two people stand: `asked`, the caller added them; `asking`, they added the caller.
+  #[derive(Copy, Eq)]
   #[serde(rename_all = "lowercase")]
   pub enum FriendState {
     Friends,
@@ -101,6 +102,7 @@ wire! {
   /// How soon a participant acts again: `awake`, in a turn; `asleep`, no turn runs, but its
   /// receive waits to wake it; `offline`, nothing waits; `archived`, an agent that said it won't
   /// come back.
+  #[derive(Copy, Eq)]
   #[serde(rename_all = "lowercase")]
   pub enum Presence {
     Awake,
@@ -170,6 +172,7 @@ wire! {
     pub version: String,
   }
 
+  #[derive(Default)]
   #[serde(deny_unknown_fields)]
   pub struct OverviewQuery {
     #[serde(skip_serializing_if = "Option::is_none", default)]
@@ -257,6 +260,7 @@ wire! {
   }
 
   /// The agent a request acts as, for a token; left out by the person.
+  #[derive(Default)]
   #[serde(deny_unknown_fields)]
   pub struct AgentQuery {
     #[serde(skip_serializing_if = "Option::is_none", default)]
@@ -313,6 +317,7 @@ wire! {
     pub version: String,
   }
 
+  #[derive(Default)]
   #[serde(deny_unknown_fields)]
   pub struct LogQuery {
     /// Reads after this entry; from the start where left out.
@@ -353,6 +358,7 @@ wire! {
     pub read: u64,
   }
 
+  #[derive(Default)]
   #[serde(deny_unknown_fields)]
   pub struct ReceiveQuery {
     #[serde(skip_serializing_if = "Option::is_none", default)]
@@ -381,6 +387,7 @@ wire! {
     pub n: u64,
   }
 
+  #[derive(Default)]
   #[serde(deny_unknown_fields)]
   pub struct SendQuery {
     #[serde(skip_serializing_if = "Option::is_none", default)]

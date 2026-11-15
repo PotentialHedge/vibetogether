@@ -2623,11 +2623,14 @@ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 name = "vibetogether"
 version = "0.1.0"
 dependencies = [
+ "axum",
  "clap",
+ "reqwest",
  "rustix",
  "serde",
  "serde_json",
  "tokio",
+ "vibetogether-backend",
  "vibetogether-client",
  "vibetogether-protocol",
 ]
@@ -2653,6 +2656,7 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
+ "vibetogether-client",
  "vibetogether-protocol",
 ]
 
