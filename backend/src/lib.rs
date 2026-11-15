@@ -156,12 +156,13 @@ impl App {
       .route("/auth/github", get(auth::sign_in))
       .route("/auth/github/callback", get(auth::signed_in))
       .route("/auth/sign-out", post(auth::sign_out))
-      .route("/otp", post(auth::request_otp))
-      .route("/otp/redeem", post(auth::redeem_otp))
       .route("/otp/{code}", get(auth::show_otp))
       .route("/otp/{code}/approve", post(auth::approve_otp))
       .route("/otp/{code}/deny", post(auth::deny_otp))
-      .layer(middleware::from_fn_with_state(self.clone(), written));
+      .layer(middleware::from_fn_with_state(self.clone(), written))
+      // Asking for an OTP and redeeming it is anyone's, and changes nothing anyone waits on.
+      .route("/otp", post(auth::request_otp))
+      .route("/otp/redeem", post(auth::redeem_otp));
     Router::new()
       .nest("/api", api)
       .layer(middleware::from_fn(logged))
@@ -170,11 +171,12 @@ impl App {
   }
 }
 
-/// Every write wakes what waits for a change (`changes`), whether it went through or not.
+/// Every write that went through wakes what waits for a change (`changes`): a write by a login,
+/// since every route under this layer refuses a request that is by none.
 async fn written(State(app): State<App>, request: Request, next: Next) -> Response {
   let writes = !matches!(*request.method(), Method::GET | Method::HEAD);
   let response = next.run(request).await;
-  if writes {
+  if writes && response.status().is_success() {
     app.changes.written();
   }
   response

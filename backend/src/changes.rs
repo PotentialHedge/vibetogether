@@ -1,6 +1,7 @@
 //! Waiting for something an account sees to change, such as its overview or a session's log.
 //! Every write wakes every waiter, which checks whether what it waits on differs now: no write
-//! has to say what it changed, and sessions are assumed small.
+//! has to say what it changed, and sessions are assumed small. A waiter checks at most every
+//! `SETTLE`, once for all the writes meanwhile, so that a burst of writes costs it one check.
 
 use std::{collections::HashMap, sync::Mutex, time::Duration};
 
@@ -14,6 +15,8 @@ use crate::error::{Refusal, Result};
 
 /// The most waits of one account at once.
 const MAX_WAITS: usize = 64;
+/// How long a waiter lets the writes settle before it checks.
+const SETTLE: Duration = Duration::from_millis(100);
 
 pub struct Changes {
   writes: watch::Sender<u64>,
@@ -84,6 +87,8 @@ impl Changes {
     loop {
       tokio::select! {
         _ = writes.changed() => {
+          tokio::time::sleep(SETTLE).await;
+          writes.borrow_and_update();
           let value = current().await?;
           if differs(&value) {
             return Ok(value);

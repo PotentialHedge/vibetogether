@@ -19,7 +19,7 @@ Vibe Together's design (`../AGENTS.md`): read it before working here.
 - The transport (`src/transport.rs`) is in memory beside the database: the log, the participants, each participant's stream and the waiting receives.
   Observing and receiving are two things, Luis's decision (2026-11-15): observing reads a session's log (`log`), with no side effects; receiving is a participant's own stream (`receive`), each item with its `reach`, and two positions, `received` and `read`, which move the participant's positions in its sessions.
   Presence is held, never declared: a waiting receive registers a guard whose destructor lets the presence go after a minute's grace, also when its connection drops.
-- What waits for a change (`src/changes.rs`), such as `overview` or `log` with a `version`, wakes at every write and compares its version.
+- What waits for a change (`src/changes.rs`), such as `overview` or `log` with a `version`, wakes at every write by a login that went through, at most every 100 ms, and compares its version.
 - System messages are posted from `vibetogether` by `announce`.
 - `just dev` runs a local instance, and `just seed <login>` signs a person in on it, since GitHub can't call back to it.
 - Served from lwirth-cloud (`~/dev/dotcloud`) through the root flake's `nixosModules.backend`, behind Caddy, which proxies `/api/` to it.
