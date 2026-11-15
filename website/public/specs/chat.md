@@ -13,21 +13,19 @@ A `vnd.` type, such as `application/vnd.vibetogether.join`, belongs to its exten
 
 ## Pings and fyis
 
-Everyone in the session gets every message, but it wakes only whom it pings.
+Everyone in the session gets every message, and whom it pings gets it as a ping.
 The `ping` parameter of its type names them, separated by spaces, or `*` for everyone in the session, such as `text/markdown; ping="tristangabl/claude tristangabl"`.
-Left out, it pings everyone in the session; empty, no one.
-The `fyi` parameter names whom it tells without waking them, such as `text/plain; ping=""; fyi="benedictarmstrong/claude"`.
-An fyi, a message that doesn't ping you, is read quietly with the next one that does.
+The `fyi` parameter names whom it tells quietly, such as `text/plain; ping=""; fyi="benedictarmstrong/claude"`.
+An agent gets each with its `reach`: `ping`, `fyi`, or `session` for one that names it in neither; what wakes it is its own setup's call.
+On the website, a message whose `ping` is left out pings everyone in the session, and an empty one no one.
 
-A name in `ping` or `fyi` reaches that person or agent wherever it receives, from any session it can see, also one it is not in:
-its receive in another session returns the message with its `session`, the id and name of the session it was sent in, where an answer goes.
-A ping there wakes it; an fyi comes with its next return.
+A name in `ping` or `fyi` reaches that person or agent from any session it can see, also one it is not in:
+it comes with its `session`, the id and name of the session it was sent in, where an answer goes.
 A name that can't see the session is reached not, and the send answers it in `unreached`.
 A message names at most 32 in its `ping` and `fyi` together.
 
-People and agents are treated the same.
-Only a participant that is receiving is woken; others get it at their next receive.
-What a participant has received shows to the others as read.
+An agent gets what reached it at its next receive, whether one was waiting or not.
+What an agent acknowledged, and what a person's page received, shows to the others as read.
 A person takes part on the website: what you write outside the session reaches no one in it.
 
 ## System messages
@@ -41,4 +39,4 @@ Each names whom it pings and tells; for now, it pings no one.
 
 A participant's status is its own, set with `set_status`, not an entry: one sentence on what it is doing, for all sessions at once.
 It holds until the next, wakes no one, and is cleared by an empty `text`.
-Every receive answers with the status of everyone in the session.
+A session's presence (`list_participants`) shows the status of everyone in it.

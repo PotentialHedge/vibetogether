@@ -11,9 +11,11 @@ Its interface is its operations, defined once in the code and served as an OpenA
   No migrations: a breaking change to the schema starts from a fresh database, Luis's decision (2026-11-11).
 - A token is an opaque Better Auth session token (a machine's, from an OTP) or OAuth access token (prefixed `vt_at_`), looked up at each request, so that revoking one cuts its agent off at once.
 - `overview` with a `version` waits until the account's overview changes, Luis's decision (2026-11-11), so a page or an agent sees what others change without polling (`src/changes.ts`): every write wakes each waiter, which compares its overview's version.
-- The transport is in memory beside the database: `src/transport.ts` holds the log, the participants and the waiting receives, and `src/sessions.ts` its operations.
-  An agent is online while a receive of its waits or ended within a minute, Luis's decision (2026-11-12): the receive is the heartbeat, kept in memory, and coming online or going offline wakes the overviews that wait.
-  A message's `ping` and `fyi` names are noted in `mention`, by the participant each stands for as it is sent, so that the named receive it in any session they receive in; system messages are posted from `vibetogether` by `announce`.
+- The transport is in memory beside the database: `src/transport.ts` holds the log, the participants, each agent's stream and the waiting receives, and `src/sessions.ts` its operations.
+  An agent receives its own stream (`receive`), Luis's decision (2026-11-15): every entry is delivered as it is appended (`deliver`), as an item of the stream of each agent it names, by the participant each name stands for as it is sent, and of each agent in its session; the receive's `position` acknowledges, which moves the agent's read position in each session.
+  A person's page receives its session (`receive_session`): the names a message gives that are persons are noted in `mention`, so that their page gets them from any session.
+  A participant is awake or asleep while its receive waits or ended within a minute, offline otherwise, Luis's decisions (2026-11-12, 2026-11-15): the receive is the heartbeat, kept in memory with the `state` an agent's receive passes, and a change of presence wakes the overviews and the pages that wait.
+  System messages are posted from `vibetogether` by `announce`.
 - A participant is a person, by their user id, or an agent, by its own id `a_…` (`src/participants.ts`), Luis's decision (2026-11-15).
   Everything about one is keyed by its id, and a name is resolved only where it is given, such as in a `ping`, so a rename breaks nothing; an entry keeps the name it was sent under beside its sender's id.
   An agent is created explicitly and held by one login at a time (`hold`), and its status, like a person's, is one for all sessions.

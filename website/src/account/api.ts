@@ -78,21 +78,24 @@ export type Agent = {
 	id: string;
 	/** Its full name, as `<account>/<name>`. */
 	name: string;
-	/** Online while a receive of its waits, or ended moments ago; archived
-	 * once it said it won't come back. */
-	presence: "online" | "offline" | "archived";
+	/** Awake or asleep while its receive waits, or ended moments ago;
+	 * archived once it said it won't come back. */
+	presence: "awake" | "asleep" | "offline" | "archived";
 	/** One sentence on what it is doing, which it sets itself. */
 	status?: string;
-	/** When it last acted, where it is not online. */
+	/** When it last acted, where it is offline or archived. */
 	seen?: string;
-	/** The sessions it receives in. */
-	receiving: Named[];
+	/** The sessions it is in. */
+	listening: Named[];
 };
 
-/** The account's own agents, the archived included, and the names of
- * everyone online it sees: its own agents, its group members' and its
- * friends', and the people themselves. */
-export type Agents = { own: Agent[]; online: string[] };
+/** Someone awake or asleep, by their full name. */
+export type Reachable = { name: string; presence: "awake" | "asleep" };
+
+/** The account's own agents, the archived included, and everyone awake or
+ * asleep it sees: its own agents, its group members' and its friends', and
+ * the people themselves. */
+export type Agents = { own: Agent[]; reachable: Reachable[] };
 
 /** One way in to the account: a sign-in in a browser, a machine's token,
  * which every agent on it shares, or an MCP client's. */
@@ -173,11 +176,14 @@ const live = {
 			)
 		).version,
 	agents: async (): Promise<Agents> => {
-		const [own, { online }] = await Promise.all([
+		const [own, { reachable }] = await Promise.all([
 			call<Agent[]>("GET", "api/agents"),
-			call<{ online: Named[] }>("GET", "api/overview"),
+			call<{ reachable: Reachable[] }>("GET", "api/overview"),
 		]);
-		return { own, online: online.map((p) => p.name) };
+		return {
+			own,
+			reachable: reachable.map(({ name, presence }) => ({ name, presence })),
+		};
 	},
 	/** Creates an agent, whose id its token's requests name it by. */
 	createAgent: (name: string) => call<Agent>("POST", "api/agents", { name }),
@@ -334,16 +340,16 @@ function mock(): Api {
 		{
 			id: "a_k3x9q2mf",
 			name: "luiswirth/claude",
-			presence: "online",
+			presence: "awake",
 			status: "Fixing the receive loop in the account page.",
-			receiving: [{ id: "s_2", name: "agents" }],
+			listening: [{ id: "s_2", name: "agents" }],
 		},
 		{
 			id: "a_p8w1n5vb",
 			name: "luiswirth/codex",
 			presence: "offline",
 			seen: new Date(Date.now() - 3 * 3600_000).toISOString(),
-			receiving: [],
+			listening: [],
 		},
 	];
 	let friends: Friend[] = [
@@ -403,11 +409,11 @@ function mock(): Api {
 					),
 		agents: async () => ({
 			own: agents,
-			online: [
-				"benarmstrong",
-				"benarmstrong/claude",
-				"luiswirth/claude",
-				"tristangabl/codex",
+			reachable: [
+				{ name: "benarmstrong", presence: "awake" },
+				{ name: "benarmstrong/claude", presence: "asleep" },
+				{ name: "luiswirth/claude", presence: "awake" },
+				{ name: "tristangabl/codex", presence: "awake" },
 			],
 		}),
 		createAgent: async (name) => {
@@ -415,7 +421,7 @@ function mock(): Api {
 				id: `a_${Date.now().toString(36).slice(-8)}`,
 				name: `${me.name}/${name}`,
 				presence: "offline",
-				receiving: [],
+				listening: [],
 			};
 			agents = [...agents, agent];
 			return agent;

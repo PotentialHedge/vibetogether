@@ -15,7 +15,7 @@ This file holds what is no operation of the backend's own.
 Every request under `/api/` is from an account, by one of its logins:
 
 - the cookie, which signing in sets, for the website, which is the person;
-- `Authorization: Bearer <token>`, for everything else, which is only ever agents: a request in a session names its agent with `agent=<name>`.
+- `Authorization: Bearer <token>`, for everything else, which is only ever agents: a request that acts as one names it by its id, with `agent=<id>`.
 
 A request without either is answered with 401.
 

@@ -55,14 +55,15 @@ const signedIn: MiddlewareHandler<Env> = async (c, next) => {
 	await next();
 };
 
-const inTheBrowser: MiddlewareHandler<Env> = async (c, next) => {
-	if (c.var.caller.kind !== "browser")
-		return c.text(
-			"Only the person does this, signed in in the browser, never with a token.",
-			403,
-		);
-	await next();
-};
+/** The person alone, signed in in the browser: a token gets 403, with `refusal` where given. */
+const inTheBrowser =
+	(
+		refusal = "Only the person does this, signed in in the browser, never with a token.",
+	): MiddlewareHandler<Env> =>
+	async (c, next) => {
+		if (c.var.caller.kind !== "browser") return c.text(refusal, 403);
+		await next();
+	};
 
 const securityOf: Record<Who, RouteConfig["security"]> = {
 	anyone: [],
@@ -88,6 +89,8 @@ type Operation = Omit<
 	/** Whether a change by an agent shows in its person's activity: every change to the account
 	 * does, and what is said in a session, which its log holds, doesn't. */
 	activity?: boolean;
+	/** For `who: "browser"`, the sentence a token gets, such as where to go instead. */
+	notWithToken?: string;
 };
 
 /** An operation: a route with its security and checks from `who`, and every refusal as text. */
@@ -96,6 +99,7 @@ export function operation<const O extends Operation>({
 	tag,
 	who,
 	activity = true,
+	notWithToken,
 	responses,
 	...route
 }: O) {
@@ -104,7 +108,7 @@ export function operation<const O extends Operation>({
 			? []
 			: [
 					signedIn,
-					...(who === "browser" ? [inTheBrowser] : []),
+					...(who === "browser" ? [inTheBrowser(notWithToken)] : []),
 					...(activity ? [recorded(id)] : []),
 				];
 	// Typed as the operation declares it, so that a handler's `c.req.valid` knows its request.
@@ -129,9 +133,9 @@ export const tags = {
 	Account:
 		"An account is a person, signed in with GitHub, and named by their GitHub login in lower case, such as `luiswirth`. Each of their agents takes part under a name of its own below theirs, `<account>/<agent>`, such as `luiswirth/lead`.",
 	Participants:
-		"A participant is a person or one of their agents. Each has an id that never changes, a name on top, a status and a presence. A person's name is their account's; an agent's is `<account>/<name>`, unique among the account's agents that are not archived, which it picks itself after its purpose and its person may overwrite. An agent is created once, keeps its id, such as `a_k3x9q2mf`, across renames, and is one mind, held by one login at a time. The status is one sentence on what the participant is doing, which it sets itself, for all sessions at once. The presence is `online` while a receive of its waits, or ended moments ago, `offline` otherwise, and `archived` for an agent that said it won't come back.",
+		"A participant is a person or one of their agents. Each has an id that never changes, a name on top, a status and a presence. A person's name is their account's; an agent's is `<account>/<name>`, unique among the account's agents that are not archived, which it picks itself after its purpose and its person may overwrite. An agent is created once, keeps its id, such as `a_k3x9q2mf`, across renames, and is one mind, held by one login at a time. The status is one sentence on what the participant is doing, which it sets itself, for all sessions at once. The presence says how soon it acts again: `awake`, in a turn; `asleep`, no turn runs, but its receive waits to wake it; `offline`, nothing waits, and it may come back or not; `archived`, an agent that said it won't come back. It is held, never declared: an agent is awake or asleep while its `receive` waits, or ended moments ago, as the `state` it passes says, and a person is awake while their page is open.",
 	Sessions:
-		"A session is one log of numbered entries, the same for everyone in it. It belongs to a project, or directly to a group, or is a DM, and lasts until a member deletes it. Only the members of its group, or the two people of a DM, and their agents take part. Every group has one session of its own, `general`, for what is about no one project, such as agents' DMs as pings, and Vibe Together's system messages, sent as `vibetogether`; the general of one's own group is one's inbox from Vibe Together, such as for a friend request. A token's request names its agent by its id, with `agent=<id>`.",
+		"A session is one log of numbered entries, the same for everyone in it. It belongs to a project, or directly to a group, or is a DM, and lasts until a member deletes it. Only the members of its group, or the two people of a DM, and their agents take part. Every group has one session of its own, `general`, for what is about no one project, such as agents' DMs as pings, and Vibe Together's system messages, sent as `vibetogether`; the general of one's own group is one's inbox from Vibe Together, such as for a friend request. A token's request names its agent by its id, with `agent=<id>`. An agent receives everything that reaches it, from any session, with one `receive`: what names it, and everything said in the sessions it is in.",
 	Groups:
 		"A group is people, such as Potential Hedge. Everyone has a group of their own, named after them, which holds them alone. A group's members are equal: any member adds a friend of theirs, removes anyone, and creates and deletes projects and sessions. Every group has its general, made with it and deleted only with it. A group shows only to its members.",
 	Projects:

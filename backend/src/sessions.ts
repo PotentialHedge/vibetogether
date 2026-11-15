@@ -29,6 +29,7 @@ import {
 	Refused,
 	read,
 	receive,
+	receiveSession,
 	send,
 	sessionGone,
 } from "./transport.ts";
@@ -182,14 +183,14 @@ const Entry = z
 		}),
 		ping: z.boolean().optional().meta({
 			description:
-				"Whether it pings the caller, which a receive wakes for; otherwise it is an fyi.",
+				"For a page's receive, whether it pings the person, which the receive wakes for; otherwise it is an fyi.",
 		}),
 		session: z
 			.object({ id: Id("s", "session"), name: z.string() })
 			.optional()
 			.meta({
 				description:
-					"Where it was sent in another session, which named the caller in its `ping` or `fyi`: answer there.",
+					"For a page's receive, where it was sent in another session, which named the person in its `ping` or `fyi`.",
 			}),
 	})
 	.openapi("Entry");
@@ -203,11 +204,13 @@ const Presence = z
 					"Its id, which never changes: a person's account's, or an agent's, as `a_…`.",
 			}),
 			read: z.number().meta({ description: "Its read position." }),
-			receiving: z.boolean().meta({
-				description: "Whether a receive of its is waiting right now.",
+			presence: z.enum(["awake", "asleep", "offline"]).meta({
+				description:
+					"`awake` or `asleep` while its receive waits, or ended moments ago, as it holds it; `offline` otherwise.",
 			}),
 			since: z.string().optional().meta({
-				description: "If not, when its last receive ended, or when it joined.",
+				description:
+					"Where it is offline, when its last receive ended, or when it joined.",
 			}),
 			status: z.string().optional().meta({
 				description: "One sentence on what it is doing, which it sets itself.",
@@ -220,6 +223,23 @@ const Presence = z
 const Log = z
 	.object({ entries: z.array(Entry), presence: Presence })
 	.openapi("Log");
+
+const Item = z
+	.object({
+		n: z.number().meta({
+			description:
+				"Its number in the agent's stream, from 1: pass it on as `position` once it is handled.",
+		}),
+		reach: z.enum(["ping", "fyi", "session"]).meta({
+			description:
+				"Why it reached the agent: `ping`, the message names it in its `ping`, or is `*` while it is in the session; `fyi`, it names it in its `fyi`; `session`, it was said in a session the agent is in, naming it in neither, a join, leave or extension's entry included.",
+		}),
+		session: z
+			.object({ id: Id("s", "session"), name: z.string() })
+			.meta({ description: "The session it was said in: answer there." }),
+		entry: Entry,
+	})
+	.openapi("Item");
 
 /** The participant a request acts for in `session`, with its name. */
 function inSession(
@@ -418,6 +438,82 @@ export function sessionOperations(api: ReturnType<typeof newApi>): void {
 
 	api.openapi(
 		operation({
+			id: "receive",
+			tag: "Sessions",
+			who: "account",
+			activity: false,
+			method: "get",
+			path: "/receive",
+			summary: "Receive",
+			description:
+				"An agent receives everything that reaches it, from any session it sees, as items of its own stream, numbered on their own: every message that names it in its `ping` or `fyi`, and everything said in the sessions it is in, its own entries left out. Each item says why it reached it, as `reach`, and Vibe Together decides nothing more: what wakes the agent is its own setup's call. It returns as soon as there is an item after the agent's read position, or after `wait` seconds. `position` names the read position, the `n` of the last item the agent handled: it acknowledges every item up to it, which moves its read position in their sessions, which everyone sees; an item not acknowledged comes again. The agent is `awake` or `asleep` while its receive waits, or ended moments ago, as `state` says, and `offline` otherwise, which its person, their groups' members and their friends see: keep one waiting always, also while you work. One receive per agent at a time: a newer one ends the one before with 409. A person's page receives its session instead.",
+			request: {
+				query: z
+					.object({
+						agent: AgentQuery,
+						position: Count.optional().meta({
+							description:
+								"The agent's read position in its stream: the `n` of the last item it handled, which it acknowledges with everything before. Left out, the stored one; a smaller one changes nothing.",
+						}),
+						wait: Count.optional().meta({
+							description:
+								"Waits at most this many seconds, and then returns what there is; 0 returns at once.",
+						}),
+						state: z.enum(["awake", "asleep"]).optional().meta({
+							description:
+								"What the agent's own side holds while it waits: `awake` in a turn (the default), `asleep` while no turn runs.",
+						}),
+					})
+					.strict(),
+			},
+			responses: {
+				200: json(
+					z.object({
+						items: z.array(Item).meta({
+							description:
+								"The items after the read position, oldest first, about 1 MB at most.",
+						}),
+						position: z.number().meta({
+							description: "The read position stored now.",
+						}),
+					}),
+					"What reached the agent.",
+				),
+			},
+		}),
+		async (c) => {
+			try {
+				if (c.var.caller.kind === "browser")
+					throw new Refused(
+						403,
+						"Only an agent receives this way, with its token: the person's page receives each session it shows.",
+					);
+				const query = c.req.valid("query");
+				const { user, id } = participantOf(c, query.agent);
+				return c.json(
+					await receive(
+						user,
+						id,
+						c.var.caller.loginId,
+						{
+							...(query.position !== undefined && {
+								position: query.position,
+							}),
+							...(query.wait !== undefined && { wait: query.wait }),
+							state: query.state ?? "awake",
+						},
+						c.req.raw.signal,
+					),
+					200,
+				);
+			} catch (error) {
+				return refused(c, error);
+			}
+		},
+	);
+
+	api.openapi(
+		operation({
 			id: "join_session",
 			tag: "Sessions",
 			who: "account",
@@ -426,7 +522,7 @@ export function sessionOperations(api: ReturnType<typeof newApi>): void {
 			path: "/sessions/{id}/participants",
 			summary: "Join a session",
 			description:
-				"Joins a session, or joins again after leaving; joining while in does nothing. Joining is an entry in the log. An agent is one mind, held by one login at a time: another login takes it once its holder is revoked, or has not acted as it for an hour.",
+				"Joins a session, or joins again after leaving; joining while in does nothing. Joining is an entry in the log. An agent in a session receives everything said in it, from then on (`receive`); one in no session is still reached by what names it. An agent is one mind, held by one login at a time: another login takes it once its holder is revoked, or has not acted as it for an hour.",
 			request: {
 				...SessionPath,
 				query: z.object({ agent: AgentQuery }).strict(),
@@ -478,7 +574,7 @@ export function sessionOperations(api: ReturnType<typeof newApi>): void {
 			path: "/sessions/{id}/participants",
 			summary: "Leave a session",
 			description:
-				"Leaves a session, which is an entry in the log; leaving twice does nothing. A receive still waiting returns.",
+				"Leaves a session, which is an entry in the log; leaving twice does nothing. An agent no longer receives what is said in it, only what names it.",
 			request: {
 				...SessionPath,
 				query: z.object({ agent: AgentQuery }).strict(),
@@ -518,7 +614,7 @@ export function sessionOperations(api: ReturnType<typeof newApi>): void {
 			path: "/sessions/{id}/participants",
 			summary: "Show who is in a session",
 			description:
-				"Everyone in the session, with their read position, whether they are receiving right now, and their status. A member sees it without joining.",
+				"Everyone in the session, with their read position, their presence, and their status. A member sees it without joining.",
 			request: SessionPath,
 			responses: { 200: json(Presence, "Who is in it.") },
 		}),
@@ -543,7 +639,7 @@ export function sessionOperations(api: ReturnType<typeof newApi>): void {
 			method: "post",
 			path: "/sessions/{id}/entries",
 			summary: "Send an entry",
-			description: `Appends an entry with the request's body as its payload, of at most ${maxPayload / 1024 / 1024} MB, and its \`Content-Type\` as its type, \`text/plain; charset=utf-8\` where none is given. A message is \`text/plain\`, \`text/markdown\`, an image or a file; a \`ping\` parameter of its type names whom it wakes, separated by spaces, or \`*\` for everyone, such as \`text/markdown; ping="ben ben/claude"\`: left out, it pings everyone in the session, and empty, no one; left out, it pings only those in the session as it is sent, and who joins later gets it, but not as a ping; \`*\` notifies every participant at that time wherever they receive, as naming each would. An \`fyi\` parameter names whom it tells without waking them. A name in either reaches whom it names as the message is sent, wherever they receive, from any session they see, even one they are not in.`,
+			description: `Appends an entry with the request's body as its payload, of at most ${maxPayload / 1024 / 1024} MB, and its \`Content-Type\` as its type, \`text/plain; charset=utf-8\` where none is given. A message is \`text/plain\`, \`text/markdown\`, an image or a file; a \`ping\` parameter of its type names whom it pings, separated by spaces, or \`*\` for everyone in the session as it is sent, such as \`text/markdown; ping="ben ben/claude"\`, and an \`fyi\` parameter whom it tells quietly. A name in either reaches whom it names as the message is sent, from any session they see, even one they are not in: an agent gets it with \`reach\` \`ping\` or \`fyi\`. Everything else said in a session reaches the agents in it with \`reach\` \`session\`. On a person's page, a message whose \`ping\` is left out pings everyone in the session as it is sent, and an empty one no one.`,
 			request: {
 				...SessionPath,
 				query: z
@@ -615,20 +711,21 @@ export function sessionOperations(api: ReturnType<typeof newApi>): void {
 
 	api.openapi(
 		operation({
-			id: "receive",
+			id: "receive_session",
 			tag: "Sessions",
-			who: "account",
+			who: "browser",
+			notWithToken:
+				"An agent receives with `receive` (GET /api/receive), which returns everything that reaches it from any session.",
 			activity: false,
 			method: "get",
 			path: "/sessions/{id}/entries",
-			summary: "Receive",
+			summary: "Receive a session, as a person's page",
 			description:
-				"Receives what others sent after the caller's read position, and moves it there as it returns: that is what everyone sees as read. It waits until an entry pings the caller, and then returns everything since, each entry marked as a ping or not, an fyi, so an agent that waits on it is woken by a ping. It also returns what other sessions the caller sees sent naming it in their `ping` or `fyi`, each with its `session`: a ping there wakes it too, and an fyi comes with the next return. Each name has one receive at a time on each login: a newer one ends the one before with 409. An agent keeps a receive waiting always, also while it works: it is online while one waits, or ended moments ago, which its person, their groups' members and their friends see in `overview`.",
+				"The person's page receives the session it shows: what others sent after the person's read position, which it moves there as it returns, and what other sessions sent naming the person in their `ping` or `fyi`, each with its `session`. The person is awake while it waits, or ended moments ago. One receive per session and sign-in at a time: a newer one ends the one before with 409. An agent receives with `receive` instead.",
 			request: {
 				...SessionPath,
 				query: z
 					.object({
-						agent: AgentQuery,
 						after: Count.optional().meta({
 							description:
 								"Receives after entry number `after` instead, such as again after a receive was cut off.",
@@ -639,11 +736,10 @@ export function sessionOperations(api: ReturnType<typeof newApi>): void {
 						}),
 						wake: z.enum(["ping", "entry", "change"]).optional().meta({
 							description:
-								"What it waits for: an entry that pings the caller (`ping`, the default), any entry (`entry`), or any change, someone's presence included (`change`), as a page that shows the session.",
+								"What it waits for: an entry that pings the person (`ping`, the default), any entry (`entry`), or any change, someone's presence included (`change`), as a page that shows the session.",
 						}),
 						own: Flag.optional().meta({
-							description:
-								"`1` returns the caller's own entries too, as a page needs.",
+							description: "`1` returns the person's own entries too.",
 						}),
 					})
 					.strict(),
@@ -654,8 +750,8 @@ export function sessionOperations(api: ReturnType<typeof newApi>): void {
 			try {
 				const session = accessible(c, c.req.valid("param").id);
 				const query = c.req.valid("query");
-				const { participant } = inSession(c, session.id, query.agent);
-				const answer: Answer = await receive(
+				const { participant } = inSession(c, session.id, undefined);
+				const answer: Answer = await receiveSession(
 					participant,
 					c.var.caller.loginId,
 					{

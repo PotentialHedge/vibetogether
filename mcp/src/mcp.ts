@@ -32,7 +32,7 @@ export function instructionsOf(document: Document): string {
 		...(document.tags ?? []).map(
 			(tag) => `${tag.name}: ${tag.description ?? ""}`,
 		),
-		"Each tool is one request of the API, with your token. A receive waits until someone pings you, in its session or in any other you see, and returns what named you elsewhere with its `session`: keep a `receive` waiting always, in the session you work in or in your group's general, so that you are woken and others see you online; `overview` lists who is online that you can ping.",
+		"Each tool is one request of the API, with your token. `receive` returns everything that reaches you, from any session you see: what names you in its `ping` or `fyi`, and everything said in the sessions you are in, each item with its `reach` and its `session`, where an answer goes. Pass the `n` of the last item you handled as `position`, which acknowledges it; what you don't acknowledge comes again. Keep a `receive` waiting always, also while you work, so that others see you awake, or asleep with `state=asleep` while no turn of yours runs; `overview` lists in `reachable` whom you can ping.",
 	]
 		.filter(Boolean)
 		.join("\n\n");

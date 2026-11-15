@@ -11,6 +11,7 @@ import {
 	type Group,
 	type Me,
 	type Project,
+	type Reachable,
 	type Session,
 } from "@/account/api";
 import { Person } from "@/account/parts";
@@ -684,14 +685,14 @@ function Members({
 	me,
 	group,
 	friends,
-	online,
+	reachable,
 	act,
 }: {
 	me: Me;
 	group: Group;
 	friends: Friend[];
-	/** The full names of the online agents the person sees. */
-	online: string[];
+	/** Everyone awake or asleep the person sees. */
+	reachable: Reachable[];
 	act: Act;
 }) {
 	const addable = friends.filter(
@@ -727,21 +728,26 @@ function Members({
 								</Button>
 							)}
 						</div>
-						{online
-							.filter((agent) => agent.startsWith(`${name}/`))
+						{reachable
+							.filter((agent) => agent.name.startsWith(`${name}/`))
 							.map((agent) => (
 								<div
-									key={agent}
+									key={agent.name}
 									className="flex h-6 items-center gap-2 pr-2 pl-9 text-xs text-muted-foreground"
-									title={`${agent} is online`}
+									title={`${agent.name} is ${agent.presence}`}
 								>
 									<span
 										role="img"
-										aria-label="online"
-										className="size-1.5 shrink-0 rounded-full bg-emerald-500"
+										aria-label={agent.presence}
+										className={cn(
+											"size-1.5 shrink-0 rounded-full",
+											agent.presence === "awake"
+												? "bg-emerald-500"
+												: "bg-amber-400",
+										)}
 									/>
 									<span className="min-w-0 truncate font-mono">
-										{agent.slice(name.length + 1)}
+										{agent.name.slice(name.length + 1)}
 									</span>
 								</div>
 							))}
@@ -796,7 +802,7 @@ export function Sidebar({
 	projects,
 	sessions,
 	friends,
-	online,
+	reachable,
 	current,
 	onSession,
 	act,
@@ -807,8 +813,8 @@ export function Sidebar({
 	projects: Project[];
 	sessions: Session[];
 	friends: Friend[];
-	/** The full names of the online agents the person sees. */
-	online: string[];
+	/** Everyone awake or asleep the person sees. */
+	reachable: Reachable[];
 	current: string | undefined;
 	onSession: (session: string) => void;
 	act: Act;
@@ -940,7 +946,7 @@ export function Sidebar({
 				me={me}
 				group={group}
 				friends={friends}
-				online={online}
+				reachable={reachable}
 				act={act}
 			/>
 		</div>

@@ -40,7 +40,12 @@ import {
 	sessionOperations,
 	sessionsOf,
 } from "./sessions.ts";
-import { announce, onlineParticipants, quoted, Refused } from "./transport.ts";
+import {
+	announce,
+	quoted,
+	Refused,
+	reachableParticipants,
+} from "./transport.ts";
 
 export const api = newApi();
 
@@ -103,10 +108,12 @@ const Friend = z
 	.openapi("Friend");
 
 /**
- * The participants online that `me` sees: themselves and their agents, and the members of their
- * groups and their friends, with theirs.
+ * The participants awake or asleep that `me` sees: themselves and their agents, and the members of
+ * their groups and their friends, with theirs.
  */
-function onlineSeenBy(me: string): { id: string; name: string }[] {
+function reachableSeenBy(
+	me: string,
+): { id: string; name: string; presence: "awake" | "asleep" }[] {
 	const people = new Set(
 		(
 			db
@@ -118,9 +125,13 @@ function onlineSeenBy(me: string): { id: string; name: string }[] {
 				.all(me, me, me) as { id: string }[]
 		).map((p) => p.id),
 	);
-	return onlineParticipants()
+	return reachableParticipants()
 		.filter((p) => people.has(p.user))
-		.map((p) => ({ id: p.id, name: nameOf(p.user, p.id) }))
+		.map((p) => ({
+			id: p.id,
+			name: nameOf(p.user, p.id),
+			presence: p.presence,
+		}))
 		.sort((a, b) => a.name.localeCompare(b.name));
 }
 
@@ -324,7 +335,7 @@ api.openapi(
 		path: "/overview",
 		summary: "Show everything at once",
 		description:
-			"The account, its groups each with its own sessions, its general first, and its projects with their sessions, its DMs, its friends, its own agents, and every online agent it sees: all an agent needs to find a session or someone to ping, in one request, with the ids the other operations take. With `version`, it waits until any of it changes, such as by a friend, another agent, or an agent coming online.",
+			"The account, its groups each with its own sessions, its general first, and its projects with their sessions, its DMs, its friends, its own agents, and everyone awake or asleep it sees: all an agent needs to find a session or someone to ping, in one request, with the ids the other operations take. With `version`, it waits until any of it changes, such as by a friend, another agent, or someone's presence.",
 		request: {
 			query: z
 				.object({
@@ -357,10 +368,18 @@ api.openapi(
 					agents: z.array(Agent).meta({
 						description: "The account's own agents that are not archived.",
 					}),
-					online: z.array(z.object({ id: z.string(), name: z.string() })).meta({
-						description:
-							"The participants online that the caller sees, people and agents, each with its id and name: itself and its agents, and its group members' and its friends'. A message's `ping` reaches one from any session its person sees, such as a group's they share or their DM.",
-					}),
+					reachable: z
+						.array(
+							z.object({
+								id: z.string(),
+								name: z.string(),
+								presence: z.enum(["awake", "asleep"]),
+							}),
+						)
+						.meta({
+							description:
+								"The participants awake or asleep that the caller sees, people and agents, each with its id, name and presence: itself and its agents, and its group members' and its friends'. A message's `ping` reaches one from any session its person sees, such as a group's they share or their DM.",
+						}),
 					version: z.string().meta({
 						description: "Differs wherever the rest does.",
 					}),
@@ -413,7 +432,7 @@ function overviewOf(me: string) {
 		dms: dmsOf(me),
 		friends: friendsOf(me),
 		agents: agentsOf(me, false),
-		online: onlineSeenBy(me),
+		reachable: reachableSeenBy(me),
 	};
 }
 

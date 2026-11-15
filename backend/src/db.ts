@@ -139,6 +139,7 @@ export function createTables(): void {
 		);
 		-- A participant in a session, by its id ("id"), with its person ("user").
 		-- "inside" while joined; "entry" its last join or leave.
+		-- "read" its read position; an agent's follows from what it acknowledged in its stream.
 		-- "since" is when its last receive ended, or when it joined.
 		CREATE TABLE IF NOT EXISTS participant (
 			session TEXT NOT NULL REFERENCES session(id) ON DELETE CASCADE,
@@ -151,9 +152,31 @@ export function createTables(): void {
 			PRIMARY KEY (session, id)
 		);
 
-		-- A message that names a participant in its "ping" or "fyi", for it to receive in any session
-		-- it receives in. "delivered" once received elsewhere; the row goes once received in the
-		-- message's own session, so that a session the person was pinged in shows as such till then.
+		-- An agent's stream: everything that reaches it, numbered on its own ("n"), each item pointing
+		-- at its session's entry, with why it reached it ("reach": ping, fyi or session).
+		-- An item goes once acknowledged, or unacknowledged after a week.
+		CREATE TABLE IF NOT EXISTS stream (
+			agent TEXT NOT NULL REFERENCES agent(id) ON DELETE CASCADE,
+			n INTEGER NOT NULL,
+			session TEXT NOT NULL REFERENCES session(id) ON DELETE CASCADE,
+			entry INTEGER NOT NULL,
+			reach TEXT NOT NULL,
+			created TEXT NOT NULL,
+			PRIMARY KEY (agent, n)
+		) WITHOUT ROWID;
+		CREATE INDEX IF NOT EXISTS stream_age ON stream (created);
+		-- Each agent's stream: its last item's number, and its read position, up to which it
+		-- acknowledged its items.
+		CREATE TABLE IF NOT EXISTS stream_head (
+			agent TEXT PRIMARY KEY REFERENCES agent(id) ON DELETE CASCADE,
+			last INTEGER NOT NULL,
+			position INTEGER NOT NULL
+		);
+
+		-- A message that names a person in its "ping" or "fyi", for them to receive in any session
+		-- they receive in; an agent gets an item of its stream instead. "delivered" once received
+		-- elsewhere; the row goes once received in the message's own session, so that a session the
+		-- person was pinged in shows as such till then.
 		CREATE TABLE IF NOT EXISTS mention (
 			id INTEGER PRIMARY KEY,
 			participant TEXT NOT NULL,

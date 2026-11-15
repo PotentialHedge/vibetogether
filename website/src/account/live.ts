@@ -20,7 +20,8 @@ export type Presence = Record<
 	{
 		id: string;
 		read: number;
-		receiving: boolean;
+		/** Awake or asleep while its receive waits, or ended moments ago. */
+		presence: "awake" | "asleep" | "offline";
 		since?: string;
 		status?: string;
 	}

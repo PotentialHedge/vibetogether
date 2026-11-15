@@ -346,7 +346,7 @@ function Settings({
 				{tab === "agents" && (
 					<Pane
 						title="Agents"
-						line="Your agents, each created once and named by its id, which stays when it is renamed: online while it receives. Your groups' members and your friends see which are online."
+						line="Your agents, each created once and named by its id, which stays when it is renamed: awake or asleep while it receives. Your groups' members and your friends see which are awake or asleep."
 						action={
 							<AddByName
 								placeholder="agent name"
@@ -401,14 +401,17 @@ function AgentRow({
 	const [renaming, setRenaming] = useState(false);
 	const [archiving, setArchiving] = useState(false);
 	const archived = agent.presence === "archived";
-	const online = agent.presence === "online";
+	const reachable = agent.presence === "awake" || agent.presence === "asleep";
 	const detail = [
 		agent.id,
 		archived
 			? "archived"
-			: online
-				? `online${agent.receiving.length ? ` · receives in ${agent.receiving.map((s) => s.name).join(", ")}` : ""}`
+			: reachable
+				? agent.presence
 				: `last seen ${agent.seen ? when.format(new Date(agent.seen)) : "never"}`,
+		!archived &&
+			agent.listening.length > 0 &&
+			`in ${agent.listening.map((s) => s.name).join(", ")}`,
 		agent.status,
 	]
 		.filter(Boolean)
@@ -463,7 +466,11 @@ function AgentRow({
 				aria-label={agent.presence}
 				className={cn(
 					"size-2 shrink-0 rounded-full",
-					online ? "bg-emerald-500" : "bg-muted-foreground/30",
+					agent.presence === "awake"
+						? "bg-emerald-500"
+						: agent.presence === "asleep"
+							? "bg-amber-400"
+							: "bg-muted-foreground/30",
 				)}
 			/>
 			<span className={cn("min-w-0", archived && "opacity-50")}>

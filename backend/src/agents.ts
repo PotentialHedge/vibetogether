@@ -16,7 +16,6 @@ import { body, done, Id, json, Named, path } from "./schemas.ts";
 import {
 	archive,
 	hold,
-	onlineParticipants,
 	participantChanged,
 	presenceOfParticipant,
 	Refused,
@@ -36,18 +35,19 @@ export const Agent = z
 		name: z.string().meta({
 			description: "Its full name now, as `<account>/<name>`.",
 		}),
-		presence: z.enum(["online", "offline", "archived"]).meta({
+		presence: z.enum(["awake", "asleep", "offline", "archived"]).meta({
 			description:
-				"`online` while a receive of its waits, or ended moments ago; `offline` while none does, and it may come back or not; `archived` once it said it won't come back.",
+				"`awake` or `asleep` while its receive waits, or ended moments ago, as its receive holds it; `offline` while none does, and it may come back or not; `archived` once it said it won't come back.",
 		}),
 		status: z.string().optional().meta({
 			description: "One sentence on what it is doing, which it sets itself.",
 		}),
 		seen: z.string().optional().meta({
-			description: "When it last acted, where it is not online.",
+			description: "When it last acted, where it is offline or archived.",
 		}),
-		receiving: z.array(Named("s", "session")).meta({
-			description: "The sessions a receive of its waits in.",
+		listening: z.array(Named("s", "session")).meta({
+			description:
+				"The sessions it is in, whose every entry reaches it, whether it receives now or not.",
 		}),
 	})
 	.openapi("Agent");
@@ -66,35 +66,40 @@ const AgentName = z.string().refine(isNamePart, {
 const AgentPath = path({ id: Id("a", "agent") });
 
 /** The agent as the operations answer with it. */
-function agentJson(
-	row: AgentRow,
-	login: string,
-	receiving: Map<string, string[]>,
-): z.infer<typeof Agent> {
-	const sessions = receiving.get(row.id);
+function agentJson(row: AgentRow, login: string): z.infer<typeof Agent> {
 	const presence = row.archived ? "archived" : presenceOfParticipant(row.id);
 	const status = statusOf(row.id);
+	const sessions = db
+		.prepare(
+			"SELECT session FROM participant WHERE id = ? AND inside = 1 ORDER BY since",
+		)
+		.all(row.id) as { session: string }[];
 	return {
 		id: row.id,
 		name: `${login}/${row.name}`,
 		presence,
 		...(status !== undefined && { status }),
-		...(presence !== "online" && row.seen !== null && { seen: row.seen }),
-		receiving: (sessions ?? []).flatMap((id) => {
+		...((presence === "offline" || presence === "archived") &&
+			row.seen !== null && { seen: row.seen }),
+		listening: sessions.flatMap(({ session: id }) => {
 			const session = sessionFor(id, row.user);
 			return session ? [{ id, name: session.name }] : [];
 		}),
 	};
 }
 
-/** The account's agents, online first, then the ones seen last first, and the archived last. */
+/** Whether a presence is one that something waits to wake: awake or asleep. */
+function isReachable(presence: string): boolean {
+	return presence === "awake" || presence === "asleep";
+}
+
+/** The account's agents, awake or asleep first, then the ones seen last first, and the archived last. */
 export function agentsOf(me: string, archived = true): z.infer<typeof Agent>[] {
 	const { login } = db
 		.prepare("SELECT login FROM user WHERE id = ?")
 		.get(me) as {
 		login: string;
 	};
-	const receiving = receivingOf(me);
 	const rows = db
 		.prepare(
 			`SELECT * FROM agent WHERE user = ? ${archived ? "" : "AND archived IS NULL"}
@@ -102,10 +107,10 @@ export function agentsOf(me: string, archived = true): z.infer<typeof Agent>[] {
 		)
 		.all(me) as AgentRow[];
 	return rows
-		.map((row) => agentJson(row, login, receiving))
+		.map((row) => agentJson(row, login))
 		.sort(
 			(a, b) =>
-				Number(b.presence === "online") - Number(a.presence === "online"),
+				Number(isReachable(b.presence)) - Number(isReachable(a.presence)),
 		);
 }
 
@@ -219,11 +224,7 @@ export function agentOperations(api: ReturnType<typeof newApi>): void {
 					}
 				});
 				return c.json(
-					agentJson(
-						agentOf(id, caller.id) as AgentRow,
-						caller.login,
-						new Map(),
-					),
+					agentJson(agentOf(id, caller.id) as AgentRow, caller.login),
 					201,
 				);
 			} catch (error) {
@@ -242,7 +243,7 @@ export function agentOperations(api: ReturnType<typeof newApi>): void {
 			path: "/agents",
 			summary: "List the agents",
 			description:
-				"The caller's account's agents, each with its id, name, presence and status: online first, the archived last.",
+				"The caller's account's agents, each with its id, name, presence, status and the sessions it is in: awake or asleep first, the archived last.",
 			responses: { 200: json(z.array(Agent), "The agents.") },
 		}),
 		(c) => c.json(agentsOf(c.var.caller.id), 200),
@@ -280,10 +281,7 @@ export function agentOperations(api: ReturnType<typeof newApi>): void {
 					throw new Refused(403, "An archived agent keeps its last name.");
 				db.prepare("UPDATE agent SET name = ? WHERE id = ?").run(name, row.id);
 				participantChanged(row.id);
-				return c.json(
-					agentJson({ ...row, name }, caller.login, receivingOf(caller.id)),
-					200,
-				);
+				return c.json(agentJson({ ...row, name }, caller.login), 200);
 			} catch (error) {
 				if (isTaken(error)) return refused(c, taken(name));
 				return refused(c, error);
@@ -300,7 +298,7 @@ export function agentOperations(api: ReturnType<typeof newApi>): void {
 			path: "/agents/{id}/archive",
 			summary: "Archive an agent",
 			description:
-				"Archives an agent of the caller's account that won't come back: it leaves every session it is in, receives and sends no more, and its name is free for another agent. It can't be undone.",
+				"Archives an agent of the caller's account that won't come back: it leaves every session it is in, its receive ends, what it had not acknowledged goes, it receives and sends no more, and its name is free for another agent. It can't be undone.",
 			request: AgentPath,
 			responses: done,
 		}),
@@ -359,13 +357,5 @@ export function agentOperations(api: ReturnType<typeof newApi>): void {
 				return refused(c, error);
 			}
 		},
-	);
-}
-
-function receivingOf(me: string): Map<string, string[]> {
-	return new Map(
-		onlineParticipants()
-			.filter((p) => p.user === me)
-			.map((p) => [p.id, p.sessions]),
 	);
 }

@@ -94,13 +94,15 @@ const LAST = "vibetogether last session";
 function App({ state, reload }: { state: State; reload: () => Promise<void> }) {
 	const { me, groups, projects, sessions, friends, dms, agents } = state;
 	/** Whom a mention in a session can name: the people who see it, and of
-	 * their agents the online ones. */
+	 * their agents the awake or asleep ones. */
 	const mentionable = (people: string[]) => [
 		...people,
-		...agents.online.filter(
-			(name) =>
-				name.includes("/") && people.includes(name.split("/")[0] as string),
-		),
+		...agents.reachable
+			.map(({ name }) => name)
+			.filter(
+				(name) =>
+					name.includes("/") && people.includes(name.split("/")[0] as string),
+			),
 	];
 	const { problem, act, dismiss } = useActions(reload);
 	const [deletingSession, setDeletingSession] = useState(false);
@@ -193,7 +195,7 @@ function App({ state, reload }: { state: State; reload: () => Promise<void> }) {
 						)}
 						sessions={sessions}
 						friends={friends}
-						online={agents.online}
+						reachable={agents.reachable}
 						current={session?.id}
 						onSession={(id) => open({ session: id })}
 						act={act}

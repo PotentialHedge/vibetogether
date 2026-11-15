@@ -91,7 +91,7 @@ function useLog(session: Pick<Session, "id">, name: string): Log {
 				!gone &&
 				setLog((log) => ({ ...log, live: true, entries: [...seat.log] })),
 			// A receive answers with the presence as it returns, when this page
-			// is between two receives; it receives again at once, so it is present.
+			// is between two receives; it receives again at once, so it is awake.
 			presence: (presence) =>
 				!gone &&
 				setLog((log) => ({
@@ -103,7 +103,7 @@ function useLog(session: Pick<Session, "id">, name: string): Log {
 								[name]: {
 									id: presence[name].id,
 									read: presence[name].read,
-									receiving: true,
+									presence: "awake",
 									...(presence[name].status !== undefined && {
 										status: presence[name].status,
 									}),
@@ -316,7 +316,7 @@ function Note({ entry }: { entry: Entry }) {
 const isMessage = (entry: Entry) =>
 	!base(entry.type).startsWith("application/vnd.");
 
-/** Who is in the session, each with whether it receives and its status. */
+/** Who is in the session, each with its presence and its status. */
 function People({
 	presence,
 	status,
@@ -330,9 +330,9 @@ function People({
 			<h2 className="flex h-5 items-center font-mono text-xs tracking-wide text-muted-foreground uppercase">
 				Here · {others.length}
 				<MoreInfo label="About who is here">
-					A green dot is receiving now, a gray one has joined but is not
-					receiving, since the time beside it. Under each name is its status,
-					which it sets itself.
+					A green dot is awake, a yellow one asleep: its receive waits to wake
+					it. A gray one is offline, since the time beside it. Under each name
+					is its status, which it sets itself.
 				</MoreInfo>
 			</h2>
 			<ul className="flex flex-col gap-3 text-sm">
@@ -341,12 +341,16 @@ function People({
 						<span
 							className={cn(
 								"mt-[0.45rem] size-1.5 shrink-0 rounded-full",
-								state.receiving ? "bg-emerald-400" : "bg-muted-foreground/50",
+								state.presence === "awake"
+									? "bg-emerald-400"
+									: state.presence === "asleep"
+										? "bg-amber-400"
+										: "bg-muted-foreground/50",
 							)}
 							title={
-								state.receiving
-									? "receiving"
-									: `not receiving since ${state.since ? clock.format(new Date(state.since)) : "joining"}`
+								state.presence === "offline"
+									? `offline since ${state.since ? clock.format(new Date(state.since)) : "joining"}`
+									: state.presence
 							}
 						/>
 						<span className="flex min-w-0 flex-col gap-0.5">
@@ -354,7 +358,7 @@ function People({
 								<span className="truncate">
 									<Name name={name} />
 								</span>
-								{!state.receiving && state.since && (
+								{state.presence === "offline" && state.since && (
 									<span className="shrink-0 font-mono text-xs tabular-nums text-muted-foreground">
 										{clock.format(new Date(state.since))}
 									</span>
@@ -396,7 +400,7 @@ export function Transcript({
 	/** Leads back to the sessions, where they are not beside it. */
 	back?: ReactNode;
 	/** Whom a mention can name: everyone who sees the session, and their
-	 * online agents. */
+	 * agents that are awake or asleep. */
 	mentionable: string[];
 }) {
 	const {
@@ -669,7 +673,8 @@ function typing(
 }
 
 /** The chatbox: Enter sends, Shift+Enter starts a new line. Typing `@` offers
- * whom it can ping: everyone who sees the session, and their online agents. */
+ * whom it can ping: everyone who sees the session, and their agents that are
+ * awake or asleep. */
 function Composer({
 	send,
 	mentionable,
@@ -773,7 +778,7 @@ function Composer({
 								{name.includes("/") && (
 									<span
 										role="img"
-										aria-label="online"
+										aria-label="reachable"
 										className="size-1.5 shrink-0 rounded-full bg-emerald-500"
 									/>
 								)}
@@ -887,21 +892,21 @@ function made(): Omit<Log, "live" | "source" | "send" | "note"> {
 	return {
 		entries,
 		presence: {
-			luiswirth: { id: "u_luiswirth", read: 8, receiving: true },
+			luiswirth: { id: "u_luiswirth", read: 8, presence: "awake" },
 			"luiswirth/claude": {
 				id: "a_k3x9q2mf",
 				read: 8,
-				receiving: true,
+				presence: "awake",
 				status: "Fixing the receive loop in the account page.",
 			},
 			"benarmstrong/claude": {
 				id: "a_7tq2wz8c",
 				read: 6,
-				receiving: false,
+				presence: "offline",
 				since: at(12),
 				status: "Fixing the receive loop in agents.md.",
 			},
-			"tristangabl/codex": { id: "a_m4p0d3xr", read: 7, receiving: true },
+			"tristangabl/codex": { id: "a_m4p0d3xr", read: 7, presence: "asleep" },
 		},
 		problem: null,
 	};

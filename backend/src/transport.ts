@@ -1,7 +1,8 @@
 /**
- * The transport: each session's log, its participants, and the receives waiting on it.
- * Everything waiting is in memory, everything else in the database, so a restart ends the
- * waiting receives, which their clients make again.
+ * The transport: each session's log, its participants, each agent's stream, and the receives
+ * waiting. An agent receives its stream, which holds everything that reaches it; a person's page
+ * receives its session. Everything waiting is in memory, everything else in the database, so a
+ * restart ends the waiting receives, which their clients make again.
  */
 import { statfsSync } from "node:fs";
 import { dirname } from "node:path";
@@ -22,8 +23,8 @@ const maxInline = 64 * 1024;
 const maxAnswer = 1024 * 1024;
 /** How long an agent stays its login's after that login last acted as it, while no receive of its waits. */
 const holdFor = 3600_000;
-/** How long a participant stays online after its last receive ended, so that receiving again keeps it. */
-const onlineFor = 60_000;
+/** How long a participant stays awake or asleep after its last receive ended, so that receiving again keeps it. */
+const graceFor = 60_000;
 
 /**
  * A participant in a session: `id` is the person's own, which is `user`, or one of their agents'.
@@ -61,12 +62,21 @@ type EntryRow = {
 	text: string | null;
 };
 
+/** The state an agent's receive holds, set by its own side: whether it is in a turn. */
+export type State = "awake" | "asleep";
+
+/**
+ * A participant's presence, by how soon it acts again: `awake` or `asleep`, as its receive holds,
+ * while one waits or ended moments ago, `offline` otherwise. A person's page holds `awake`.
+ */
+export type PresenceState = State | "offline";
+
 export type Presence = Record<
 	string,
 	{
 		id: string;
 		read: number;
-		receiving: boolean;
+		presence: PresenceState;
 		since?: string;
 		status?: string;
 	}
@@ -180,62 +190,94 @@ function pingsEveryone(type: string): boolean {
 /** The most names one message lists in its `ping` and `fyi` together. */
 const maxNamed = 32;
 
+/** Why an item reached an agent: it names it in `ping`, or in `fyi`, or was said in a session it listens to. */
+export type Reach = "ping" | "fyi" | "session";
+
 /**
- * Notes entry `n` of `session` for every name its `ping` or `fyi` lists, and for `*` every
- * participant, which sees the session, so that it reaches them in any session they receive in.
- * A name stands for whom it names as the entry is sent. Returns the participants noted, and the
- * names that see the session not.
+ * Delivers entry `n` of `session`, from the participant `sender`, null for Vibe Together's own.
+ * A message reaches every name its `ping` or `fyi` lists, as the name stands as it is sent, where
+ * it sees the session, and for an explicit `*` every participant in the session, as a ping; any
+ * entry reaches every agent in the session, the sender left out. An agent gets an item of its
+ * stream, and a person named a mention. Returns the persons and agents reached, and the names that
+ * see the session not.
  */
-function mention(
+function deliver(
 	session: string,
 	n: number,
 	sender: string | null,
 	type: string,
-): { noted: { user: string; id: string }[]; unreached: string[] } {
+): {
+	people: { user: string; id: string }[];
+	agents: string[];
+	unreached: string[];
+} {
 	const unreached: string[] = [];
-	if (!isMessage(type)) return { noted: [], unreached };
-	const named = namesOf(type, "ping");
-	const ping = new Set(named.filter((name) => name !== "*"));
-	const fyi = [
-		...new Set(namesOf(type, "fyi").filter((name) => !ping.has(name))),
-	];
-	if (ping.size + fyi.length > maxNamed)
-		throw new Refused(
-			400,
-			`A message names at most ${maxNamed} in its ping and fyi together.`,
-		);
-	const reached = new Map<string, { user: string; ping: boolean }>();
-	for (const name of [...ping, ...fyi]) {
-		const p = participantByName(name);
-		if (p?.id === sender) continue;
-		if (!p || !sessionFor(session, p.user)) {
-			unreached.push(name);
+	const reached = new Map<string, { user: string; reach: Reach }>();
+	const inSession = db
+		.prepare(`${participants} WHERE p.session = ? AND p.inside = 1`)
+		.all(session) as ParticipantRow[];
+	if (isMessage(type)) {
+		const named = namesOf(type, "ping");
+		const ping = new Set(named.filter((name) => name !== "*"));
+		const fyi = [
+			...new Set(namesOf(type, "fyi").filter((name) => !ping.has(name))),
+		];
+		if (ping.size + fyi.length > maxNamed)
+			throw new Refused(
+				400,
+				`A message names at most ${maxNamed} in its ping and fyi together.`,
+			);
+		for (const name of [...ping, ...fyi]) {
+			const p = participantByName(name);
+			if (p?.id === sender) continue;
+			if (!p || !sessionFor(session, p.user)) {
+				unreached.push(name);
+				continue;
+			}
+			const pinged = ping.has(name) || reached.get(p.id)?.reach === "ping";
+			reached.set(p.id, { user: p.user, reach: pinged ? "ping" : "fyi" });
+		}
+		// An explicit ping to everyone reaches every participant in the session, as naming each would.
+		if (named.includes("*"))
+			for (const row of inSession)
+				if (row.id !== sender)
+					reached.set(row.id, { user: row.user, reach: "ping" });
+	}
+	for (const row of inSession)
+		if (
+			row.id !== row.user &&
+			row.id !== sender &&
+			!reached.has(row.id) &&
+			sessionFor(session, row.user)
+		)
+			reached.set(row.id, { user: row.user, reach: "session" });
+	const now = new Date().toISOString();
+	const people: { user: string; id: string }[] = [];
+	const agents: string[] = [];
+	for (const [id, { user, reach }] of reached) {
+		if (id === user) {
+			if (reach === "session") continue;
+			db.prepare(
+				"INSERT INTO mention (participant, user, session, n, ping, created) VALUES (?, ?, ?, ?, ?, ?)",
+			).run(id, user, session, n, reach === "ping" ? 1 : 0, now);
+			people.push({ user, id });
 			continue;
 		}
-		reached.set(p.id, {
-			user: p.user,
-			ping: ping.has(name) || reached.get(p.id)?.ping === true,
-		});
-	}
-	// An explicit ping to everyone notifies every participant wherever they receive, as naming each would.
-	if (named.includes("*"))
-		for (const row of db
-			.prepare(`${participants} WHERE p.session = ? AND p.inside = 1`)
-			.all(session) as ParticipantRow[])
-			if (row.id !== sender)
-				reached.set(row.id, { user: row.user, ping: true });
-	const now = new Date().toISOString();
-	for (const [id, { user, ping }] of reached)
+		const { last } = db
+			.prepare(
+				`INSERT INTO stream_head (agent, last, position) VALUES (?, 1, 0)
+				 ON CONFLICT DO UPDATE SET last = last + 1 RETURNING last`,
+			)
+			.get(id) as { last: number };
 		db.prepare(
-			"INSERT INTO mention (participant, user, session, n, ping, created) VALUES (?, ?, ?, ?, ?, ?)",
-		).run(id, user, session, n, ping ? 1 : 0, now);
-	return {
-		noted: [...reached].map(([id, { user }]) => ({ user, id })),
-		unreached,
-	};
+			"INSERT INTO stream (agent, n, session, entry, reach, created) VALUES (?, ?, ?, ?, ?, ?)",
+		).run(id, last, session, n, reach, now);
+		agents.push(id);
+	}
+	return { people, agents, unreached };
 }
 
-/** Who is in the session, with their read position, whether they are receiving, and their status. */
+/** Who is in the session, with their read position, their presence, and their status. */
 export function presenceOf(session: string): Presence {
 	const rows = db
 		.prepare(
@@ -247,24 +289,22 @@ export function presenceOf(session: string): Presence {
 		.all(session) as (ParticipantRow & { text: string | null })[];
 	const presence: Presence = {};
 	for (const row of rows) {
-		const receiving = [...waiting].some(
-			(w) => !w.reads && w.session === session && w.id === row.id,
-		);
+		const state = presenceOfParticipant(row.id);
 		presence[rowName(row)] = {
 			id: row.id,
 			read: row.read,
-			receiving,
-			...(!receiving && { since: row.since }),
+			presence: state,
+			...(state === "offline" && { since: row.since }),
 			...(row.text !== null && { status: row.text }),
 		};
 	}
 	return presence;
 }
 
-/** A receive or a read that waits: a participant's, or a member's reading. */
+/** A person's page receiving its session, or a member reading a session. */
 type Waiter = {
 	session: string;
-	/** The participant's person and id, where it is a receive; a read is no participant. */
+	/** The person, where it is a receive; a read is no participant. */
 	user: string;
 	id: string;
 	reads: boolean;
@@ -296,67 +336,101 @@ type MentionRow = EntryRow & {
 
 const waiting = new Set<Waiter>();
 
-/** When each participant's last receive started or ended, by its id. */
-const lastReceived = new Map<string, { user: string; time: number }>();
-
-/** Whether the participant is online: a receive of its waits, or ended moments ago. */
-function isOnline(id: string): boolean {
-	const last = lastReceived.get(id);
-	if (last && Date.now() - last.time < onlineFor) return true;
-	for (const w of waiting) if (!w.reads && w.id === id) return true;
-	return false;
-}
-
-/**
- * A participant's presence: `online` while a receive of its waits, or ended moments ago,
- * `offline` otherwise. An agent is `asleep` once a watch on it can wait, which isn't built yet.
- */
-export function presenceOfParticipant(id: string): "online" | "offline" {
-	return isOnline(id) ? "online" : "offline";
-}
-
-/** Every participant online now, each with the sessions it receives in. */
-export function onlineParticipants(): {
+/** An agent's receive waiting on its stream, with the state it holds. */
+type StreamWaiter = {
 	user: string;
 	id: string;
-	sessions: string[];
+	login: string;
+	state: State;
+	/** Returns what is after the read position now, or the refusal. */
+	end: (refused?: Refused) => void;
+};
+
+/** The one receive of each agent waiting, by its id. */
+const streams = new Map<string, StreamWaiter>();
+
+/** When each participant's last receive started or ended, by its id, and the state it held. */
+const lastReceived = new Map<
+	string,
+	{ user: string; time: number; state: State }
+>();
+
+/**
+ * A participant's presence: the state its receive holds while one waits, or ended moments ago,
+ * `offline` otherwise. A person's page is `awake`.
+ */
+export function presenceOfParticipant(id: string): PresenceState {
+	const stream = streams.get(id);
+	if (stream) return stream.state;
+	for (const w of waiting) if (!w.reads && w.id === id) return "awake";
+	const last = lastReceived.get(id);
+	if (last && Date.now() - last.time < graceFor) return last.state;
+	return "offline";
+}
+
+/** Every participant awake or asleep now, with its presence. */
+export function reachableParticipants(): {
+	user: string;
+	id: string;
+	presence: State;
 }[] {
-	const online = new Map<
-		string,
-		{ user: string; id: string; sessions: string[] }
-	>();
-	const now = Date.now();
-	for (const [id, { user, time }] of lastReceived)
-		if (now - time < onlineFor) online.set(id, { user, id, sessions: [] });
-	for (const w of waiting) {
-		if (w.reads) continue;
-		const p = online.get(w.id) ?? { user: w.user, id: w.id, sessions: [] };
-		if (!p.sessions.includes(w.session)) p.sessions.push(w.session);
-		online.set(w.id, p);
-	}
-	return [...online.values()];
+	const ids = new Map<string, string>();
+	for (const [id, { user }] of lastReceived) ids.set(id, user);
+	for (const w of waiting) if (!w.reads) ids.set(w.id, w.user);
+	for (const w of streams.values()) ids.set(w.id, w.user);
+	return [...ids].flatMap(([id, user]) => {
+		const presence = presenceOfParticipant(id);
+		return presence === "offline" ? [] : [{ user, id, presence }];
+	});
 }
 
 /**
- * Notes that a receive of the participant started or ended: what shows who is online changes
- * where it comes online now, or once it stays offline.
+ * Makes `change` to what the participant's presence comes from: where the presence changes, the
+ * pages that show it and the overviews that wait are woken.
  */
-function received(user: string, id: string): void {
-	const was = isOnline(id);
-	lastReceived.set(id, { user, time: Date.now() });
+function presenceChange(id: string, change: () => void): void {
+	const was = presenceOfParticipant(id);
+	change();
+	if (presenceOfParticipant(id) !== was) presenceMoved(id);
+}
+
+/** Wakes what shows the participant's presence: its sessions' pages, and the overviews that wait. */
+function presenceMoved(id: string): void {
+	written();
+	queueMicrotask(() => {
+		for (const { session } of db
+			.prepare("SELECT session FROM participant WHERE id = ? AND inside = 1")
+			.all(id) as { session: string }[])
+			notify(session, true);
+	});
+}
+
+/**
+ * Notes that a receive of the participant started or ended, holding `state`: it stays awake or
+ * asleep moments longer, so that receiving again keeps it, and goes offline after.
+ */
+function received(user: string, id: string, state: State): void {
+	lastReceived.set(id, { user, time: Date.now(), state });
 	if (id !== user)
 		db.prepare("UPDATE agent SET seen = ? WHERE id = ?").run(
 			new Date().toISOString(),
 			id,
 		);
-	if (!was) written();
 	setTimeout(() => {
 		const last = lastReceived.get(id);
-		if (last && Date.now() - last.time >= onlineFor) {
+		if (last && Date.now() - last.time >= graceFor) {
 			lastReceived.delete(id);
-			if (!isOnline(id)) written();
+			if (presenceOfParticipant(id) === "offline") presenceMoved(id);
 		}
-	}, onlineFor + 100).unref();
+	}, graceFor + 100).unref();
+}
+
+/** Notes when the participant's receive ended, which its sessions show while it is offline. */
+function ended(id: string): void {
+	db.prepare("UPDATE participant SET since = ? WHERE id = ?").run(
+		new Date().toISOString(),
+		id,
+	);
 }
 
 /**
@@ -537,22 +611,26 @@ export function sessionGone(session: string): void {
 	);
 }
 
-/** Checks that the caller may still be in `session`, as a member, and holds its agent. */
+/** Checks that the person may still be in `session`, as a member, and is in it where it receives. */
 function stillIn(w: Waiter): Refused | undefined {
 	if (!lasts(w.user, w.login)) return new Refused(403, "The login is revoked.");
 	if (!sessionFor(w.session, w.user))
 		return new Refused(403, "You are no longer in this session's group.");
 	if (w.reads) return undefined;
-	const row = participantRow(w);
-	if (!row?.inside) return new Refused(403, "You left the session.");
-	if (w.id !== w.user) {
-		const agent = db
-			.prepare("SELECT holder, archived FROM agent WHERE id = ?")
-			.get(w.id) as { holder: string | null; archived: string | null };
-		if (agent.archived) return new Refused(403, "The agent is archived.");
-		if (agent.holder !== w.login)
-			return new Refused(403, "Another login took this agent.");
-	}
+	if (!participantRow(w)?.inside)
+		return new Refused(403, "You left the session.");
+	return undefined;
+}
+
+/** Checks that the agent's login lasts and still holds it, and that it is not archived. */
+function stillHolds(w: StreamWaiter): Refused | undefined {
+	if (!lasts(w.user, w.login)) return new Refused(403, "The login is revoked.");
+	const agent = db
+		.prepare("SELECT holder, archived FROM agent WHERE id = ?")
+		.get(w.id) as { holder: string | null; archived: string | null };
+	if (agent.archived) return new Refused(403, "The agent is archived.");
+	if (agent.holder !== w.login)
+		return new Refused(403, "Another login took this agent.");
 	return undefined;
 }
 
@@ -561,6 +639,10 @@ function stillIn(w: Waiter): Refused | undefined {
 setInterval(() => {
 	for (const w of [...waiting]) {
 		const refused = stillIn(w);
+		if (refused) w.end(refused);
+	}
+	for (const w of [...streams.values()]) {
+		const refused = stillHolds(w);
 		if (refused) w.end(refused);
 	}
 }, 5000).unref();
@@ -587,7 +669,7 @@ export function hold(user: string, id: string, login: string): void {
 		);
 	const other = agent.holder !== null && agent.holder !== login;
 	if (other) {
-		const busy = [...waiting].some((w) => !w.reads && w.id === id);
+		const busy = streams.has(id);
 		const recent =
 			agent.seen !== null && Date.now() - Date.parse(agent.seen) < holdFor;
 		if (lasts(user, agent.holder as string) && (busy || recent))
@@ -601,10 +683,9 @@ export function hold(user: string, id: string, login: string): void {
 		new Date().toISOString(),
 		id,
 	);
-	if (other)
-		for (const w of [...waiting])
-			if (!w.reads && w.id === id && w.login !== login)
-				w.end(new Refused(403, "Another login took this agent."));
+	const stream = streams.get(id);
+	if (other && stream && stream.login !== login)
+		stream.end(new Refused(403, "Another login took this agent."));
 }
 
 /** The participant, joined, or why not. */
@@ -647,6 +728,26 @@ function adds(user: string, bytes: number): void {
 		);
 	count.entries += 1;
 	count.bytes += bytes;
+}
+
+/** Refuses another receive of the account where it has too many waiting. */
+function mayWait(user: string): void {
+	const held =
+		[...waiting].filter((w) => w.user === user).length +
+		[...streams.values()].filter((w) => w.user === user).length;
+	if (held >= limits.waiting)
+		throw new Refused(503, "This account has too many receives waiting.", 10);
+}
+
+/** Wakes what an entry of `session` reached: the session's pages, the persons it named, and the agents. */
+function reach(
+	session: string,
+	{ people, agents }: { people: { id: string }[]; agents: string[] },
+	presenceChanged = false,
+): void {
+	notify(session, presenceChanged);
+	notifyNamed(session, people);
+	for (const id of agents) streams.get(id)?.end();
 }
 
 /** Appends an entry from `sender`, by its name and its participant's id, null for Vibe Together's own. */
@@ -713,9 +814,13 @@ export function join(
 			 VALUES (?, ?, ?, 1, ?, ?, ?)
 			 ON CONFLICT DO UPDATE SET inside = 1, entry = excluded.entry, since = excluded.since`,
 		).run(p.session, p.id, p.user, n, row?.read ?? 0, new Date().toISOString());
-		return { n, read: row?.read ?? 0 };
+		return {
+			n,
+			read: row?.read ?? 0,
+			reached: deliver(p.session, n, p.id, joinType),
+		};
 	});
-	notify(p.session, true);
+	if ("reached" in result) reach(p.session, result.reached, true);
 	return { n: result.n, name, read: result.read };
 }
 
@@ -733,7 +838,7 @@ export function leave(
 }
 
 function leaveAs(p: Participant, name: string): { n: number } {
-	const n = transaction(() => {
+	const { n, reached } = transaction(() => {
 		const n = append(
 			p.session,
 			{ name, id: p.id },
@@ -744,10 +849,10 @@ function leaveAs(p: Participant, name: string): { n: number } {
 		db.prepare(
 			"UPDATE participant SET inside = 0, entry = ?, since = ? WHERE session = ? AND id = ?",
 		).run(n, new Date().toISOString(), p.session, p.id);
-		return n;
+		return { n, reached: deliver(p.session, n, p.id, leaveType) };
 	});
 	endWaiters(p.session, (w) => !w.reads && w.id === p.id, entriesFor);
-	notify(p.session, true);
+	reach(p.session, reached, true);
 	return { n };
 }
 
@@ -768,12 +873,12 @@ export function send(
 			`A payload is at most ${maxPayload / 1024 / 1024} MB.`,
 		);
 	adds(p.user, payload.length);
-	const { n, noted, unreached } = transaction(() => {
+	const { n, reached } = transaction(() => {
 		const n = append(p.session, { name, id: p.id }, type, payload, filename);
-		return { n, ...mention(p.session, n, p.id, type) };
+		return { n, reached: deliver(p.session, n, p.id, type) };
 	});
-	notify(p.session, false);
-	notifyNamed(p.session, noted);
+	reach(p.session, reached);
+	const { unreached } = reached;
 	return { n, ...(unreached.length && { unreached }) };
 }
 
@@ -787,7 +892,7 @@ export function participantChanged(id: string): void {
 
 /**
  * Archives the agent `id` of `user`, which said it won't come back: it leaves every session it is
- * in, under `name`, and receives and sends no more, and its name is free for another.
+ * in, under `name`, receives and sends no more, its stream goes, and its name is free for another.
  */
 export function archive(user: string, id: string, name: string): void {
 	for (const { session } of db
@@ -799,11 +904,10 @@ export function archive(user: string, id: string, name: string): void {
 			"UPDATE agent SET archived = ?, holder = NULL WHERE id = ? AND user = ?",
 		).run(new Date().toISOString(), id, user);
 		db.prepare("DELETE FROM status WHERE participant = ?").run(id);
-		db.prepare("DELETE FROM mention WHERE participant = ?").run(id);
+		db.prepare("DELETE FROM stream WHERE agent = ?").run(id);
+		db.prepare("DELETE FROM stream_head WHERE agent = ?").run(id);
 	});
-	for (const w of [...waiting])
-		if (!w.reads && w.id === id)
-			w.end(new Refused(403, "The agent is archived."));
+	streams.get(id)?.end(new Refused(403, "The agent is archived."));
 }
 
 /**
@@ -837,7 +941,7 @@ export function announce(
 	}
 	if (++count.n > maxAnnounced) return;
 	const type = `text/markdown; charset=utf-8; ping="${ping.join(" ")}"${fyi.length ? `; fyi="${fyi.join(" ")}"` : ""}`;
-	const { noted } = transaction(() => {
+	const reached = transaction(() => {
 		const n = append(
 			session,
 			{ name: systemName, id: null },
@@ -845,24 +949,24 @@ export function announce(
 			new TextEncoder().encode(text),
 			null,
 		);
-		return mention(session, n, null, type);
+		return deliver(session, n, null, type);
 	});
-	notify(session, false);
-	notifyNamed(session, noted);
+	reach(session, reached);
 }
 
 /**
- * Receives what others sent after the read position, or after `after`, and acknowledges what it
- * covers as it returns. It waits until something wakes it, or `wait` seconds are over.
- * One receive per participant and login at a time: a newer one ends the one before with 409.
+ * A person's page receives its session: what others sent after the read position, or after
+ * `after`, which it acknowledges as it returns, and the messages of other sessions that name the
+ * person. It waits until something wakes it, or `wait` seconds are over, and holds the person
+ * awake meanwhile. One receive per session and login at a time: a newer one ends the one before
+ * with 409. An agent receives its stream instead (`receive`).
  */
-export function receive(
+export function receiveSession(
 	p: Participant,
 	login: string,
 	options: { after?: number; wait?: number; wake: Wake; own: boolean },
 	signal: AbortSignal,
 ): Promise<Answer> {
-	hold(p.user, p.id, login);
 	const row = inside(p);
 	endWaiters(
 		p.session,
@@ -875,7 +979,7 @@ export function receive(
 	);
 	const after = Math.min(options.after ?? row.read, lastOf(p.session));
 	seen(p, after);
-	received(p.user, p.id);
+	presenceChange(p.id, () => received(p.user, p.id, "awake"));
 	return wait(
 		{
 			session: p.session,
@@ -924,56 +1028,47 @@ function wait(
 	const waiter = w as Waiter;
 	const found = entriesFor(waiter);
 	if (ready(waiter, found) || seconds === 0)
-		return Promise.resolve(finish(waiter, found, presenceOf(w.session), false));
-	if (
-		[...waiting].filter((other) => other.user === w.user).length >=
-		limits.waiting
-	)
-		return Promise.reject(
-			new Refused(503, "This account has too many receives waiting.", 10),
-		);
-	// Whether a receive is waiting is presence; one that wakes for any change, such as a
-	// page's, changes nothing for others, so that two of them don't wake each other forever.
-	const counted = !waiter.reads && waiter.wake !== "change";
+		return Promise.resolve(finish(waiter, found, presenceOf(w.session)));
+	try {
+		mayWait(w.user);
+	} catch (error) {
+		return Promise.reject(error);
+	}
+	// A receive holds its person awake while it waits; a read is no presence.
+	const held = (change: () => void) =>
+		waiter.reads ? change() : presenceChange(waiter.id, change);
 	return new Promise<Answer>((resolve, reject) => {
 		let timer: NodeJS.Timeout | undefined;
 		const stop = (): boolean => {
-			if (!waiting.delete(waiter)) return false;
+			if (!waiting.has(waiter)) return false;
+			held(() => {
+				waiting.delete(waiter);
+				if (!waiter.reads) received(waiter.user, waiter.id, "awake");
+			});
 			clearTimeout(timer);
 			signal.removeEventListener("abort", abort);
-			if (!waiter.reads) received(waiter.user, waiter.id);
+			if (!waiter.reads) ended(waiter.id);
 			return true;
 		};
 		waiter.end = (outcome, presence) => {
 			if (!stop()) return;
-			if (outcome instanceof Refused) {
-				reject(outcome);
-				if (counted) notify(w.session, true);
-			} else
-				resolve(
-					finish(waiter, outcome, presence ?? presenceOf(w.session), counted),
-				);
+			if (outcome instanceof Refused) reject(outcome);
+			else resolve(finish(waiter, outcome, presence ?? presenceOf(w.session)));
 		};
 		const abort = () => {
 			if (!stop()) return;
 			reject(new Refused(400, "The receive was cut off."));
-			if (waiter.reads) return;
-			db.prepare(
-				"UPDATE participant SET since = ? WHERE session = ? AND id = ?",
-			).run(new Date().toISOString(), w.session, w.id);
-			if (counted) notify(w.session, true);
 		};
-		waiting.add(waiter);
+		held(() => waiting.add(waiter));
 		signal.addEventListener("abort", abort);
 		if (seconds !== undefined)
 			timer = setTimeout(() => waiter.end(entriesFor(waiter)), seconds * 1000);
-		if (counted) notify(w.session, true);
 	});
 }
 
 /**
- * The participant has received its session up to `n`: what named it there up to it no longer
- * marks the session as pinging it.
+ * The person has received its session up to `n`: what named them there up to it no longer
+ * marks the session as pinging them.
  */
 function seen(p: Pick<Participant, "session" | "id">, n: number): void {
 	const gone = db
@@ -984,16 +1079,8 @@ function seen(p: Pick<Participant, "session" | "id">, n: number): void {
 	if (gone) written();
 }
 
-/**
- * A receive that returns acknowledges what it covers, and ends its receiving: the presence
- * changes where its read position moved, or where it counted as receiving.
- */
-function finish(
-	w: Waiter,
-	found: Found,
-	presence: Presence,
-	wasReceiving: boolean,
-): Answer {
+/** A receive that returns acknowledges what it covers: its read position moves, which its session shows. */
+function finish(w: Waiter, found: Found, presence: Presence): Answer {
 	const answer = answerOf(w, found, presence);
 	if (w.reads) return answer;
 	// The messages that named it are received: those of other sessions it got here, and those of
@@ -1006,11 +1093,177 @@ function finish(
 			"UPDATE participant SET read = ? WHERE session = ? AND id = ? AND read < ?",
 		)
 		.run(found.covered, w.session, w.id, found.covered).changes;
-	db.prepare(
-		"UPDATE participant SET since = ? WHERE session = ? AND id = ?",
-	).run(new Date().toISOString(), w.session, w.id);
-	if (moved || wasReceiving) queueMicrotask(() => notify(w.session, true));
+	if (moved) queueMicrotask(() => notify(w.session, true));
 	return answer;
+}
+
+/** An item of an agent's stream, as its receive answers it. */
+export type Item = {
+	n: number;
+	reach: Reach;
+	session: { id: string; name: string };
+	entry: Entry;
+};
+
+export type StreamAnswer = { items: Item[]; position: number };
+
+type ItemRow = EntryRow & {
+	item: number;
+	reach: Reach;
+	session: string;
+	sessionName: string;
+};
+
+/**
+ * Moves the agent's read position in its stream to `position`, at most its last item, and never
+ * back: it acknowledges every item up to it, which go, and moves its read position in each of
+ * their sessions to the last entry acknowledged there. Returns the read position now.
+ */
+function acknowledge(id: string, position: number | undefined): number {
+	const head = (db
+		.prepare("SELECT last, position FROM stream_head WHERE agent = ?")
+		.get(id) as { last: number; position: number } | undefined) ?? {
+		last: 0,
+		position: 0,
+	};
+	if (position === undefined) return head.position;
+	const to = Math.min(position, head.last);
+	if (to <= head.position) return head.position;
+	const moved = transaction(() => {
+		const reads = db
+			.prepare(
+				"SELECT session, max(entry) AS entry FROM stream WHERE agent = ? AND n > ? AND n <= ? GROUP BY session",
+			)
+			.all(id, head.position, to) as { session: string; entry: number }[];
+		db.prepare("DELETE FROM stream WHERE agent = ? AND n <= ?").run(id, to);
+		db.prepare("UPDATE stream_head SET position = ? WHERE agent = ?").run(
+			to,
+			id,
+		);
+		return reads.filter(
+			({ session, entry }) =>
+				db
+					.prepare(
+						"UPDATE participant SET read = ? WHERE session = ? AND id = ? AND read < ?",
+					)
+					.run(entry, session, id, entry).changes > 0,
+		);
+	});
+	for (const { session } of moved) notify(session, true);
+	return to;
+}
+
+/**
+ * The agent's items after `position`, about one answer's worth: those of a session it sees no
+ * longer go.
+ */
+function itemsOf(user: string, id: string, position: number): Item[] {
+	const rows = db
+		.prepare(
+			`SELECT st.n AS item, st.reach, st.session, s.name AS sessionName,
+			 e.n, e.time, e.sender, e.participant, e.type, e.size, e.filename, e.text
+			 FROM stream st JOIN entry e ON e.session = st.session AND e.n = st.entry
+			 JOIN session s ON s.id = st.session
+			 WHERE st.agent = ? AND st.n > ? ORDER BY st.n LIMIT 1000`,
+		)
+		.all(id, position) as ItemRow[];
+	const sees = new Map<string, string | undefined>();
+	const items: Item[] = [];
+	let bytes = 0;
+	for (const row of rows) {
+		if (!sees.has(row.session))
+			sees.set(row.session, sessionFor(row.session, user)?.name);
+		const name = sees.get(row.session);
+		if (name === undefined) {
+			db.prepare("DELETE FROM stream WHERE agent = ? AND n = ?").run(
+				id,
+				row.item,
+			);
+			continue;
+		}
+		bytes += (row.text?.length ?? 0) + 200;
+		if (items.length && bytes > maxAnswer) break;
+		items.push({
+			n: row.item,
+			reach: row.reach,
+			session: { id: row.session, name },
+			entry: entryJson(row),
+		});
+	}
+	return items;
+}
+
+// An item unacknowledged for a week goes.
+setInterval(
+	() =>
+		db
+			.prepare("DELETE FROM stream WHERE created < ?")
+			.run(new Date(Date.now() - 7 * 86400_000).toISOString()),
+	3600_000,
+).unref();
+
+/**
+ * An agent receives its stream: everything that reached it after its read position, as `position`
+ * names it, or as it is stored. Naming the position acknowledges every item up to it. It returns
+ * as soon as there is an item, or after `wait` seconds, and holds the agent's `state` meanwhile:
+ * it is awake or asleep while its receive waits, or ended moments ago. One receive per agent at a
+ * time: a newer one ends the one before with 409.
+ */
+export function receive(
+	user: string,
+	id: string,
+	login: string,
+	options: { position?: number; wait?: number; state: State },
+	signal: AbortSignal,
+): Promise<StreamAnswer> {
+	hold(user, id, login);
+	streams
+		.get(id)
+		?.end(
+			new Refused(409, "A newer receive of the same agent replaced this one."),
+		);
+	const position = acknowledge(id, options.position);
+	presenceChange(id, () => received(user, id, options.state));
+	const items = itemsOf(user, id, position);
+	if (items.length || options.wait === 0)
+		return Promise.resolve({ items, position });
+	try {
+		mayWait(user);
+	} catch (error) {
+		return Promise.reject(error);
+	}
+	return new Promise<StreamAnswer>((resolve, reject) => {
+		let timer: NodeJS.Timeout | undefined;
+		const waiter: StreamWaiter = {
+			user,
+			id,
+			login,
+			state: options.state,
+			end: (refused) => {
+				if (!stop()) return;
+				if (refused) reject(refused);
+				else resolve({ items: itemsOf(user, id, position), position });
+			},
+		};
+		const stop = (): boolean => {
+			if (streams.get(id) !== waiter) return false;
+			presenceChange(id, () => {
+				streams.delete(id);
+				received(user, id, options.state);
+			});
+			clearTimeout(timer);
+			signal.removeEventListener("abort", abort);
+			ended(id);
+			return true;
+		};
+		const abort = () => {
+			if (stop()) reject(new Refused(400, "The receive was cut off."));
+		};
+		presenceChange(id, () => streams.set(id, waiter));
+		signal.addEventListener("abort", abort);
+		const { wait } = options;
+		if (wait !== undefined) timer = setTimeout(() => waiter.end(), wait * 1000);
+	});
 }
 
 /** An entry's payload, with its type and file name. */
