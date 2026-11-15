@@ -71,21 +71,27 @@ export type Friend = {
 	state: "friends" | "asked" | "asking";
 };
 
-/** One of the account's agents, as it shows while it receives: an agent
- * that uses Vibe Together always does. */
+/** One of the account's agents: created once, named by its id, which stays
+ * across renames. */
 export type Agent = {
-	/** Its full name, as `<account>/<agent>`. */
+	/** Its id, as `a_…`, which a token's request names it by. */
+	id: string;
+	/** Its full name, as `<account>/<name>`. */
 	name: string;
-	/** Whether a receive of its waits, or ended moments ago. */
-	online: boolean;
-	/** When it was last seen, where it is offline. */
+	/** Online while a receive of its waits, or ended moments ago; archived
+	 * once it said it won't come back. */
+	presence: "online" | "offline" | "archived";
+	/** One sentence on what it is doing, which it sets itself. */
+	status?: string;
+	/** When it last acted, where it is not online. */
 	seen?: string;
 	/** The sessions it receives in. */
 	receiving: Named[];
 };
 
-/** The account's own agents, and the full names of every online agent it
- * sees: its own, its group members' and its friends'. */
+/** The account's own agents, the archived included, and the names of
+ * everyone online it sees: its own agents, its group members' and its
+ * friends', and the people themselves. */
 export type Agents = { own: Agent[]; online: string[] };
 
 /** One way in to the account: a sign-in in a browser, a machine's token,
@@ -167,12 +173,18 @@ const live = {
 			)
 		).version,
 	agents: async (): Promise<Agents> => {
-		const { agents, online } = await call<{
-			agents: Agent[];
-			online: string[];
-		}>("GET", "api/overview");
-		return { own: agents, online };
+		const [own, { online }] = await Promise.all([
+			call<Agent[]>("GET", "api/agents"),
+			call<{ online: Named[] }>("GET", "api/overview"),
+		]);
+		return { own, online: online.map((p) => p.name) };
 	},
+	/** Creates an agent, whose id its token's requests name it by. */
+	createAgent: (name: string) => call<Agent>("POST", "api/agents", { name }),
+	renameAgent: (id: string, name: string) =>
+		call<Agent>("PATCH", `api/agents/${encodeURIComponent(id)}`, { name }),
+	archiveAgent: (id: string) =>
+		call<void>("POST", `api/agents/${encodeURIComponent(id)}/archive`),
 	groups: () => call<Group[]>("GET", "api/groups"),
 	createGroup: (name: string) => call<Group>("POST", "api/groups", { name }),
 	deleteGroup: (id: string) =>
@@ -318,6 +330,22 @@ function mock(): Api {
 		{ id: "s_2", name: "agents", ...inProject("p_2") },
 		{ id: "s_3", name: "demo", ...inProject("p_2") },
 	];
+	let agents: Agent[] = [
+		{
+			id: "a_k3x9q2mf",
+			name: "luiswirth/claude",
+			presence: "online",
+			status: "Fixing the receive loop in the account page.",
+			receiving: [{ id: "s_2", name: "agents" }],
+		},
+		{
+			id: "a_p8w1n5vb",
+			name: "luiswirth/codex",
+			presence: "offline",
+			seen: new Date(Date.now() - 3 * 3600_000).toISOString(),
+			receiving: [],
+		},
+	];
 	let friends: Friend[] = [
 		{
 			name: "benarmstrong",
@@ -374,21 +402,35 @@ function mock(): Api {
 						),
 					),
 		agents: async () => ({
-			own: [
-				{
-					name: "luiswirth/claude",
-					online: true,
-					receiving: [{ id: "s_2", name: "agents" }],
-				},
-				{
-					name: "luiswirth/codex",
-					online: false,
-					seen: new Date(Date.now() - 3 * 3600_000).toISOString(),
-					receiving: [],
-				},
+			own: agents,
+			online: [
+				"benarmstrong",
+				"benarmstrong/claude",
+				"luiswirth/claude",
+				"tristangabl/codex",
 			],
-			online: ["benarmstrong/claude", "luiswirth/claude", "tristangabl/codex"],
 		}),
+		createAgent: async (name) => {
+			const agent: Agent = {
+				id: `a_${Date.now().toString(36).slice(-8)}`,
+				name: `${me.name}/${name}`,
+				presence: "offline",
+				receiving: [],
+			};
+			agents = [...agents, agent];
+			return agent;
+		},
+		renameAgent: async (id, name) => {
+			agents = agents.map((a) =>
+				a.id === id ? { ...a, name: `${me.name}/${name}` } : a,
+			);
+			return agents.find((a) => a.id === id) as Agent;
+		},
+		archiveAgent: async (id) => {
+			agents = agents.map((a) =>
+				a.id === id ? { ...a, presence: "archived" } : a,
+			);
+		},
 		groups: async () => groups,
 		createGroup: async (name) => {
 			const group = {

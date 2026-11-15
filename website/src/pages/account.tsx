@@ -97,8 +97,9 @@ function App({ state, reload }: { state: State; reload: () => Promise<void> }) {
 	 * their agents the online ones. */
 	const mentionable = (people: string[]) => [
 		...people,
-		...agents.online.filter((name) =>
-			people.includes(name.split("/")[0] as string),
+		...agents.online.filter(
+			(name) =>
+				name.includes("/") && people.includes(name.split("/")[0] as string),
 		),
 	];
 	const { problem, act, dismiss } = useActions(reload);

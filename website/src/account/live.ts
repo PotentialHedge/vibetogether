@@ -17,12 +17,17 @@ export type Entry = {
 
 export type Presence = Record<
 	string,
-	{ read: number; receiving: boolean; since?: string; status?: string }
+	{
+		id: string;
+		read: number;
+		receiving: boolean;
+		since?: string;
+		status?: string;
+	}
 >;
 
 export const JOIN = "application/vnd.vibetogether.join";
 export const LEAVE = "application/vnd.vibetogether.leave";
-export const STATUS = "application/vnd.vibetogether.chat.status+json";
 
 export class LiveError extends Error {
 	status: number;

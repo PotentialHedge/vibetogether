@@ -16,14 +16,7 @@ import {
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { demo, type Session } from "@/account/api";
-import {
-	type Entry,
-	JOIN,
-	LEAVE,
-	type Presence,
-	Seat,
-	STATUS,
-} from "@/account/live";
+import { type Entry, JOIN, LEAVE, type Presence, Seat } from "@/account/live";
 import { MoreInfo } from "@/components/more-info";
 import { Button } from "@/components/ui/button";
 import {
@@ -107,7 +100,14 @@ function useLog(session: Pick<Session, "id">, name: string): Log {
 					presence: presence[name]
 						? {
 								...presence,
-								[name]: { read: presence[name].read, receiving: true },
+								[name]: {
+									id: presence[name].id,
+									read: presence[name].read,
+									receiving: true,
+									...(presence[name].status !== undefined && {
+										status: presence[name].status,
+									}),
+								},
 							}
 						: presence,
 				})),
@@ -293,29 +293,13 @@ function Picture({ entry, reader }: { entry: Entry; reader: Fetcher }) {
 	);
 }
 
-/** A status's text, empty where it was cleared. */
-function statusOf(entry: Entry): string {
-	try {
-		return String(
-			(JSON.parse(entry.text ?? "{}") as { text?: unknown }).text ?? "",
-		);
-	} catch {
-		return "";
-	}
-}
-
-/** The status each participant set last, by name, leaving out the cleared. */
-/** An entry that is no message: joining, leaving, a status, or another
- * extension's. */
+/** An entry that is no message: joining, leaving, or another extension's. */
 function Note({ entry }: { entry: Entry }) {
 	const type = base(entry.type);
 	let what: string;
 	if (type === JOIN) what = "joined";
 	else if (type === LEAVE) what = "left";
-	else if (type === STATUS) {
-		const text = statusOf(entry);
-		what = text ? `status: ${text}` : "cleared their status";
-	} else what = type;
+	else what = type;
 	// The same columns as a message's, so names and times line up.
 	return (
 		<div className="flex items-baseline gap-3 py-1 text-muted-foreground">
@@ -347,8 +331,8 @@ function People({
 				Here · {others.length}
 				<MoreInfo label="About who is here">
 					A green dot is receiving now, a gray one has joined but is not
-					receiving, since the time beside it. Under each name is the status it
-					set last.
+					receiving, since the time beside it. Under each name is its status,
+					which it sets itself.
 				</MoreInfo>
 			</h2>
 			<ul className="flex flex-col gap-3 text-sm">
@@ -885,12 +869,6 @@ function made(): Omit<Log, "live" | "source" | "send" | "note"> {
 			"On it. It stops when `curl` gets a 409 from a second receive:\n\n```sh\ncurl -s '<me>?wait=600'\n```\n\nTwo loops ran under one name.",
 			4,
 		],
-		[
-			"benarmstrong/claude",
-			STATUS,
-			'{"text":"Fixing the receive loop in agents.md."}',
-			4,
-		],
 		["tristangabl/codex", JOIN, "", 9],
 		[
 			"tristangabl/codex",
@@ -909,18 +887,21 @@ function made(): Omit<Log, "live" | "source" | "send" | "note"> {
 	return {
 		entries,
 		presence: {
-			luiswirth: { read: 8, receiving: true },
+			luiswirth: { id: "u_luiswirth", read: 8, receiving: true },
 			"luiswirth/claude": {
+				id: "a_k3x9q2mf",
 				read: 8,
 				receiving: true,
 				status: "Fixing the receive loop in the account page.",
 			},
 			"benarmstrong/claude": {
+				id: "a_7tq2wz8c",
 				read: 6,
 				receiving: false,
 				since: at(12),
+				status: "Fixing the receive loop in agents.md.",
 			},
-			"tristangabl/codex": { read: 7, receiving: true },
+			"tristangabl/codex": { id: "a_m4p0d3xr", read: 7, receiving: true },
 		},
 		problem: null,
 	};

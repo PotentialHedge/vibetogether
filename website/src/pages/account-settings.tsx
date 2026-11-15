@@ -346,30 +346,21 @@ function Settings({
 				{tab === "agents" && (
 					<Pane
 						title="Agents"
-						line="Your agents, under the names they took: online while they receive. Your groups' members and your friends see which are online."
+						line="Your agents, each created once and named by its id, which stays when it is renamed: online while it receives. Your groups' members and your friends see which are online."
+						action={
+							<AddByName
+								placeholder="agent name"
+								label="Create"
+								onAdd={async (name) => {
+									await api.createAgent(name);
+									await reload();
+								}}
+							/>
+						}
 					>
-						<Rows empty="No agent has taken part yet.">
+						<Rows empty="No agents yet: an agent creates itself, or you create it here and give it its id.">
 							{agents.map((agent) => (
-								<Row key={agent.name}>
-									<span
-										role="img"
-										aria-label={agent.online ? "online" : "offline"}
-										className={cn(
-											"size-2 shrink-0 rounded-full",
-											agent.online
-												? "bg-emerald-500"
-												: "bg-muted-foreground/30",
-										)}
-									/>
-									<Titled
-										title={agent.name}
-										detail={
-											agent.online
-												? `online${agent.receiving.length ? ` · receives in ${agent.receiving.map((s) => s.name).join(", ")}` : ""}`
-												: `last seen ${agent.seen ? when.format(new Date(agent.seen)) : "a while ago"}`
-										}
-									/>
-								</Row>
+								<AgentRow key={agent.id} agent={agent} act={act} />
 							))}
 						</Rows>
 					</Pane>
@@ -395,6 +386,90 @@ function Settings({
 				{tab === "account" && <AccountPane />}
 			</main>
 		</div>
+	);
+}
+
+/** One agent: its name, id, presence and status, renamed in place, and
+ * archived after a second click, since that can't be undone. */
+function AgentRow({
+	agent,
+	act,
+}: {
+	agent: Agent;
+	act: (action: () => Promise<unknown>) => () => Promise<void>;
+}) {
+	const [renaming, setRenaming] = useState(false);
+	const [archiving, setArchiving] = useState(false);
+	const archived = agent.presence === "archived";
+	const online = agent.presence === "online";
+	const detail = [
+		agent.id,
+		archived
+			? "archived"
+			: online
+				? `online${agent.receiving.length ? ` · receives in ${agent.receiving.map((s) => s.name).join(", ")}` : ""}`
+				: `last seen ${agent.seen ? when.format(new Date(agent.seen)) : "never"}`,
+		agent.status,
+	]
+		.filter(Boolean)
+		.join(" · ");
+	return (
+		<Row
+			actions={
+				archived ? undefined : renaming ? (
+					<AddByName
+						placeholder={agent.name.split("/")[1] ?? ""}
+						label="Rename"
+						onAdd={async (name) => {
+							await act(() => api.renameAgent(agent.id, name))();
+							setRenaming(false);
+						}}
+					/>
+				) : archiving ? (
+					<>
+						<Button
+							variant="destructive"
+							size="sm"
+							onClick={act(() => api.archiveAgent(agent.id))}
+						>
+							Archive for good
+						</Button>
+						<Button
+							variant="ghost"
+							size="sm"
+							onClick={() => setArchiving(false)}
+						>
+							Cancel
+						</Button>
+					</>
+				) : (
+					<>
+						<Button variant="ghost" size="sm" onClick={() => setRenaming(true)}>
+							Rename
+						</Button>
+						<Button
+							variant="ghost"
+							size="sm"
+							onClick={() => setArchiving(true)}
+						>
+							Archive
+						</Button>
+					</>
+				)
+			}
+		>
+			<span
+				role="img"
+				aria-label={agent.presence}
+				className={cn(
+					"size-2 shrink-0 rounded-full",
+					online ? "bg-emerald-500" : "bg-muted-foreground/30",
+				)}
+			/>
+			<span className={cn("min-w-0", archived && "opacity-50")}>
+				<Titled title={agent.name} detail={detail} />
+			</span>
+		</Row>
 	);
 }
 
