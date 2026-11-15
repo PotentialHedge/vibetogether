@@ -106,8 +106,11 @@ const live = {
 		change: { name?: string; repos?: string[] },
 	) => (await client()).changeProject(id, change),
 	deleteProject: async (id: string) => (await client()).deleteProject(id),
-	createSession: async (project: string, name: string) =>
-		(await client()).createSession({ project, name }),
+	/** A session in a project, or directly in a group. */
+	createSession: async (
+		place: { project: string } | { group: string },
+		name: string,
+	) => (await client()).createSession({ ...place, name }),
 	deleteSession: async (id: string) => (await client()).deleteSession(id),
 	activity: async () => (await client()).activity(),
 	/** Deletes the account: only the person, signed in, may. */
@@ -384,11 +387,20 @@ function mock(): Api {
 			projects = projects.filter((project) => project.id !== id);
 			sessions = sessions.filter((session) => session.project?.id !== id);
 		},
-		createSession: async (project, name) => {
+		createSession: async (place, name) => {
 			const session = {
 				id: `s_${Date.now()}`,
 				name,
-				...inProject(project),
+				...("project" in place
+					? inProject(place.project)
+					: {
+							project: undefined,
+							group: named(place.group),
+							general: false,
+							pinged: false,
+							friend: undefined,
+							creator: me.name,
+						}),
 			};
 			sessions = [...sessions, session];
 			return session;

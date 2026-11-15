@@ -152,7 +152,8 @@ function useLog(session: Pick<Session, "id">, name: string): Log {
 function hue(name: string): string {
 	let hash = 0;
 	for (const char of name) hash = (hash * 31 + char.charCodeAt(0)) >>> 0;
-	return `oklch(0.8 0.11 ${hash % 360})`;
+	const h = hash % 360;
+	return `light-dark(oklch(0.55 0.13 ${h}), oklch(0.8 0.11 ${h}))`;
 }
 
 function Name({ name }: { name: string }) {

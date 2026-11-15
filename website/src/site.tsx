@@ -7,6 +7,7 @@ import { Person } from "@/account/parts";
 import { GitHubIcon, useMe } from "@/account/sign-in";
 import { cn } from "@/lib/utils";
 import "./analytics";
+import "./theme";
 import "./index.css";
 
 /** The site's root, wherever it is served: the built modules sit one

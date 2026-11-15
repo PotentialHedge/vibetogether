@@ -1,7 +1,16 @@
 /** The app's navigation: the person's DMs and groups in the rail, and the
  * open group's projects, their sessions and its members in the sidebar. */
 
-import { Ellipsis, LogOut, Plus, Settings, X } from "lucide-react";
+import {
+	Ellipsis,
+	LogOut,
+	Monitor,
+	Moon,
+	Plus,
+	Settings,
+	Sun,
+	X,
+} from "lucide-react";
 import { type ReactNode, useEffect, useState } from "react";
 import {
 	type Account,
@@ -30,6 +39,8 @@ import {
 	DropdownMenuGroup,
 	DropdownMenuItem,
 	DropdownMenuLabel,
+	DropdownMenuRadioGroup,
+	DropdownMenuRadioItem,
 	DropdownMenuSeparator,
 	DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
@@ -44,6 +55,7 @@ import {
 } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
 import { page } from "@/site";
+import { type Theme, useTheme } from "@/theme";
 
 type Act = (action: () => Promise<unknown>) => () => Promise<void>;
 
@@ -341,6 +353,7 @@ export function Rail({
 	settings?: boolean;
 }) {
 	const [adding, setAdding] = useState(false);
+	const [theme, setTheme] = useTheme();
 	const sorted = [...groups].sort((a, b) => Number(b.own) - Number(a.own));
 	return (
 		<nav
@@ -458,6 +471,25 @@ export function Rail({
 						<Settings />
 						Settings
 					</DropdownMenuItem>
+					<DropdownMenuSeparator />
+					<DropdownMenuRadioGroup
+						value={theme}
+						onValueChange={(value) => setTheme(value as Theme)}
+					>
+						<DropdownMenuRadioItem value="system">
+							<Monitor />
+							System
+						</DropdownMenuRadioItem>
+						<DropdownMenuRadioItem value="light">
+							<Sun />
+							Light
+						</DropdownMenuRadioItem>
+						<DropdownMenuRadioItem value="dark">
+							<Moon />
+							Dark
+						</DropdownMenuRadioItem>
+					</DropdownMenuRadioGroup>
+					<DropdownMenuSeparator />
 					<DropdownMenuItem
 						onClick={async () => {
 							await api.signOut();
@@ -670,7 +702,10 @@ function ProjectItem({
 				label="Create session"
 				placeholder="session name"
 				onName={async (name) => {
-					const session = await api.createSession(project.id, name);
+					const session = await api.createSession(
+						{ project: project.id },
+						name,
+					);
 					await reload();
 					onSession(session.id);
 				}}
@@ -822,6 +857,7 @@ export function Sidebar({
 	// Groups are flat: any member deletes the group, and the last one leaves only by deleting it.
 	const last = group.members.length <= 1;
 	const [adding, setAdding] = useState(false);
+	const [addingSession, setAddingSession] = useState(false);
 	const [deleting, setDeleting] = useState(false);
 	return (
 		<div className="flex min-h-0 min-w-0 flex-1 flex-col bg-card/20 md:w-64 md:flex-none md:shrink-0 md:border-r">
@@ -864,6 +900,21 @@ export function Sidebar({
 				)}
 			</header>
 			<div className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto p-2">
+				<Heading
+					action={
+						<Button
+							variant="ghost"
+							size="icon-xs"
+							title="New session"
+							aria-label={`New session in ${group.name}`}
+							onClick={() => setAddingSession(true)}
+						>
+							<Plus />
+						</Button>
+					}
+				>
+					Sessions
+				</Heading>
 				<ul className="mb-2 flex flex-col">
 					{sessions
 						.filter(
@@ -920,6 +971,19 @@ export function Sidebar({
 					onName={async (name) => {
 						await api.createProject(group.id, name);
 						await reload();
+					}}
+				/>
+				<NameDialog
+					open={addingSession}
+					onOpenChange={setAddingSession}
+					title={`New session in ${group.name}`}
+					description="Where you, your group and your agents talk."
+					label="Create session"
+					placeholder="session name"
+					onName={async (name) => {
+						const session = await api.createSession({ group: group.id }, name);
+						await reload();
+						onSession(session.id);
 					}}
 				/>
 				{projects.length === 0 && (

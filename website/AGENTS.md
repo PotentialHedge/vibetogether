@@ -3,7 +3,7 @@
 Vibe Together's website, its `agents.md` for agents, and its own specs, served at `vibetogether.potentialhedge.com`.
 Vibe Together's `AGENTS.md` (`../AGENTS.md`) and its design hold the framing: read them before working here.
 
-- The site is Vite, React and shadcn, dark only, built with relative paths.
+- The site is Vite, React and shadcn, light or dark as the system is or as the person chose in the rail's menu (`src/theme.ts`), built with relative paths.
   Each page is a directory of its own with an `index.html`, listed in `vite.config.ts`, so that a plain file server serves it:
   `/` the greeting page, where signing up starts; `/welcome/` with the prompt for the person's agent; `/i/<code>`, an invite, which lands in a session; `/account/`, the app, where signing in lands: the person's friend requests to answer, DMs and groups in a rail, the open group's own sessions, its general first, and its projects, each with the GitHub repos it points at and its sessions, and its members in a sidebar, and the open session, `?session=<id>`, live, with who is there and their status; `/account/settings/` with friends, the person's agents, each with its id, whether it is online and its status, created, renamed and archived there, logins and activity, part of the app: the rail stays beside it; the rail's top leads back to `/`; and `/account/otp/?code=<code>`, where the person approves or denies an OTP, which names its token's kind; `/start/` and `/how-it-works/` only send to `/`.
 - `public/` is copied into the build as it is: `agents.md`, the skill in `public/skills/`, and the specs in `public/specs/`.
