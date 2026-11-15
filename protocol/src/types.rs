@@ -482,12 +482,15 @@ wire! {
 }
 
 impl Item {
-  /// Whether it wakes its receiver by default: a ping, or a message said in a session the
-  /// receiver is in; an fyi, a join, a leave or another extension's entry lands quietly.
+  /// Whether it wakes its receiver by default: a ping, or a message said to a session the
+  /// receiver is in, its `ping` left out; a message that pings no one (`ping=""`), an fyi, a join,
+  /// a leave or another extension's entry lands quietly, since the sender decides.
   pub fn wakes(&self) -> bool {
     match self.reach {
       Reach::Ping => true,
-      Reach::Session => crate::is_message(&self.entry.ty),
+      Reach::Session => {
+        crate::is_message(&self.entry.ty) && crate::parameter_of(&self.entry.ty, "ping").is_none()
+      }
       Reach::Fyi => false,
     }
   }
