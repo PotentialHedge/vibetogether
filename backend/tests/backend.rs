@@ -815,7 +815,7 @@ async fn accepting_an_invite_makes_friends_joins_its_group_and_lands_in_its_sess
   assert_eq!(again.land.group.as_ref().unwrap().id, w.group.id);
   let plain = w
     .luis
-    .machine
+    .browser
     .create_invite(&CreateInvite::default())
     .await
     .unwrap();
@@ -1711,11 +1711,8 @@ async fn letting_someone_in_and_deleting_are_the_persons_alone() {
   let logins = w.luis.browser.logins().await.unwrap();
   let other = logins.iter().find(|l| l.kind == LoginKind::Person).unwrap();
   refused(machine.revoke_login(&other.id).await);
-  // An agent may still invite to be friends, and revoke its own token.
-  machine
-    .create_invite(&CreateInvite::default())
-    .await
-    .unwrap();
+  // Nor may it invite to be friends, or remove a member; it may revoke its own token.
+  refused(machine.create_invite(&CreateInvite::default()).await);
   // The ask addresses the person.
   let overview = w
     .luis

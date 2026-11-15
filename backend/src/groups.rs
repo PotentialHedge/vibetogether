@@ -369,6 +369,7 @@ pub async fn remove_member(
   caller: Caller,
   Path((id, name)): Path<(String, String)>,
 ) -> Result<StatusCode> {
+  caller.as_person()?;
   let mut db = app.db.acquire().await?;
   let group = group_for(&mut db, &id, &caller.account).await?;
   if group.person.is_some() {

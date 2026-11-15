@@ -120,7 +120,8 @@ async fn invite_by_code(db: &mut Db, code: &str) -> Result<Option<InviteRow>> {
 }
 
 /// Creates a link that invites one person to be the caller's friend, and with `group` or
-/// `session` to join that group too, which is the person's alone, never an agent's.
+/// `session` to join that group too: the person's alone, never an agent's, since accepting it makes
+/// a friend.
 pub async fn create(
   State(app): State<App>,
   caller: Caller,
@@ -130,9 +131,7 @@ pub async fn create(
     true => CreateInvite::default(),
     false => serde_json::from_slice(&body).map_err(|e| Refusal::bad(e.to_string()))?,
   };
-  if input.group.is_some() || input.session.is_some() {
-    caller.as_person()?;
-  }
+  caller.as_person()?;
   let mut db = app.db.acquire().await?;
   caller.limit(&mut db, "create_invite").await?;
   let me = &caller.account;

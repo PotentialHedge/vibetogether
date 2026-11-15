@@ -266,8 +266,8 @@ enum Command {
   },
   /// Lists your open invites.
   Invites,
-  /// Creates an invite to be friends, and with --group or --session to join that group too,
-  /// which only the person does.
+  /// Creates an invite to be friends, and with --group or --session to join that group too: only
+  /// the person does this, since accepting it makes a friend.
   CreateInvite {
     #[arg(long)]
     group: Option<String>,

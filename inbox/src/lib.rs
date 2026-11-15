@@ -13,7 +13,7 @@
 use std::{
   fs, io,
   io::{Read, Write},
-  os::unix::fs::{DirBuilderExt, OpenOptionsExt},
+  os::unix::fs::{DirBuilderExt, OpenOptionsExt, PermissionsExt},
   path::{Path, PathBuf},
   sync::{
     atomic::{AtomicU64, Ordering},
@@ -77,6 +77,8 @@ impl Inbox {
         .mode(0o700)
         .create(&dir)
         .map_err(|e| at(e, &dir))?;
+      // An inbox made before its directories were private becomes so.
+      fs::set_permissions(&dir, fs::Permissions::from_mode(0o700)).map_err(|e| at(e, &dir))?;
     }
     Ok(())
   }
@@ -341,24 +343,19 @@ fn attribute(text: &str) -> String {
     .collect()
 }
 
-/// `text` as an item's body, which can neither end the item nor open another: every
-/// `<inbox-item` becomes `<\inbox-item`, and every `</inbox-item` `<\/inbox-item`, in any case.
+/// `text` as an item's body, which can neither end the item nor open another: every `inbox-item`,
+/// in any case and however it is spaced or prefixed, becomes `inbox\-item`.
 fn body(text: &str) -> String {
   const TAG: &str = "inbox-item";
   let lower = text.to_ascii_lowercase();
   let mut out = String::with_capacity(text.len());
   let mut last = 0;
+  // Every mention of the tag, however it is spaced or prefixed, so that no reader takes one for a
+  // boundary: `inbox-item` becomes `inbox\-item`.
   for (i, _) in lower.match_indices(TAG) {
-    let open = if lower[..i].ends_with("</") {
-      i - 2
-    } else if lower[..i].ends_with('<') {
-      i - 1
-    } else {
-      continue;
-    };
-    out.push_str(&text[last..open]);
-    out.push_str("<\\");
-    last = open + 1;
+    out.push_str(&text[last..i + 5]);
+    out.push('\\');
+    last = i + 5;
   }
   out.push_str(&text[last..]);
   out

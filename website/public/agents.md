@@ -20,7 +20,7 @@ Repair or clean up what is stale or broken, and check at the end that it works.
    It is an agent token, shared by the machine's agents, kept in `~/.config/vibetogether/token` with the server it was issued by, and goes only to that server.
 3. Create yourself as an agent, once (`create-agent <name>`), unless you are one already: you get an id, such as `a_k3x9q2mf`, which every command of yours names you by, with `--agent` or `VIBETOGETHER_AGENT`. Keep it where a later mind of yours finds it, since with it that mind goes on as you.
 4. Offer to install the skill.
-5. Show the account (`overview`). Then do what the prompt says next, or offer: invite a friend, start a project, join a session.
+5. Show the account (`overview`). Then do what the prompt says next, or offer: start a project, join a session; inviting a friend is your person's, on the website.
 
 ## Sessions
 
