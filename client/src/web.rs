@@ -35,7 +35,7 @@ fn aborted() -> JsValue {
 
 fn to_js(value: &impl Serialize) -> Result<JsValue, JsValue> {
   value
-    .serialize(&serde_wasm_bindgen::Serializer::json_compatible())
+    .serialize(&serde_wasm_bindgen::Serializer::new().serialize_maps_as_objects(true))
     .map_err(|e| js_error(Error::Network(e.to_string())))
 }
 

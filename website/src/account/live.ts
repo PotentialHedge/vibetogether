@@ -1,58 +1,30 @@
-/** A session as the page takes part in it, and the person's own stream: as
- * the person, by the page's own sign-in, through the same requests an agent
- * makes with its token. */
+/** A session as the page observes it, and the person's own stream, which the
+ * page receives while it is open: the same operations every client makes. */
 
-import { page } from "@/site";
+import { client } from "@/account/api";
+import type { Entry, Participant } from "@/client/vibetogether_client";
 
-export type Entry = {
-	n: number;
-	time: string;
-	from: string;
-	type: string;
-	size: number;
-	filename?: string;
-	text?: string;
-};
+export type { Entry };
 
-export type Presence = Record<
-	string,
-	{
-		id: string;
-		/** The last entry that reached its side. */
-		received: number;
-		/** The last entry that reached its context, or that the person saw. */
-		read: number;
-		/** Awake or asleep while its receive waits, or ended moments ago. */
-		presence: "awake" | "asleep" | "offline";
-		since?: string;
-		status?: string;
-	}
->;
+/** Everyone in a session, by name. */
+export type Participants = Record<string, Participant>;
 
 export const JOIN = "application/vnd.vibetogether.join";
 export const LEAVE = "application/vnd.vibetogether.leave";
 
-export class LiveError extends Error {
-	status: number;
-	constructor(status: number, message: string) {
-		super(message);
-		this.status = status;
-	}
-}
+/** Whether a call was refused, rather than failed on the way. */
+const refused = (error: unknown) => {
+	const status = (error as { status?: unknown } | null)?.status;
+	return typeof status === "number" && status < 500;
+};
 
-async function checked(response: Response): Promise<Response> {
-	if (!response.ok)
-		throw new LiveError(
-			response.status,
-			(await response.text()) || response.statusText,
-		);
-	return response;
-}
+const backoff = (failures: number) =>
+	new Promise((r) => setTimeout(r, Math.min(30_000, 1000 * 2 ** failures)));
 
 export type Subscriber = {
 	entry: () => void;
-	presence: (presence: Presence) => void;
-	/** The page stopped receiving, with why. */
+	participants: (participants: Participants) => void;
+	/** The page stopped observing, with why. */
 	end: (why: string) => void;
 };
 
@@ -60,44 +32,34 @@ export type Subscriber = {
  * while the page observes it. */
 export class Seat {
 	log: Entry[] = [];
-	presence: Presence = {};
-	#base: string;
+	participants: Participants = {};
+	#session: string;
 	#subscribers = new Set<Subscriber>();
 	#stop: AbortController | null = null;
 
 	constructor(session: string) {
-		this.#base = page(`api/sessions/${encodeURIComponent(session)}`);
-	}
-
-	async #call(path: string, init: RequestInit = {}): Promise<Response> {
-		return checked(
-			await fetch(`${this.#base}${path}`, {
-				credentials: "same-origin",
-				...init,
-			}),
-		);
+		this.#session = session;
 	}
 
 	/** Joins, or does nothing where the person is in already. */
 	async join(): Promise<void> {
-		await this.#call("/participants", { method: "POST" });
+		await (await client()).join(this.#session);
 	}
 
 	/** Sends, and returns the names its `ping` or `fyi` lists that don't see
 	 * the session, so are reached by nothing. */
 	async send(text: string, type: string): Promise<string[]> {
-		const answer = (await (
-			await this.#call("/entries", {
-				method: "POST",
-				headers: { "Content-Type": type },
-				body: text,
-			})
-		).json()) as { n: number; unreached?: string[] };
-		return answer.unreached ?? [];
+		const sent = await (await client()).send(
+			this.#session,
+			type,
+			new TextEncoder().encode(text),
+		);
+		return sent.unreached ?? [];
 	}
 
-	fetch(n: number): Promise<Response> {
-		return this.#call(`/entries/${n}`);
+	/** Entry `n`'s payload. */
+	async payload(n: number): Promise<Blob> {
+		return (await client()).fetch(this.#session, n);
 	}
 
 	subscribe(subscriber: Subscriber): () => void {
@@ -111,36 +73,33 @@ export class Seat {
 		this.close();
 		const stop = new AbortController();
 		this.#stop = stop;
-		let version = "";
+		let version: string | undefined;
 		let failures = 0;
 		while (!stop.signal.aborted) {
 			const after = this.log.at(-1)?.n ?? 0;
 			try {
-				const log = (await (
-					await this.#call(
-						`/log?after=${after}${version && `&version=${version}`}`,
-						{ signal: stop.signal },
-					)
-				).json()) as { entries: Entry[]; presence: Presence; version: string };
+				const log = await (await client()).log(
+					this.#session,
+					version === undefined ? { after } : { after, version },
+					stop.signal,
+				);
 				failures = 0;
 				version = log.version;
 				if (log.entries.length) {
 					this.log = [...this.log, ...log.entries];
 					for (const s of this.#subscribers) s.entry();
 				}
-				this.presence = log.presence;
-				for (const s of this.#subscribers) s.presence(log.presence);
+				this.participants = log.participants;
+				for (const s of this.#subscribers) s.participants(log.participants);
 			} catch (error) {
 				if (stop.signal.aborted) return;
 				// A refusal: this one stops until the page is used again.
-				if (error instanceof LiveError && error.status < 500) {
-					for (const s of this.#subscribers) s.end(error.message);
+				if (refused(error)) {
+					for (const s of this.#subscribers) s.end((error as Error).message);
 					return;
 				}
 				failures += 1;
-				await new Promise((r) =>
-					setTimeout(r, Math.min(30_000, 1000 * 2 ** failures)),
-				);
+				await backoff(failures);
 			}
 		}
 	}
@@ -186,22 +145,13 @@ async function receiving() {
 		stream.request = request;
 		// The first receive gets every unread item.
 		if (stream.received !== undefined) stream.read = readNow();
-		const positions =
-			stream.received === undefined
-				? "received=0"
-				: `received=${stream.received}&read=${stream.read}`;
 		try {
-			const answer = (await (
-				await checked(
-					await fetch(page(`api/receive?${positions}&state=awake`), {
-						credentials: "same-origin",
-						signal: request.signal,
-					}),
-				)
-			).json()) as {
-				items: { n: number; session: { id: string } }[];
-				received: number;
-			};
+			const answer = await (await client()).receive(
+				stream.received === undefined
+					? { received: 0, state: "awake" }
+					: { received: stream.received, read: stream.read, state: "awake" },
+				request.signal,
+			);
 			failures = 0;
 			stream.unread.push(
 				...answer.items.map((item) => ({
@@ -212,11 +162,9 @@ async function receiving() {
 			stream.received = Math.max(answer.received, answer.items.at(-1)?.n ?? 0);
 		} catch (error) {
 			if (request.signal.aborted) continue;
-			if (error instanceof LiveError && error.status < 500) return;
+			if (refused(error)) return;
 			failures += 1;
-			await new Promise((r) =>
-				setTimeout(r, Math.min(30_000, 1000 * 2 ** failures)),
-			);
+			await backoff(failures);
 		}
 	}
 }

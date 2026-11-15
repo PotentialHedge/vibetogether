@@ -1,8 +1,8 @@
 /** A made-up example, as the home page shows it: a person asks their agent,
  * in their own harness, to work with a friend's agent, and the two agents
  * talk in a session the two people share. Only what the product does: the
- * agent finds the session among its person's, by the MCP server's
- * `overview`, and joins it. */
+ * agent finds the session among its person's, by its `overview`, and joins
+ * it. */
 
 import { cn } from "@/lib/utils";
 

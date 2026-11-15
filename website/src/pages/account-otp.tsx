@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
-import { api, type Device } from "@/account/api";
+import { api } from "@/account/api";
 import { SignIn, useMe } from "@/account/sign-in";
+import type { OtpShown } from "@/client/vibetogether_client";
 import { Frame } from "@/components/frame";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -17,37 +18,48 @@ function ago(time: string): string {
 	return relative.format(Math.round(minutes / 60), "hour");
 }
 
-/** Confirms the OTP an agent sent its person, as a link with the code in it,
- * or typed in. */
-function DevicePage() {
+/** What each kind of token may do, in plain words. */
+const KIND = {
+	agent: {
+		what: "an agent token",
+		does: "It acts only for your agents, never as you.",
+	},
+	person: {
+		what: "a person token",
+		does: "It acts as you, as a client of yours, such as a messenger: it can do everything you can do here.",
+	},
+} as const;
+
+/** Approves or denies the OTP someone asked for a token with, as a link with
+ * the code in it, or typed in. */
+function OtpPage() {
 	const me = useMe();
-	const given = new URLSearchParams(location.search).get("user_code");
+	const given = new URLSearchParams(location.search).get("code");
 	const [code, setCode] = useState(given ?? "");
-	const [claimed, setClaimed] = useState<Device | null>(null);
+	const [shown, setShown] = useState<OtpShown | null>(null);
 	const [outcome, setOutcome] = useState<"approved" | "denied" | null>(null);
 	const [problem, setProblem] = useState<string | null>(null);
 
-	const claim = useCallback(async (typed: string) => {
+	const show = useCallback(async (typed: string) => {
 		setProblem(null);
 		try {
-			const device = await api.device(typed.trim().toUpperCase());
-			setClaimed(device);
+			setShown(await api.showOtp(typed.trim().toUpperCase()));
 		} catch (error) {
 			setProblem(error instanceof Error ? error.message : String(error));
 		}
 	}, []);
 
 	useEffect(() => {
-		if (given && me && me !== "signed-out") claim(given);
-	}, [given, me, claim]);
+		if (given && me && me !== "signed-out") show(given);
+	}, [given, me, show]);
 
 	if (me === null) return null;
 	if (me === "signed-out")
 		return (
 			<Frame
-				title="Connect your agent"
+				title="Approve a token"
 				description="Sign in, then approve or deny it."
-				info="An agent asks for your account with an OTP."
+				info="An agent or a client of yours asks for a token with an OTP."
 			>
 				<SignIn back={location.href} />
 			</Frame>
@@ -56,18 +68,16 @@ function DevicePage() {
 	if (outcome)
 		return (
 			<Frame
-				title={
-					outcome === "denied" ? "Request denied" : "Your agent is connected"
-				}
+				title={outcome === "denied" ? "Request denied" : "Token approved"}
 				description={
 					outcome === "denied"
-						? "The agent got no access. You can close this page."
+						? "It got no access. You can close this page."
 						: "You can close this page."
 				}
 				info={
 					outcome === "denied"
 						? undefined
-						: "Your agent goes on by itself. Revoke it any time in your settings, under Logins."
+						: "It goes on by itself. Revoke it any time in your settings, under Logins."
 				}
 			>
 				<a
@@ -79,12 +89,11 @@ function DevicePage() {
 			</Frame>
 		);
 
-	if (claimed) {
+	if (shown) {
+		const kind = KIND[shown.kind];
 		const act = async (approve: boolean) => {
 			try {
-				await (approve
-					? api.approve(claimed.user_code)
-					: api.deny(claimed.user_code));
+				await (approve ? api.approveOtp(shown.code) : api.denyOtp(shown.code));
 				setOutcome(approve ? "approved" : "denied");
 			} catch (error) {
 				setProblem(error instanceof Error ? error.message : String(error));
@@ -92,18 +101,20 @@ function DevicePage() {
 		};
 		return (
 			<Frame
-				title={`Connect ${claimed.client_id} to your account?`}
-				description="Every agent on it then acts as you. Only if your own agent just gave you this code."
-				info="They can join your sessions as your agents, until you revoke it in your settings, under Logins. If someone sent you this link, deny it."
+				title={`Give ${shown.name} ${kind.what}?`}
+				description={`${kind.does} Only if your own agent or client just gave you this code.`}
+				info="It lasts until you revoke it in your settings, under Logins. If someone sent you this link, deny it."
 			>
 				<div className="flex flex-col gap-4 rounded-2xl border bg-card/60 p-5">
 					<dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 font-mono text-sm">
+						<dt className="text-muted-foreground">name</dt>
+						<dd>{shown.name}</dd>
 						<dt className="text-muted-foreground">code</dt>
-						<dd>{claimed.user_code}</dd>
+						<dd>{shown.code}</dd>
 						<dt className="text-muted-foreground">asked</dt>
-						<dd>{claimed.requested ? ago(claimed.requested) : "unknown"}</dd>
+						<dd>{ago(shown.requested)}</dd>
 						<dt className="text-muted-foreground">from</dt>
-						<dd>{claimed.from ?? "unknown"}</dd>
+						<dd>{shown.from}</dd>
 					</dl>
 					<div className="flex gap-3">
 						<Button size="xl" onClick={() => act(true)}>
@@ -121,14 +132,14 @@ function DevicePage() {
 
 	return (
 		<Frame
-			title="Connect your agent"
-			description="Enter the code your agent gave you."
+			title="Approve a token"
+			description="Enter the code your agent or client gave you."
 		>
 			<form
 				className="flex gap-2"
 				onSubmit={(event) => {
 					event.preventDefault();
-					claim(code);
+					show(code);
 				}}
 			>
 				<Input
@@ -153,6 +164,6 @@ function DevicePage() {
 
 render(
 	<Site current="account/">
-		<DevicePage />
+		<OtpPage />
 	</Site>,
 );

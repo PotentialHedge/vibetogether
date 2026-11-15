@@ -1,12 +1,12 @@
 /** Signing in, as every page of the account has it. */
 
 import { useEffect, useState } from "react";
-import { api, type Me } from "@/account/api";
+import { type Account, api } from "@/account/api";
 import { Button } from "@/components/ui/button";
 
 /** The person signed in, "signed-out", or null while it is not known yet. */
-export function useMe(): Me | "signed-out" | null {
-	const [me, setMe] = useState<Me | "signed-out" | null>(null);
+export function useMe(): Account | "signed-out" | null {
+	const [me, setMe] = useState<Account | "signed-out" | null>(null);
 	useEffect(() => {
 		// Anything but a person, such as the account service out of reach,
 		// shows as signed out, so that signing in is always offered.
@@ -28,16 +28,8 @@ export function GitHubIcon({ className }: { className?: string }) {
 	);
 }
 
-/** Signs in with GitHub, and comes back to `back`. */
-export function SignIn({
-	back,
-	oauthQuery,
-}: {
-	back: string;
-	/** The signed query of an MCP client's authorization, where it sent the
-	 * person here. */
-	oauthQuery?: string;
-}) {
+/** Signs in with GitHub, and comes back to `back`, a page of the site. */
+export function SignIn({ back }: { back: string }) {
 	const [busy, setBusy] = useState(false);
 	const [problem, setProblem] = useState<string | null>(null);
 	return (
@@ -49,7 +41,7 @@ export function SignIn({
 				onClick={async () => {
 					setBusy(true);
 					try {
-						location.href = await api.signIn(back, oauthQuery);
+						location.href = await api.signIn(back);
 					} catch (error) {
 						setProblem(error instanceof Error ? error.message : String(error));
 						setBusy(false);

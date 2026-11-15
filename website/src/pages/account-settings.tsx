@@ -10,7 +10,6 @@ import {
 	KeyRound,
 	LogOut,
 	Monitor,
-	Plug,
 	Users,
 } from "lucide-react";
 import { type ReactNode, useCallback, useEffect, useState } from "react";
@@ -18,14 +17,10 @@ import {
 	type Activity,
 	type Agent,
 	api,
-	type Dm,
 	demo,
-	type Friend,
-	type Group,
 	type Login,
-	type Me,
-	type Session,
-	Unauthorized,
+	type Seen,
+	signedOut,
 } from "@/account/api";
 import {
 	AddByName,
@@ -41,46 +36,29 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { page, render, Site } from "@/site";
 
-type State = {
-	/** The version of everything the account sees, as it was loaded at. */
-	version: string;
-	me: Me;
-	friends: Friend[];
+type State = Seen & {
 	logins: Login[];
 	activity: Activity[];
+	/** The account's agents, the archived included. */
 	agents: Agent[];
-	/** What the rail shows, as in the app. */
-	groups: Group[];
-	sessions: Session[];
-	dms: Dm[];
 };
 
-async function load(): Promise<State> {
-	// First, so that a change while the rest loads shows as one more.
-	const version = await api.version();
-	const [me, friends, logins, activity, agents, groups, sessions, dms] =
-		await Promise.all([
-			api.me(),
-			api.friends(),
-			api.logins(),
-			api.activity(),
-			api.agents(),
-			api.groups(),
-			api.sessions(),
-			api.dms(),
-		]);
-	return {
-		version,
-		me,
-		friends,
-		logins,
-		activity,
-		agents: agents.own,
-		groups,
-		sessions,
-		dms,
-	};
+async function load(given?: Seen): Promise<State> {
+	const [seen, logins, activity, agents] = await Promise.all([
+		given ?? api.seen(),
+		api.logins(),
+		api.activity(),
+		api.agents(),
+	]);
+	return { ...seen, logins, activity, agents };
 }
+
+/** What each kind of login is, in plain words. */
+const KIND = {
+	browser: "browser sign-in",
+	agent: "agent token",
+	person: "person token",
+} as const;
 
 const date = new Intl.DateTimeFormat(undefined, { dateStyle: "medium" });
 const when = new Intl.DateTimeFormat(undefined, {
@@ -299,7 +277,7 @@ function Settings({
 				{tab === "logins" && (
 					<Pane
 						title="Logins"
-						line="Each way in to your account: a browser you signed in on, a machine's agents, or an MCP client. Agents connect by asking you to approve their OTP."
+						line="Each way in to your account: a browser you signed in on, an agent token, which acts only for your agents, or a person token, which acts as you. A token is made by an OTP you approve."
 					>
 						<Rows empty="No logins.">
 							{logins.map((login) => (
@@ -310,7 +288,7 @@ function Settings({
 											variant="ghost"
 											size="sm"
 											onClick={act(async () => {
-												await api.revoke(login.id);
+												await api.revokeLogin(login.id);
 												if (login.current) location.href = page();
 											})}
 										>
@@ -318,16 +296,19 @@ function Settings({
 										</Button>
 									}
 								>
-									{login.kind === "mcp" ? (
-										<Plug
-											aria-label="MCP client"
+									{login.kind === "browser" ? (
+										<Monitor
+											aria-label={KIND.browser}
+											className="size-4 shrink-0 text-muted-foreground"
+										/>
+									) : login.kind === "agent" ? (
+										<Bot
+											aria-label={KIND.agent}
 											className="size-4 shrink-0 text-muted-foreground"
 										/>
 									) : (
-										<Monitor
-											aria-label={
-												login.kind === "browser" ? "browser" : "machine"
-											}
+										<KeyRound
+											aria-label={KIND.person}
 											className="size-4 shrink-0 text-muted-foreground"
 										/>
 									)}
@@ -335,7 +316,7 @@ function Settings({
 										title={
 											login.current ? `${login.name} (this one)` : login.name
 										}
-										detail={`${login.kind === "mcp" ? "MCP client" : login.kind === "browser" ? "browser" : "machine"} · since ${date.format(new Date(login.created))}`}
+										detail={`${KIND[login.kind]} · since ${date.format(new Date(login.created))}`}
 									/>
 								</Row>
 							))}
@@ -590,11 +571,11 @@ function InApp({
 function Page() {
 	const [state, setState] = useState<State | "signed-out" | null>(null);
 	const [problem, setProblem] = useState<string | null>(null);
-	const reload = useCallback(async () => {
+	const reload = useCallback(async (seen?: Seen) => {
 		try {
-			setState(await load());
+			setState(await load(seen));
 		} catch (error) {
-			if (error instanceof Unauthorized) setState("signed-out");
+			if (signedOut(error)) setState("signed-out");
 			else setProblem(error instanceof Error ? error.message : String(error));
 		}
 	}, []);

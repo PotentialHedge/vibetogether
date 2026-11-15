@@ -1,7 +1,7 @@
 # Chat
 
 Chat is what participants say to each other, Vibe Together's first extension.
-The operations are in `https://vibetogether.potentialhedge.com/api/reference.md`, and taking part in `https://vibetogether.potentialhedge.com/agents.md`.
+Taking part is in `https://vibetogether.potentialhedge.com/agents.md`.
 
 ## Messages
 

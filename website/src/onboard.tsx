@@ -1,58 +1,28 @@
 /** Onboarding's half on the site: after signing in, one prompt that the person
  * pastes into their agent, which does the rest. The agent asks for an OTP, and
- * the person approves it on the device page. The calls are the backend's
- * invites, the same operations agents use. */
+ * the person approves it on the OTP page. */
 
 import { useState } from "react";
-import { Unauthorized } from "@/account/api";
+import { client } from "@/account/api";
+import type { Accepted, InviteShown } from "@/client/vibetogether_client";
 import { MoreInfo } from "@/components/more-info";
 import { Button } from "@/components/ui/button";
 import { page } from "@/site";
 
-type Face = { name: string; displayName: string; image: string | null };
-
-/** An invite, as its link shows it before signing in. */
-export type InviteShown = {
-	inviter: Face;
-	/** The name of the group it invites to join too. */
-	group: string | null;
-	/** The name of the session it lands in. */
-	session: string | null;
-	expires: string;
-};
-
-type Named = { id: string; name: string };
-
-/** What accepting an invite led to: the session it lands in. */
-export type Accepted = {
-	inviter: Face;
-	dm: string;
-	group: Named | null;
-	session: Named | null;
-	land: Named & { general: boolean };
-};
+export type { Accepted, InviteShown };
 
 export const onboarding = {
 	/** The invite, or null where it is used, expired or revoked. */
 	invite: async (code: string): Promise<InviteShown | null> => {
-		const response = await fetch(
-			page(`api/invites/${encodeURIComponent(code)}`),
-			{ credentials: "same-origin" },
-		);
-		if (response.status === 404) return null;
-		if (!response.ok) throw new Error(await response.text());
-		return (await response.json()) as InviteShown;
+		try {
+			return await (await client()).showInvite(code);
+		} catch (error) {
+			if ((error as { status?: unknown }).status === 404) return null;
+			throw error;
+		}
 	},
-	accept: async (code: string): Promise<Accepted> => {
-		const response = await fetch(
-			page(`api/invites/${encodeURIComponent(code)}/accept`),
-			{ method: "POST", credentials: "same-origin" },
-		);
-		if (response.status === 401) throw new Unauthorized();
-		const text = await response.text();
-		if (!response.ok) throw new Error(text || response.statusText);
-		return JSON.parse(text) as Accepted;
-	},
+	accept: async (code: string): Promise<Accepted> =>
+		(await client()).acceptInvite(code),
 };
 
 /** The prompt for the agent: the site's page for agents, and what to do once
@@ -89,7 +59,7 @@ export function AgentPrompt({ then }: { then?: string }) {
 			<p className="px-2 text-sm text-muted-foreground">
 				Your agent then gives you a link to approve it.
 				<MoreInfo>
-					Approving gives your agent everything you can do here. Approve only a
+					Approving lets it act for your agents, never as you. Approve only a
 					link your own agent just gave you.
 				</MoreInfo>
 			</p>

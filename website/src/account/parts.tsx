@@ -1,7 +1,7 @@
 /** The parts the pages of an account share: a person's face, and rows. */
 
 import { type ReactNode, useEffect, useState } from "react";
-import { api, Unauthorized } from "@/account/api";
+import { api, type Seen, signedOut } from "@/account/api";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -15,7 +15,7 @@ export function Person({
 }: {
 	name: string;
 	displayName?: string;
-	image?: string;
+	image?: string | undefined;
 	size?: "default" | "sm" | "lg";
 }) {
 	return (
@@ -139,25 +139,23 @@ export function useActions(reload: () => Promise<void>) {
 }
 
 /** Reloads whenever anything the account sees changes, such as by an agent or
- * a friend, from `version`, the one the page's state was loaded at. */
+ * a friend, from `version`, the one the page's state was loaded at: with what
+ * it sees now, or with nothing where the sign-in is gone. */
 export function useReloadOnChange(
 	version: string | undefined,
-	reload: () => Promise<void>,
+	reload: (seen?: Seen) => Promise<void>,
 ) {
 	useEffect(() => {
 		if (version === undefined) return;
 		const stop = new AbortController();
 		(async () => {
-			let seen = version;
 			while (!stop.signal.aborted) {
 				try {
-					const next = await api.version(seen, stop.signal);
-					if (next === seen) continue;
-					seen = next;
-					await reload();
+					const seen = await api.seen(version, stop.signal);
+					if (seen.version !== version) return void (await reload(seen));
 				} catch (error) {
 					if (stop.signal.aborted) return;
-					if (error instanceof Unauthorized) return void (await reload());
+					if (signedOut(error)) return void (await reload());
 					await new Promise((resolve) => setTimeout(resolve, 10_000));
 				}
 			}

@@ -5,18 +5,7 @@
 
 import { ArrowLeft, MessagesSquare, X } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
-import {
-	type Agents,
-	api,
-	type Dm,
-	demo,
-	type Friend,
-	type Group,
-	type Me,
-	type Project,
-	type Session,
-	Unauthorized,
-} from "@/account/api";
+import { api, demo, type Seen, signedOut } from "@/account/api";
 import { showSession } from "@/account/live";
 import { useActions, useReloadOnChange } from "@/account/parts";
 import {
@@ -35,33 +24,9 @@ import { DropdownMenuItem } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 import { render, Site } from "@/site";
 
-type State = {
-	/** The version of everything the account sees, as it was loaded at. */
-	version: string;
-	me: Me;
-	groups: Group[];
-	projects: Project[];
-	sessions: Session[];
-	friends: Friend[];
-	dms: Dm[];
-	agents: Agents;
-};
+type State = Seen;
 
-async function load(): Promise<State> {
-	// First, so that a change while the rest loads shows as one more.
-	const version = await api.version();
-	const [me, groups, projects, sessions, friends, dms, agents] =
-		await Promise.all([
-			api.me(),
-			api.groups(),
-			api.projects(),
-			api.sessions(),
-			api.friends(),
-			api.dms(),
-			api.agents(),
-		]);
-	return { version, me, groups, projects, sessions, friends, dms, agents };
-}
+const load = () => api.seen();
 
 /** What is open, kept in the address so that a reload or a link opens it
  * again: a session, a DM by its friend's name, or a group with none of its
@@ -93,12 +58,12 @@ function go(place: Place) {
 const LAST = "vibetogether last session";
 
 function App({ state, reload }: { state: State; reload: () => Promise<void> }) {
-	const { me, groups, projects, sessions, friends, dms, agents } = state;
+	const { me, groups, projects, sessions, friends, dms, reachable } = state;
 	/** Whom a mention in a session can name: the people who see it, and of
 	 * their agents the awake or asleep ones. */
 	const mentionable = (people: string[]) => [
 		...people,
-		...agents.reachable
+		...reachable
 			.map(({ name }) => name)
 			.filter(
 				(name) =>
@@ -202,7 +167,7 @@ function App({ state, reload }: { state: State; reload: () => Promise<void> }) {
 						)}
 						sessions={sessions}
 						friends={friends}
-						reachable={agents.reachable}
+						reachable={reachable}
 						current={session?.id}
 						onSession={(id) => open({ session: id })}
 						act={act}
@@ -330,11 +295,11 @@ function App({ state, reload }: { state: State; reload: () => Promise<void> }) {
 function Account() {
 	const [state, setState] = useState<State | "signed-out" | null>(null);
 	const [problem, setProblem] = useState<string | null>(null);
-	const reload = useCallback(async () => {
+	const reload = useCallback(async (seen?: Seen) => {
 		try {
-			setState(await load());
+			setState(seen ?? (await load()));
 		} catch (error) {
-			if (error instanceof Unauthorized) setState("signed-out");
+			if (signedOut(error)) setState("signed-out");
 			else setProblem(error instanceof Error ? error.message : String(error));
 		}
 	}, []);

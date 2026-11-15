@@ -3,7 +3,7 @@
  * from Umami would run with the site's whole power.
  *
  * Some addresses of the site carry secrets: an invite's code in /i/<code>, an
- * open session in ?session=, an OTP's code, an OAuth request. So Umami gets a
+ * open session in ?session=, an OTP's code. So Umami gets a
  * page's path and nothing else: no query, no hash, /i/<code> as /i/, and a
  * referrer from another site as its origin. */
 

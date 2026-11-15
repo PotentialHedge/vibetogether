@@ -4,12 +4,11 @@
 import { Ellipsis, LogOut, Plus, Settings, X } from "lucide-react";
 import { type ReactNode, useEffect, useState } from "react";
 import {
+	type Account,
 	api,
-	type Dm,
 	demo,
 	type Friend,
 	type Group,
-	type Me,
 	type Project,
 	type Reachable,
 	type Session,
@@ -256,7 +255,7 @@ function GroupFace({ group }: { group: Group }) {
 }
 
 /** A friend's DM in the rail, with their face. */
-export type DmOfFriend = { dm: Dm; friend: Friend };
+export type DmOfFriend = { dm: Session; friend: Friend };
 
 /** The person's DMs, one per friend, at the top, then their groups, their own
  * first, and the person's own menu. */
@@ -325,7 +324,7 @@ export function Rail({
 	reload,
 	settings = false,
 }: {
-	me: Me;
+	me: Account;
 	/** Who asked to be friends, waiting for an answer. */
 	requests: Friend[];
 	/** The groups with a session that pinged the person. */
@@ -688,7 +687,7 @@ function Members({
 	reachable,
 	act,
 }: {
-	me: Me;
+	me: Account;
 	group: Group;
 	friends: Friend[];
 	/** Everyone awake or asleep the person sees. */
@@ -808,7 +807,7 @@ export function Sidebar({
 	act,
 	reload,
 }: {
-	me: Me;
+	me: Account;
 	group: Group;
 	projects: Project[];
 	sessions: Session[];
@@ -868,8 +867,7 @@ export function Sidebar({
 				<ul className="mb-2 flex flex-col">
 					{sessions
 						.filter(
-							(session) =>
-								session.project === null && session.group?.id === group.id,
+							(session) => !session.project && session.group?.id === group.id,
 						)
 						.sort((a, b) => Number(b.general) - Number(a.general))
 						.map((session) => (

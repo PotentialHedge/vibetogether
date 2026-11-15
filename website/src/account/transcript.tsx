@@ -1,6 +1,6 @@
 /** One of the account's sessions, live, as a chat: the person is in it as
- * themself, under their account name, joined once with the token of the
- * page's own sign-in, so they are in exactly where they may. The page
+ * themself, under their account name, joined once by the page's own
+ * sign-in, so they are in exactly where they may. The page
  * observes the session while it is open in it. */
 
 import { ArrowUp, Download, Ellipsis, Minus, Plus, Users } from "lucide-react";
@@ -15,7 +15,13 @@ import {
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { demo, type Session } from "@/account/api";
-import { type Entry, JOIN, LEAVE, type Presence, Seat } from "@/account/live";
+import {
+	type Entry,
+	JOIN,
+	LEAVE,
+	type Participants,
+	Seat,
+} from "@/account/live";
 import { MoreInfo } from "@/components/more-info";
 import { Button } from "@/components/ui/button";
 import {
@@ -32,7 +38,7 @@ type Log = {
 	/** What fetches the payloads, once it is made: none in the demo. */
 	source: Seat | null;
 	entries: Entry[];
-	presence: Presence;
+	participants: Participants;
 	problem: string | null;
 	/** Sends a message as the person, once they are in, and returns the names
 	 * it pings that it doesn't reach. */
@@ -49,7 +55,7 @@ function useLog(session: Pick<Session, "id">, name: string): Log {
 		live: false,
 		source: null,
 		entries: [],
-		presence: {},
+		participants: {},
 		problem: null,
 		send: null,
 		note: null,
@@ -89,8 +95,8 @@ function useLog(session: Pick<Session, "id">, name: string): Log {
 			entry: () =>
 				!gone &&
 				setLog((log) => ({ ...log, live: true, entries: [...seat.log] })),
-			presence: (presence) =>
-				!gone && setLog((log) => ({ ...log, live: true, presence })),
+			participants: (participants) =>
+				!gone && setLog((log) => ({ ...log, live: true, participants })),
 			end: (why) =>
 				!gone && setLog((log) => ({ ...log, live: false, problem: why })),
 		});
@@ -166,7 +172,7 @@ const size = (bytes: number) =>
 
 /** What an entry holds, as the chat spec says to show it. */
 /** What fetches an entry's payload. */
-type Fetcher = Pick<Seat, "fetch">;
+type Fetcher = Pick<Seat, "payload">;
 
 function Body({ entry, reader }: { entry: Entry; reader: Fetcher | null }) {
 	const type = base(entry.type);
@@ -204,10 +210,9 @@ function Body({ entry, reader }: { entry: Entry; reader: Fetcher | null }) {
 					onClick={async () => {
 						// Opaque bytes: nothing done with the URL renders the
 						// sender's HTML or SVG on the site's own origin.
-						const blob = new Blob(
-							[await (await reader.fetch(entry.n)).blob()],
-							{ type: "application/octet-stream" },
-						);
+						const blob = new Blob([await reader.payload(entry.n)], {
+							type: "application/octet-stream",
+						});
 						const link = document.createElement("a");
 						link.href = URL.createObjectURL(blob);
 						link.download = entry.filename ?? `${entry.n}`;
@@ -242,11 +247,9 @@ function Picture({ entry, reader }: { entry: Entry; reader: Fetcher }) {
 	useEffect(() => {
 		let made: string | null = null;
 		let gone = false;
-		reader.fetch(entry.n).then(
-			async (response) => {
-				const blob = new Blob([await response.blob()], {
-					type: base(entry.type),
-				});
+		reader.payload(entry.n).then(
+			(payload) => {
+				const blob = new Blob([payload], { type: base(entry.type) });
 				if (gone) return;
 				made = URL.createObjectURL(blob);
 				setUrl(made);
@@ -298,13 +301,13 @@ const isMessage = (entry: Entry) =>
 
 /** Who is in the session, each with its presence and its status. */
 function People({
-	presence,
+	participants,
 	status,
 }: {
-	presence: Presence;
+	participants: Participants;
 	status: Map<string, string>;
 }) {
-	const others = Object.entries(presence);
+	const others = Object.entries(participants);
 	return (
 		<div className="flex flex-col gap-3">
 			<h2 className="flex h-5 items-center font-mono text-xs tracking-wide text-muted-foreground uppercase">
@@ -387,7 +390,7 @@ export function Transcript({
 		live: reading,
 		source: reader,
 		entries,
-		presence,
+		participants,
 		problem,
 		send,
 		note,
@@ -395,11 +398,11 @@ export function Transcript({
 	const status = useMemo(
 		() =>
 			new Map(
-				Object.entries(presence).flatMap(([name, state]) =>
+				Object.entries(participants).flatMap(([name, state]) =>
 					state.status ? [[name, state.status] as const] : [],
 				),
 			),
-		[presence],
+		[participants],
 	);
 	const mentionable = useMemo(
 		() => seeing.filter((name) => name !== as),
@@ -418,13 +421,13 @@ export function Transcript({
 	const seen = useMemo(() => {
 		const shown = entries.map((entry) => entry.n);
 		const under = new Map<number, string[]>();
-		for (const [name, { read }] of Object.entries(presence)) {
+		for (const [name, { read }] of Object.entries(participants)) {
 			if (name === as) continue;
 			const at = shown.filter((n) => n <= read).at(-1);
 			if (at !== undefined) under.set(at, [...(under.get(at) ?? []), name]);
 		}
 		return under;
-	}, [entries, presence, as]);
+	}, [entries, participants, as]);
 
 	// Follows the log as it grows, while it is scrolled to its end.
 	const scroller = useRef<HTMLDivElement>(null);
@@ -447,7 +450,7 @@ export function Transcript({
 		URL.revokeObjectURL(link.href);
 	};
 
-	const count = Object.keys(presence).length;
+	const count = Object.keys(participants).length;
 
 	return (
 		<div className="flex h-full min-h-0">
@@ -522,7 +525,7 @@ export function Transcript({
 					</div>
 					{people && (
 						<div className="pb-1 xl:hidden">
-							<People presence={presence} status={status} />
+							<People participants={participants} status={status} />
 						</div>
 					)}
 				</header>
@@ -614,7 +617,7 @@ export function Transcript({
 				)}
 			</div>
 			<aside className="hidden w-72 shrink-0 overflow-y-auto border-l px-5 py-4 xl:block">
-				<People presence={presence} status={status} />
+				<People participants={participants} status={status} />
 			</aside>
 		</div>
 	);
@@ -851,7 +854,7 @@ function made(): Omit<Log, "live" | "source" | "send" | "note"> {
 		[
 			"benarmstrong/claude",
 			"text/markdown",
-			"On it. It stops when `curl` gets a 409 from a second receive:\n\n```sh\ncurl -s '<me>?wait=600'\n```\n\nTwo loops ran under one name.",
+			"On it. It stops when a second receive gets a 409:\n\n```sh\nvibetogether receive\n```\n\nTwo loops ran under one name.",
 			4,
 		],
 		["tristangabl/codex", JOIN, "", 9],
@@ -871,7 +874,7 @@ function made(): Omit<Log, "live" | "source" | "send" | "note"> {
 	}));
 	return {
 		entries,
-		presence: {
+		participants: {
 			luiswirth: { id: "u_luiswirth", received: 8, read: 8, presence: "awake" },
 			"luiswirth/claude": {
 				id: "a_k3x9q2mf",
