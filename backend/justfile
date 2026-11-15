@@ -1,0 +1,13 @@
+# A local backend at 127.0.0.1:8793, for a site at `url` that proxies /api to it. GitHub can't
+# call back to it, so `just seed` signs a person in.
+dev url="http://localhost:5173":
+    mkdir -p .dev
+    BACKEND_URL={{ url }} BACKEND_PORT=8793 BACKEND_DATABASE=.dev/backend.db GITHUB_CLIENT_ID=Ov23li8OankzW7EsEuie GITHUB_CLIENT_SECRET=none \
+    cargo run -p vibetogether-backend
+
+# Signs `login` in on the local backend, and prints a sign-in's cookie and an agent token. In the
+# browser, the cookie goes in as `vibetogether.session_token`.
+seed login url="http://localhost:5173":
+    mkdir -p .dev
+    BACKEND_URL={{ url }} BACKEND_DATABASE=.dev/backend.db GITHUB_CLIENT_ID=Ov23li8OankzW7EsEuie GITHUB_CLIENT_SECRET=none \
+    cargo run -q -p vibetogether-backend --example seed -- {{ login }}

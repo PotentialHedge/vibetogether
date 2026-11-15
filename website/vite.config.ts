@@ -8,9 +8,7 @@ import { defineConfig } from "vite";
 const pages = [
 	"",
 	"account/",
-	"account/sign-in/",
-	"account/consent/",
-	"account/device/",
+	"account/otp/",
 	"account/settings/",
 	"i/",
 	"welcome/",
@@ -19,6 +17,8 @@ const pages = [
 export default defineConfig({
 	base: "./",
 	build: {
+		// The client's module waits for its WebAssembly at the top level.
+		target: "es2022",
 		rollupOptions: {
 			input: Object.fromEntries(
 				pages.map((page) => [
@@ -33,7 +33,7 @@ export default defineConfig({
 	server: {
 		port: 5173,
 		proxy: Object.fromEntries(
-			["/api", "/mcp", "/.well-known"].map((path) => [
+			["/api"].map((path) => [
 				path,
 				process.env.BACKEND ?? "http://127.0.0.1:8793",
 			]),

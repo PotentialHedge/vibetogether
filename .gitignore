@@ -5,3 +5,5 @@ result
 .direnv/
 __pycache__/
 backend/.dev/
+website/src/client/
+result-*

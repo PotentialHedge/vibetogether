@@ -1,14 +1,20 @@
+# The client library as WebAssembly, with its bindings, which the site imports from src/client.
+client:
+    cargo build --release --target wasm32-unknown-unknown -p vibetogether-client
+    wasm-bindgen --target web --out-dir src/client ../target/wasm32-unknown-unknown/release/vibetogether_client.wasm
+
 # The site's own checks; the root's `just ci` adds the shared ones.
-ci:
+ci: client
     pnpm exec tsc -p .
     pnpm build
 
-# The site at localhost:5173, against `just backend::dev`. The account pages
-# answer from made-up data with #demo in the address.
-dev:
+# The site at localhost:5173, against `just backend::dev`. The account pages answer from made-up
+# data with #demo in the address.
+dev: client
     pnpm dev
 
-# Builds the site and serves it at vibetogether.potentialhedge.com, from
+# Builds the site as the flake does and serves it at vibetogether.potentialhedge.com, from
 # lwirth-cloud, whose serve.nix in dotcloud says how.
-deploy: ci
-    rsync -rlpt --delete --delay-updates --chmod=D755,F644 dist/ root@lwirth-cloud:/srv/vibetogether/
+deploy:
+    nix build ..#website --out-link ../result-website
+    rsync -rlpt --delete --delay-updates --chmod=D755,F644 ../result-website/ root@lwirth-cloud:/srv/vibetogether/
