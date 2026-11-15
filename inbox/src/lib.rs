@@ -4,7 +4,9 @@
 //! the file `wake` is the doorbell, and a lock on the file `awake` says the agent is in a turn.
 //!
 //! An item is one file, named `<time>.<sender>.<ext>`, such as `20261115T153012.123456Z.luis.md`,
-//! with the time in UTC to the microsecond, so that the names sort by time.
+//! with the time in UTC to the microsecond, so that the names sort by time, and the sender
+//! encoded one to one: a `/` as `_`, and every other byte but ASCII letters, digits and `-` as
+//! `%XX`, such as `luis_lead` for `luis/lead`.
 
 use std::{
   fs, io,
@@ -76,7 +78,7 @@ impl Inbox {
   /// so that `new/` only ever holds complete items and no delivery overwrites another.
   pub fn deliver(&self, mut content: impl Read, sender: &str, ext: &str) -> io::Result<PathBuf> {
     self.create()?;
-    let sender = sanitize(sender);
+    let sender = encode(sender);
     let ext = ext.trim_start_matches('.');
     if ext.is_empty() || ext.contains('/') {
       return Err(io::Error::new(
@@ -264,30 +266,75 @@ fn parse_name(name: &str) -> Option<(Timestamp, String)> {
     .to_zoned(TimeZone::UTC)
     .ok()?
     .timestamp();
-  Some((time, sender.to_string()))
+  Some((time, decode(sender)))
 }
 
 fn format_time(time: Timestamp) -> String {
   time.strftime(TIME_FORMAT).to_string()
 }
 
-/// A sender as it can stand in a file name: no `.`, no `/`, never empty.
-fn sanitize(sender: &str) -> String {
-  let sender: String = sender
-    .chars()
-    .map(|c| {
-      if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
-        c
-      } else {
-        '-'
-      }
+/// A sender as it stands in a file name, one to one: no `.`, no `/`.
+fn encode(sender: &str) -> String {
+  sender
+    .bytes()
+    .map(|b| match b {
+      b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' => (b as char).to_string(),
+      b'/' => "_".to_string(),
+      b => format!("%{b:02X}"),
     })
-    .collect();
-  if sender.is_empty() {
-    "unknown".to_string()
-  } else {
-    sender
+    .collect()
+}
+
+/// The sender a file name holds, as `encode` wrote it; anything else is kept as it is.
+fn decode(name: &str) -> String {
+  let bytes = name.as_bytes();
+  let mut out = Vec::with_capacity(bytes.len());
+  let mut i = 0;
+  while i < bytes.len() {
+    let hex = bytes
+      .get(i + 1..i + 3)
+      .and_then(|h| std::str::from_utf8(h).ok())
+      .and_then(|h| u8::from_str_radix(h, 16).ok());
+    match (bytes[i], hex) {
+      (b'%', Some(byte)) => {
+        out.push(byte);
+        i += 3;
+      }
+      (b'_', _) => {
+        out.push(b'/');
+        i += 1;
+      }
+      (byte, _) => {
+        out.push(byte);
+        i += 1;
+      }
+    }
   }
+  String::from_utf8_lossy(&out).into_owned()
+}
+
+/// `text` as an attribute's value: no `"`, `<` or `&` of its own.
+fn attribute(text: &str) -> String {
+  text
+    .replace('&', "&amp;")
+    .replace('"', "&quot;")
+    .replace('<', "&lt;")
+}
+
+/// `text` as an item's body, which can't end the item early: every `</inbox-item`, in any case,
+/// becomes `<\/inbox-item`.
+fn body(text: &str) -> String {
+  const END: &str = "</inbox-item";
+  let lower = text.to_ascii_lowercase();
+  let mut out = String::with_capacity(text.len());
+  let mut last = 0;
+  for (i, _) in lower.match_indices(END) {
+    out.push_str(&text[last..i]);
+    out.push_str("<\\/");
+    last = i + 2;
+  }
+  out.push_str(&text[last..]);
+  out
 }
 
 fn at(e: io::Error, path: &Path) -> io::Error {
@@ -295,24 +342,26 @@ fn at(e: io::Error, path: &Path) -> io::Error {
 }
 
 impl Item {
-  /// The item as a model reads it: text inline, any other content as its path and type.
+  /// The item as a model reads it: text inline, any other content as its path and type. Nothing
+  /// an item holds ends it or adds to its header.
   pub fn render(&self, out: &mut impl Write) -> io::Result<()> {
     let time = self
       .time
       .to_zoned(TimeZone::system())
       .strftime("%Y-%m-%d %H:%M:%S %:z");
-    let from = self.sender.as_deref().unwrap_or("unknown");
+    let from = attribute(self.sender.as_deref().unwrap_or("unknown"));
     match &self.content {
       Content::Text(text) => {
         writeln!(out, "<inbox-item from=\"{from}\" time=\"{time}\">")?;
-        writeln!(out, "{}", text.strip_suffix('\n').unwrap_or(text))?;
+        writeln!(out, "{}", body(text.strip_suffix('\n').unwrap_or(text)))?;
         writeln!(out, "</inbox-item>")
       }
       Content::File { mime } => {
         writeln!(
           out,
-          "<inbox-item from=\"{from}\" time=\"{time}\" type=\"{mime}\" path=\"{}\"/>",
-          self.path.display()
+          "<inbox-item from=\"{from}\" time=\"{time}\" type=\"{}\" path=\"{}\"/>",
+          attribute(mime),
+          attribute(&self.path.display().to_string())
         )
       }
     }

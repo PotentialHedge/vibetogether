@@ -147,11 +147,12 @@ async fn vibe_together_delivers_into_the_inbox() {
     .collect();
   assert!(
     texts[0].starts_with("Vibe Together item ")
-      && texts[0].contains("(session), session general (")
+      && texts[0].contains("(session) from luis, session general (")
   );
   assert!(texts[0].ends_with("\nQuiet here.\n"));
   assert!(texts[1].contains("(ping)") && texts[1].ends_with("\n**Scout?**\n"));
   assert!(items[1].path.extension().is_some_and(|e| e == "md"));
+  assert_eq!(items[1].sender.as_deref(), Some("luis"));
   until("read", async || received().await.read == sent).await;
   delivery.kill().await.unwrap();
 }

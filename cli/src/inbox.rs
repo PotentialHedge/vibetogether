@@ -215,14 +215,15 @@ fn reach_name(reach: Reach) -> &'static str {
 }
 
 /// An item as the agent reads it, with its extension: a first line that says where it is from,
-/// then its text. A payload without inline text is described with where to fetch it, never
+/// the sender as the backend names it, then its text. A payload without inline text is described with where to fetch it, never
 /// fetched.
 fn render(item: &Item, server: &str) -> (String, String) {
   let entry = &item.entry;
   let header = format!(
-    "Vibe Together item {} ({}), session {} ({}):",
+    "Vibe Together item {} ({}) from {}, session {} ({}):",
     item.n,
     reach_name(item.reach),
+    entry.from,
     item.session.name,
     item.session.id,
   );
