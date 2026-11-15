@@ -60,7 +60,9 @@
           cp -r node_modules $dir
           ${lib.concatMapStrings (part: ''
               mkdir -p $dir/${part}
-              cp -r ${part}/package.json ${part}/src ${part}/node_modules $dir/${part}
+              cp -r ${part}/package.json ${part}/src $dir/${part}
+              # A part with no dependencies of its own has none.
+              if [ -d ${part}/node_modules ]; then cp -r ${part}/node_modules $dir/${part}; fi
             '')
             parts}
           makeWrapper ${lib.getExe pkgs.nodejs} $out/bin/${bin} --add-flags $dir/${main}
@@ -73,17 +75,17 @@
       vibetogether-backend = workspacePackage pkgs {
         pname = "vibetogether-backend";
         bin = "vibetogether-backend";
-        parts = ["backend" "mcp"];
+        parts = ["backend" "mcp" "operations"];
         main = "backend/src/main.ts";
         hash = "sha256-a5jUcY2fVIVEVuHqSI4p4AoPCpSlpf7feZokubpfQzo=";
       };
-      # The command line, made from the MCP server's mapping.
+      # The command line, made from the operations' mapping alone.
       vibetogether = workspacePackage pkgs {
         pname = "vibetogether-cli";
         bin = "vibetogether";
-        parts = ["cli" "mcp"];
+        parts = ["cli" "operations"];
         main = "cli/src/cli.ts";
-        hash = "sha256-t2gYhMu+YZYxjRM1NW3cMoZAhHsktiauyPP+1+okvLw=";
+        hash = "sha256-k+kTjtSljaE+aMAQzBNVXpiA97lZsZdBWTdSVl1f47w=";
       };
     });
 

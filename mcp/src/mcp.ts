@@ -4,158 +4,25 @@
  * token. Nothing here knows any operation, so the document is the one definition of each.
  */
 import { createMcpHandler, Server } from "@modelcontextprotocol/server";
+import {
+	type Call,
+	callsOf,
+	type Document,
+	urlOf,
+} from "vibetogether-operations";
 
-type Schema = Record<string, unknown> & {
-	type?: string | string[];
-	properties?: Record<string, Schema>;
-	required?: string[];
-	description?: string;
-	$ref?: string;
-};
-
-type Parameter = {
-	in: "path" | "query" | "header" | "cookie";
-	name: string;
-	required?: boolean;
-	description?: string;
-	schema: Schema;
-};
-
-type Operation = {
-	operationId: string;
-	summary?: string;
-	description?: string;
-	tags?: string[];
-	security?: Record<string, string[]>[];
-	parameters?: Parameter[];
-	requestBody?: { content: Record<string, { schema: Schema }> };
-	"x-tool"?: boolean;
-};
-
-export type Document = {
-	info: { title: string; description?: string };
-	tags?: { name: string; description?: string }[];
-	paths: Record<string, Record<string, Operation>>;
-	components?: { schemas?: Record<string, Schema> };
-};
-
-/** A tool: the operation it calls, and its arguments, by where each goes in the request. */
-type Tool = {
-	name: string;
-	description: string;
-	inputSchema: Schema;
-	method: string;
-	path: string;
-	params: Parameter[];
-	/** The body's fields, where it is JSON. */
-	json: string[];
-	/** Whether the body is the payload itself, which the tool takes as `content`. */
-	raw: boolean;
-};
+export type { Document };
 
 /** The most an image is that a tool hands over as one, rather than as how to fetch it. */
 const maxImage = 5 * 1024 * 1024;
 
-/** `schema` with its references followed, since a tool's schema stands on its own. */
-function resolved(document: Document, schema: Schema, depth = 0): Schema {
-	if (depth > 12) return {};
-	if (schema.$ref) {
-		const name = schema.$ref.split("/").pop() ?? "";
-		return resolved(
-			document,
-			document.components?.schemas?.[name] ?? {},
-			depth + 1,
-		);
-	}
-	const out: Schema = {};
-	for (const [key, value] of Object.entries(schema)) {
-		if (Array.isArray(value))
-			out[key] = value.map((v) =>
-				v && typeof v === "object"
-					? resolved(document, v as Schema, depth + 1)
-					: v,
-			);
-		else if (value && typeof value === "object")
-			out[key] =
-				key === "properties"
-					? Object.fromEntries(
-							Object.entries(value as Record<string, Schema>).map(([k, v]) => [
-								k,
-								resolved(document, v, depth + 1),
-							]),
-						)
-					: resolved(document, value as Schema, depth + 1);
-		else out[key] = value;
-	}
-	return out;
-}
-
 /** The tools of `document`: every operation a token may call, but those marked `x-tool: false`. */
-export function toolsOf(document: Document): Tool[] {
-	const tools: Tool[] = [];
-	for (const [path, item] of Object.entries(document.paths))
-		for (const [method, operation] of Object.entries(item)) {
-			if (operation["x-tool"] === false) continue;
-			if (!operation.security?.some((way) => "token" in way)) continue;
-			const params = (operation.parameters ?? []).filter(
-				(p) => p.in === "path" || p.in === "query",
-			);
-			const properties: Record<string, Schema> = {};
-			const required: string[] = [];
-			for (const p of params) {
-				properties[p.name] = {
-					...resolved(document, p.schema),
-					...(p.description && { description: p.description }),
-				};
-				if (p.required || p.in === "path") required.push(p.name);
-			}
-			const content = operation.requestBody?.content ?? {};
-			const jsonBody = content["application/json"]?.schema;
-			const raw = !jsonBody && Object.keys(content).length > 0;
-			const json: string[] = [];
-			if (jsonBody) {
-				const body = resolved(document, jsonBody);
-				for (const [name, field] of Object.entries(body.properties ?? {})) {
-					properties[name] = field;
-					json.push(name);
-				}
-				required.push(...(body.required ?? []));
-			}
-			if (raw) {
-				properties.content = {
-					type: "string",
-					description:
-						"The payload: text as it is, or anything else in base64 with `base64` set.",
-				};
-				properties.type = {
-					type: "string",
-					description:
-						"The payload's MIME type, with its parameters, `text/plain; charset=utf-8` where left out.",
-				};
-				properties.base64 = {
-					type: "boolean",
-					description: "Whether `content` is base64.",
-				};
-				required.push("content");
-			}
-			tools.push({
-				name: operation.operationId,
-				description: [operation.summary, operation.description]
-					.filter(Boolean)
-					.join(": "),
-				inputSchema: {
-					type: "object",
-					properties,
-					...(required.length && { required }),
-				},
-				method: method.toUpperCase(),
-				path,
-				params,
-				json,
-				raw,
-			});
-		}
-	return tools;
+function toolsOf(document: Document): Call[] {
+	return callsOf(document).filter(
+		({ operation }) =>
+			operation["x-tool"] !== false &&
+			operation.security?.some((way) => "token" in way),
+	);
 }
 
 /** The instructions: what the document says of itself and of each concept. */
@@ -213,23 +80,14 @@ async function contentOf(response: Response, url: string): Promise<Content[]> {
 
 /** Calls the tool's operation with `args` and the agent's `token`, through `fetch`. */
 async function call(
-	tool: Tool,
+	tool: Call,
 	args: Record<string, unknown>,
 	token: string,
 	base: string,
 	fetch: (request: Request) => Promise<Response>,
 	signal: AbortSignal,
 ): Promise<{ content: Content[]; isError?: boolean }> {
-	let path = tool.path;
-	const query = new URLSearchParams();
-	for (const p of tool.params) {
-		const value = args[p.name];
-		if (value === undefined || value === null) continue;
-		if (p.in === "path")
-			path = path.replace(`{${p.name}}`, encodeURIComponent(String(value)));
-		else query.set(p.name, String(value));
-	}
-	const url = `${base}${path}${query.size ? `?${query}` : ""}`;
+	const url = urlOf(tool, args, base);
 	const headers = new Headers({ authorization: `Bearer ${token}` });
 	let body: string | Uint8Array<ArrayBuffer> | undefined;
 	if (tool.json.length) {

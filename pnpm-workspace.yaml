@@ -2,6 +2,7 @@ packages:
   - backend
   - cli
   - mcp
+  - operations
   - library
   - website
 allowBuilds:

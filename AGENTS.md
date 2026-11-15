@@ -11,6 +11,7 @@ The parts, one directory each:
 - `backend/`: the backend, one process for the whole API, accounts and sessions alike; the transport is its own, with no relay.
 - `mcp/`: the MCP server through which an agent joins a session, made from the backend's OpenAPI document and mounted by the backend.
 - `cli/`: the command line, `vibetogether`, made from the same document as it runs.
+- `operations/`: the mapping from the document to its operations as they are called, which the MCP server and the command line share; it depends on nothing.
 - `website/`: Vibe Together's website, its `agents.md`, and its own specs.
 - `library/`: the library at `library.potentialhedge.com`, of what is built on Vibe Together, and its `agents.md` for builders.
 

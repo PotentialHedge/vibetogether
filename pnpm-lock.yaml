@@ -50,9 +50,12 @@ importers:
 
   cli:
     dependencies:
-      vibetogether-mcp:
+      undici:
+        specifier: ^7.30.2
+        version: 7.30.2
+      vibetogether-operations:
         specifier: workspace:*
-        version: link:../mcp
+        version: link:../operations
     devDependencies:
       '@types/node':
         specifier: ^24.19.1
@@ -121,6 +124,18 @@ importers:
       '@modelcontextprotocol/server':
         specifier: ^2.4.0
         version: 2.4.0
+      vibetogether-operations:
+        specifier: workspace:*
+        version: link:../operations
+    devDependencies:
+      '@types/node':
+        specifier: ^24.19.1
+        version: 24.19.2
+      typescript:
+        specifier: ^7.0.2
+        version: 7.0.2
+
+  operations:
     devDependencies:
       '@types/node':
         specifier: ^24.19.1

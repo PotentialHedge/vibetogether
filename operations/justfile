@@ -1,0 +1,4 @@
+# The mapping's own checks; the root's `just ci` adds the shared ones. The MCP
+# server's and the command line's tests use it.
+ci:
+    pnpm exec tsc

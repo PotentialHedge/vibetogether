@@ -4,6 +4,7 @@ mod backend
 mod cli
 mod library
 mod mcp
+mod operations
 mod website
 
 # Everything CI runs: the checks the parts share, then each part's own.
@@ -15,6 +16,7 @@ ci:
     just cli::ci
     just library::ci
     just mcp::ci
+    just operations::ci
     just website::ci
     # The packages as they install, whose sources differ from pnpm's.
     nix build --no-link .#vibetogether-backend .#vibetogether

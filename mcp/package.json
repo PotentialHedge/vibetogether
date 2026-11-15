@@ -7,7 +7,8 @@
 		"node": ">=24"
 	},
 	"dependencies": {
-		"@modelcontextprotocol/server": "^2.4.0"
+		"@modelcontextprotocol/server": "^2.4.0",
+		"vibetogether-operations": "workspace:*"
 	},
 	"devDependencies": {
 		"@types/node": "^24.19.1",

@@ -2,14 +2,18 @@
 /**
  * Vibe Together's command line: each operation of the server's OpenAPI document is a command of
  * its id, with its arguments as flags, made from the document as it runs, so it never lags the
- * server. Nothing here knows any operation: the mapping is the MCP server's (`toolsOf`), given
- * every operation, since `x-tool` is for MCP alone.
+ * server. Nothing here knows any operation: the mapping from the document is `vibetogether-operations`,
+ * shared with the MCP server, and every operation is a command, since `x-tool` is for MCP alone.
  */
 import { readFileSync } from "node:fs";
-import { type Document, toolsOf } from "vibetogether-mcp";
-
-type Tool = ReturnType<typeof toolsOf>[number];
-type Schema = Tool["inputSchema"];
+import { Agent, setGlobalDispatcher } from "undici";
+import {
+	type Call,
+	callsOf,
+	type Document,
+	type Schema,
+	urlOf,
+} from "vibetogether-operations";
 
 /** What a run reads from and writes to, so that tests give their own. */
 export type Io = {
@@ -41,43 +45,23 @@ const kebab = (name: string) =>
 		.replace(/_/g, "-")
 		.toLowerCase();
 
-/** A command: the operation's tool, with what the listing shows of it. */
-type Command = { name: string; tag: string; summary: string; tool: Tool };
+/** A command: the operation's call, with what the listing shows of it. */
+type Command = { name: string; tag: string; summary: string; tool: Call };
 
 /** Every operation of `document` as a command, `x-tool: false` and every security included. */
 export function commandsOf(document: Document): Command[] {
-	const all: Document = {
-		...document,
-		paths: Object.fromEntries(
-			Object.entries(document.paths).map(([path, item]) => [
-				path,
-				Object.fromEntries(
-					Object.entries(item).map(([method, operation]) => {
-						const { "x-tool": _, ...rest } = operation;
-						return [method, { ...rest, security: [{ token: [] }] }];
-					}),
-				),
-			]),
-		),
-	};
-	const operations = Object.values(document.paths).flatMap((item) =>
-		Object.values(item),
-	);
-	return toolsOf(all).map((tool) => {
-		const operation = operations.find((o) => o.operationId === tool.name);
-		return {
-			name: kebab(tool.name),
-			tag: operation?.tags?.[0] ?? "",
-			summary: operation?.summary ?? "",
-			tool,
-		};
-	});
+	return callsOf(document).map((tool) => ({
+		name: kebab(tool.name),
+		tag: tool.operation.tags?.[0] ?? "",
+		summary: tool.operation.summary ?? "",
+		tool,
+	}));
 }
 
 /** A command's arguments as flags: each path and query parameter and JSON field. */
 type Argument = { name: string; flag: string; schema: Schema };
 
-function argumentsOf(tool: Tool): Argument[] {
+function argumentsOf(tool: Call): Argument[] {
 	const own = new Set([...tool.params.map((p) => p.name), ...tool.json]);
 	return Object.entries(tool.inputSchema.properties ?? {})
 		.filter(([name]) => own.has(name))
@@ -199,16 +183,7 @@ async function requestOf(
 	io: Io,
 ): Promise<() => Request> {
 	const { tool } = command;
-	let path = tool.path;
-	const query = new URLSearchParams();
-	for (const p of tool.params) {
-		const value = values[p.name];
-		if (value === undefined || value === null) continue;
-		if (p.in === "path")
-			path = path.replace(`{${p.name}}`, encodeURIComponent(String(value)));
-		else query.set(p.name, String(value));
-	}
-	const url = `${base}${path}${query.size ? `?${query}` : ""}`;
+	const url = urlOf(tool, values, base);
 	const headers = new Headers();
 	if (token) headers.set("authorization", `Bearer ${token}`);
 	let body: string | Uint8Array<ArrayBuffer> | undefined;
@@ -447,6 +422,9 @@ async function runOrExit(args: string[], io: Io): Promise<number> {
 }
 
 if (import.meta.main) {
+	// Node's fetch gives up on an answer after 300 s, and a wait may take longer: it is one
+	// request until it returns.
+	setGlobalDispatcher(new Agent({ headersTimeout: 0, bodyTimeout: 0 }));
 	const io: Io = {
 		env: process.env,
 		fetch: (request) => fetch(request),
