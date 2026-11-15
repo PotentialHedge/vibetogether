@@ -95,7 +95,8 @@ impl App {
   }
 
   /// The API, with every request logged by its method, path, status and time: nothing of its
-  /// query, headers or body, which hold tokens and links. Every answer names the API's version.
+  /// query, headers or body, which hold tokens and links, and its path without the codes of
+  /// OTPs and invites. Every answer names the API's version.
   pub fn router(&self) -> Router {
     let api = Router::new()
       .route("/me", get(account::me).delete(account::delete))
@@ -186,10 +187,40 @@ async fn versioned(mut response: Response) -> Response {
   response
 }
 
+/// A path as it is logged: the code of an OTP or an invite, which lets whoever holds it in, as
+/// `{code}`.
+fn redacted(path: &str) -> String {
+  let mut segments: Vec<&str> = path.split('/').collect();
+  if let ["", "api", "otp" | "invites", code, ..] = segments[..]
+    && code != "redeem"
+  {
+    segments[3] = "{code}";
+  }
+  segments.join("/")
+}
+
+#[cfg(test)]
+#[test]
+fn codes_are_not_logged() {
+  assert_eq!(redacted("/api/otp/ABCD1234"), "/api/otp/{code}");
+  assert_eq!(
+    redacted("/api/otp/ABCD1234/approve"),
+    "/api/otp/{code}/approve"
+  );
+  assert_eq!(redacted("/api/invites/k3x9"), "/api/invites/{code}");
+  assert_eq!(
+    redacted("/api/invites/k3x9/accept"),
+    "/api/invites/{code}/accept"
+  );
+  assert_eq!(redacted("/api/otp/redeem"), "/api/otp/redeem");
+  assert_eq!(redacted("/api/invites"), "/api/invites");
+  assert_eq!(redacted("/api/sessions/s_1"), "/api/sessions/s_1");
+}
+
 async fn logged(request: Request, next: Next) -> Response {
   let (method, path, start) = (
     request.method().clone(),
-    request.uri().path().to_string(),
+    redacted(request.uri().path()),
     Instant::now(),
   );
   let response = next.run(request).await;
