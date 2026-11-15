@@ -221,6 +221,15 @@ const LIMITED: [(&str, i64); 3] = [
 ];
 
 impl Caller {
+  /// The participant acting, by name: the agent an agent token names, as `<account>/<agent>`,
+  /// else the person.
+  pub fn actor(&self) -> &str {
+    self
+      .agent
+      .as_ref()
+      .map_or(&self.person, |agent| &agent.name)
+  }
+
   /// Refuses a token: only the person does this, signed in in the browser.
   pub fn in_browser(&self) -> Result<()> {
     match self.kind {

@@ -214,7 +214,7 @@ pub async fn create(
   tx.commit().await?;
   let text = format!(
     "{} created the group {}.",
-    caller.person,
+    caller.actor(),
     quoted(&group.name)
   );
   transport::announce(&app, &mut db, &general, &text, &[], &[]).await?;
@@ -282,7 +282,7 @@ pub async fn delete(
     let inbox = general_of(&mut db, &own).await?;
     let text = format!(
       "{} deleted the group {}.",
-      caller.person,
+      caller.actor(),
       quoted(&group.name)
     );
     transport::announce(&app, &mut db, &inbox, &text, &[], &[]).await?;
@@ -342,13 +342,13 @@ pub async fn add_member(
     .execute(&mut *db)
     .await?;
   let general = general_of(&mut db, &group.id).await?;
-  let text = format!("{} added {login} to the group.", caller.person);
+  let text = format!("{} added {login} to the group.", caller.actor());
   transport::announce(&app, &mut db, &general, &text, &[], &[]).await?;
   let own = own_group_of(&mut db, &person).await?;
   let inbox = general_of(&mut db, &own).await?;
   let text = format!(
     "{} added you to the group {}.",
-    caller.person,
+    caller.actor(),
     quoted(&group.name)
   );
   transport::announce(&app, &mut db, &inbox, &text, &[], &[]).await?;
@@ -402,7 +402,7 @@ pub async fn remove_member(
   let general = general_of(&mut db, &group.id).await?;
   let text = match own {
     true => format!("{login} left the group."),
-    false => format!("{} removed {login} from the group.", caller.person),
+    false => format!("{} removed {login} from the group.", caller.actor()),
   };
   transport::announce(&app, &mut db, &general, &text, &[], &[]).await?;
   if !own {
@@ -410,7 +410,7 @@ pub async fn remove_member(
     let inbox = general_of(&mut db, &mine).await?;
     let text = format!(
       "{} removed you from the group {}.",
-      caller.person,
+      caller.actor(),
       quoted(&group.name)
     );
     transport::announce(&app, &mut db, &inbox, &text, &[], &[]).await?;
@@ -528,7 +528,7 @@ pub async fn create_project(
   let general = general_of(&mut db, &group.id).await?;
   let text = format!(
     "{} created the project {}.",
-    caller.person,
+    caller.actor(),
     quoted(&project.name)
   );
   transport::announce(&app, &mut db, &general, &text, &[], &[]).await?;
@@ -595,7 +595,7 @@ pub async fn delete_project(
   let general = general_of(&mut db, &project.group).await?;
   let text = format!(
     "{} deleted the project {}, with its sessions.",
-    caller.person,
+    caller.actor(),
     quoted(&project.name)
   );
   transport::announce(&app, &mut db, &general, &text, &[], &[]).await?;

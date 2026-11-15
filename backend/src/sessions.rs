@@ -243,7 +243,7 @@ pub async fn create(
   let session = accessible(&mut db, &id, &caller).await?;
   let text = format!(
     "{} created the session {}{}.",
-    caller.person,
+    caller.actor(),
     quoted(&name),
     where_of(&mut db, &session).await?
   );
@@ -323,7 +323,7 @@ pub async fn delete(
   let general = general_of(&mut db, session.group.as_deref().unwrap_or_default()).await?;
   let text = format!(
     "{} deleted the session {}{place}.",
-    caller.person,
+    caller.actor(),
     quoted(&session.name)
   );
   transport::announce(&app, &mut db, &general, &text, &[], &[]).await?;

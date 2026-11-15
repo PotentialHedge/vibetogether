@@ -907,7 +907,8 @@ async fn every_group_has_its_general_which_stays_as_long_as_the_group() {
   };
   assert_eq!(status(w.ben.machine.create_session(&both).await), 400);
 
-  // What happened in the group is in its general, from vibetogether, pinging no one.
+  // What happened in the group is in its general, from vibetogether, naming the agent that did it
+  // and pinging no one.
   let log = w
     .luis
     .browser
@@ -915,10 +916,8 @@ async fn every_group_has_its_general_which_stays_as_long_as_the_group() {
     .await
     .unwrap()
     .entries;
-  assert!(
-    log.iter().any(|e| e.from == "vibetogether"
-      && e.text.as_deref() == Some("ben created the session `lounge`."))
-  );
+  assert!(log.iter().any(|e| e.from == "vibetogether"
+    && e.text.as_deref() == Some("ben/laptop created the session `lounge`.")));
   assert!(log.iter().all(|e| e.ty.contains("ping=\"\"")));
   w.ben.own.delete_session(&own.id).await.unwrap();
 
