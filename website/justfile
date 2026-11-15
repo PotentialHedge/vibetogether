@@ -17,4 +17,4 @@ dev: client
 # lwirth-cloud, whose serve.nix in dotcloud says how.
 deploy:
     nix build ..#website --out-link ../result-website
-    rsync -rlpt --delete --delay-updates --chmod=D755,F644 ../result-website/ root@lwirth-cloud:/srv/vibetogether/
+    rsync -rlpt --checksum --delete --delay-updates --chmod=D755,F644 ../result-website/ root@lwirth-cloud:/srv/vibetogether/
