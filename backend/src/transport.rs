@@ -18,7 +18,7 @@ use tokio::{sync::oneshot, time::Instant};
 use vibetogether_protocol::{
   Entry, Item, JOIN_TYPE, LEAVE_TYPE, LogQuery, MAX_NAMED, MAX_PAYLOAD, Named, Participant,
   Presence, Reach, ReceiveQuery, Received, SYSTEM_NAME, Sent, State, is_message, is_name_part,
-  names_of,
+  names_of, renamed,
 };
 
 use crate::{
@@ -711,6 +711,38 @@ pub async fn leave(app: &App, db: &mut Db, p: &Acting, session: &str, login: &st
   Ok(n)
 }
 
+/// A message's type with each name in its `ping` or `fyi` that is no more than an agent's own
+/// name, such as `lead`, as the full name of the sender's person's agent of that name, where one
+/// is not archived, so that everyone sees whom it named; any other name stays as it is.
+async fn with_own_agents(db: &mut Db, p: &Acting, ty: &str) -> Result<String> {
+  if !is_message(ty) {
+    return Ok(ty.to_string());
+  }
+  let login = p.name.split('/').next().unwrap_or_default();
+  let mut own = HashMap::new();
+  for name in names_of(ty, "ping").into_iter().chain(names_of(ty, "fyi")) {
+    if !is_name_part(&name) || own.contains_key(&name) {
+      continue;
+    }
+    let agent: Option<String> = sqlx::query_scalar(
+      "SELECT name FROM agent WHERE account = ? AND name = ? AND archived IS NULL",
+    )
+    .bind(&p.account)
+    .bind(&name)
+    .fetch_optional(&mut *db)
+    .await?;
+    if let Some(agent) = agent {
+      own.insert(name, format!("{login}/{agent}"));
+    }
+  }
+  if own.is_empty() {
+    return Ok(ty.to_string());
+  }
+  Ok(renamed(ty, |name| {
+    own.get(name).cloned().unwrap_or_else(|| name.to_string())
+  }))
+}
+
 /// Sends an entry: its number, and the names its `ping` or `fyi` lists that don't see the session.
 pub async fn send(
   app: &App,
@@ -735,6 +767,8 @@ pub async fn send(
   app
     .limits
     .adds(&p.account, payload.bytes.len() as u64, &app.config.database)?;
+  let ty = with_own_agents(db, p, payload.ty).await?;
+  let payload = Payload { ty: &ty, ..payload };
   let (n, unreached) = append_as(app, db, p, session, payload, None).await?;
   Ok(Sent {
     n: n as u64,
@@ -1138,13 +1172,14 @@ impl Drop for Waiting {
 /// A participant receives its stream: the items after `received`, as given or as stored. Naming
 /// `received` and `read` stores them first (`acknowledge`). It returns as soon as there is an
 /// item, or after `wait` seconds, and holds the participant's `state` meanwhile. An agent has one
-/// receive at a time: a newer one ends the one before with 409; a person has one per page.
+/// receive at a time: a newer one that may wait ends the one before with 409, while one with
+/// `wait=0` only acknowledges and looks; a person has one per page.
 pub async fn receive(app: &App, p: &Acting, login: &str, query: ReceiveQuery) -> Result<Received> {
   let state = query.state.unwrap_or_default();
   let (received, read) = {
     let mut db = app.db.acquire().await?;
     hold(app, &mut db, p, login).await?;
-    if p.id != p.account {
+    if p.id != p.account && query.wait != Some(0) {
       end(
         app,
         |r| r.participant == p.id,

@@ -966,6 +966,47 @@ async fn every_group_has_its_general_which_stays_as_long_as_the_group() {
 }
 
 #[tokio::test]
+async fn a_short_name_pings_the_senders_own_agent_first() {
+  let w = world().await;
+  let g = w.session.id.clone();
+  let ben = agent(&w.ben.machine, "claude").await;
+  let bens = agent(&w.ben.machine, "lead").await;
+  let luis = agent(&w.luis.machine, "lead").await;
+  ben.join(&g).await.unwrap();
+  caught_up(&bens).await;
+  caught_up(&luis).await;
+  send(&ben, &g, "Lead?", "text/plain; ping=\"lead luis\"").await;
+  assert_eq!(
+    said(&now(&bens).await),
+    [(s("ben/claude"), s("Lead?"), Reach::Ping)]
+  );
+  assert!(now(&luis).await.is_empty());
+  // Everyone sees whom it pinged.
+  let log = w.luis.browser.log(&g, &LogQuery::default()).await.unwrap();
+  assert_eq!(
+    log.entries.last().unwrap().ty,
+    "text/plain; ping=\"ben/lead luis\""
+  );
+}
+
+#[tokio::test]
+async fn a_receive_that_does_not_wait_leaves_the_waiting_one() {
+  let w = world().await;
+  let claude = agent(&w.luis.machine, "claude").await;
+  caught_up(&claude).await;
+  let waiting = {
+    let claude = claude.clone();
+    tokio::spawn(async move { claude.receive(&query(None, None, Some(1))).await })
+  };
+  sleep(50).await;
+  assert_eq!(
+    status(claude.receive(&query(None, None, Some(0))).await),
+    200
+  );
+  assert_eq!(status(waiting.await.unwrap()), 200);
+}
+
+#[tokio::test]
 async fn a_ping_or_an_fyi_reaches_an_agent_from_any_session_it_sees() {
   let w = world().await;
   let overview = w

@@ -1,4 +1,4 @@
-use vibetogether_protocol::{is_message, message_type, names_of, parameter_of};
+use vibetogether_protocol::{is_message, message_type, names_of, parameter_of, renamed};
 
 #[test]
 fn a_quoted_parameter_hides_no_other() {
@@ -40,4 +40,24 @@ fn an_extensions_entry_is_no_message() {
   assert!(is_message("image/png"));
   assert!(!is_message("application/vnd.vibetogether.join"));
   assert!(!is_message("application/VND.example.cursor+json"));
+}
+
+#[test]
+fn renaming_changes_only_the_names() {
+  let full = |n: &str| match n {
+    "lead" => "luis/lead".to_string(),
+    n => n.to_string(),
+  };
+  assert_eq!(
+    renamed(
+      r#"text/markdown; charset=utf-8; ping="lead ben"; fyi=lead"#,
+      full
+    ),
+    r#"text/markdown; charset=utf-8; ping="luis/lead ben"; fyi="luis/lead""#
+  );
+  assert_eq!(renamed("text/plain", full), "text/plain");
+  assert_eq!(
+    renamed("text/plain; broken; ping=lead", full),
+    "text/plain; broken; ping=lead"
+  );
 }

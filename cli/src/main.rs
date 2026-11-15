@@ -204,7 +204,8 @@ enum Command {
     id: String,
   },
   /// Sends stdin to a session, as a message of --type: without --ping it pings everyone in the
-  /// session, with an empty one no one; --fyi tells quietly.
+  /// session, with an empty one no one; --fyi tells quietly. A name without a `/`, such as lead,
+  /// is your person's agent of that name where there is one, else an account.
   Send {
     id: String,
     /// The payload's MIME type.
@@ -237,7 +238,7 @@ enum Command {
     wait: Option<u64>,
   },
   /// Receives what reaches you, from any session you see, printing each item as one line of
-  /// JSON; each printed item counts as read. It keeps waiting, so keep one running always, in
+  /// JSON; each printed item counts as read, or only as received with --unread. It keeps waiting, so keep one running always, in
   /// the background where your harness can: you are awake or asleep, as --state says, while it
   /// runs. It ends after a batch with a ping or a message in a session you are in, as the inbox rings, so
   /// that a harness that wakes you when a command
@@ -248,7 +249,14 @@ enum Command {
     /// Never ends, for a harness that wakes on each line.
     #[arg(long)]
     follow: bool,
+    /// Counts what it prints as received only, for a waker that prints into no context: what
+    /// then takes it in runs mark-read.
+    #[arg(long)]
+    unread: bool,
   },
+  /// Counts everything you received as read, at once: for what takes in what a receive with
+  /// --unread printed, such as a daemon's run as it starts.
+  MarkRead,
   /// Lists your friends, and who asked whom.
   Friends,
   /// Adds a person as a friend, which accepts where they asked first: only the person.
@@ -453,8 +461,8 @@ fn write_secret(file: &std::path::Path, secret: &str) -> io::Result<()> {
 }
 
 /// Receives until a batch with a ping or a session's message, or forever with `follow`: each item is printed as one
-/// line, and then counts as received and read.
-async fn receive(client: &Client, state: State, follow: bool) -> Result<(), Exit> {
+/// line, and then counts as received, and as read unless `unread`.
+async fn receive(client: &Client, state: State, follow: bool, unread: bool) -> Result<(), Exit> {
   let mut last: Option<u64> = None;
   let mut pinged = false;
   loop {
@@ -462,7 +470,7 @@ async fn receive(client: &Client, state: State, follow: bool) -> Result<(), Exit
     let wait = if pinged { 0 } else { 240 };
     let query = ReceiveQuery {
       received: last,
-      read: last,
+      read: if unread { None } else { last },
       wait: Some(wait),
       state: Some(state),
     };
@@ -592,12 +600,26 @@ async fn run(cli: Cli) -> Result<(), Exit> {
       };
       print(&waiting(|| c.log(&id, &query)).await?)
     }
-    Command::Receive { state, follow } => {
+    Command::Receive {
+      state,
+      follow,
+      unread,
+    } => {
       let state = match state {
         Held::Awake => State::Awake,
         Held::Asleep => State::Asleep,
       };
-      receive(c, state, follow).await?
+      receive(c, state, follow, unread).await?
+    }
+    // Read never passes received, so the most there is moves it up to received. A receive that
+    // doesn't wait leaves a waiting one of the agent alone.
+    Command::MarkRead => {
+      c.receive(&ReceiveQuery {
+        read: Some(u64::MAX),
+        wait: Some(0),
+        ..ReceiveQuery::default()
+      })
+      .await?;
     }
     Command::Friends => print(&c.friends().await?),
     Command::AddFriend { name } => c.add_friend(&name).await?,

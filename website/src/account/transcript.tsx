@@ -700,7 +700,7 @@ export function Transcript({
 						{note}
 					</p>
 				) : (
-					<Composer send={send} mentionable={mentionable} />
+					<Composer send={send} mentionable={mentionable} as={as} />
 				)}
 			</div>
 			<aside className="hidden w-72 shrink-0 overflow-y-auto border-l px-5 py-4 xl:block">
@@ -718,7 +718,8 @@ const NAME = "[a-z0-9][a-z0-9-]*(?:/[a-z0-9][a-z0-9-]*)?";
 const EVERYONE = "everyone";
 
 /** Whom a message pings: every name it mentions as `@name`, whoever sees
- * the session, which the backend decides, and `*` for `@everyone`; or, where
+ * the session, which the backend decides, also for a name without a `/`, the
+ * person's own agent of that name first, and `*` for `@everyone`; or, where
  * it mentions none, everyone in the session. */
 function mentioned(text: string): string[] | null {
 	const named = [
@@ -742,15 +743,27 @@ function typing(
 	return { start: caret - prefix.length - 1, prefix };
 }
 
+/** Whether `name` is offered for the `@name` typed so far: its start, or for
+ * an agent the start of its own part. */
+function matches(name: string, prefix: string): boolean {
+	return (
+		name.startsWith(prefix) || (name.split("/")[1]?.startsWith(prefix) ?? false)
+	);
+}
+
 /** The chatbox: Enter sends, Shift+Enter starts a new line. Typing `@` offers
  * whom it can ping: everyone who sees the session, and their agents that are
- * awake or asleep. */
+ * awake or asleep; the person's own agents complete to their own part, which
+ * names them first. */
 function Composer({
 	send,
 	mentionable,
+	as,
 }: {
 	send: Log["send"];
 	mentionable: string[];
+	/** The person's account name. */
+	as: string;
 }) {
 	const [text, setText] = useState("");
 	const [caret, setCaret] = useState(0);
@@ -771,7 +784,7 @@ function Composer({
 	const offered =
 		at && at.start !== dismissed
 			? [EVERYONE, ...mentionable]
-					.filter((name) => name.startsWith(at.prefix))
+					.filter((name) => matches(name, at.prefix))
 					.sort(
 						(a, b) =>
 							Number(b === EVERYONE) - Number(a === EVERYONE) ||
@@ -781,8 +794,10 @@ function Composer({
 					.slice(0, 8)
 			: [];
 	if (!send) return null;
-	const pick = (name: string) => {
+	const own = `${as}/`;
+	const pick = (offered: string) => {
 		if (!at) return;
+		const name = offered.startsWith(own) ? offered.slice(own.length) : offered;
 		const end = caret;
 		const next = `${text.slice(0, at.start)}@${name} ${text.slice(end)}`;
 		const position = at.start + name.length + 2;
@@ -852,7 +867,16 @@ function Composer({
 										className="size-1.5 shrink-0 rounded-full bg-emerald-500"
 									/>
 								)}
-								<span className="min-w-0 truncate">{name}</span>
+								<span className="min-w-0 truncate">
+									{name.startsWith(own) ? (
+										<>
+											<span className="text-muted-foreground">{own}</span>
+											{name.slice(own.length)}
+										</>
+									) : (
+										name
+									)}
+								</span>
 							</button>
 						))}
 					</div>

@@ -1,22 +1,48 @@
 //! An entry's type, a MIME type, and the parameters a message names participants in.
 
+use std::ops::Range;
+
 /// A parameter of a MIME type, such as `ping` of `text/plain; ping="ben ben/claude"`, read as
 /// RFC 9110 reads it: a quoted value holds what would otherwise end it, the first of a name
 /// counts, and reading stops at the first malformed parameter.
 pub fn parameter_of(ty: &str, name: &str) -> Option<String> {
-  let mut rest = &ty[ty.find(';')?..];
+  parameters(ty)
+    .into_iter()
+    .find(|(key, _, _)| key.eq_ignore_ascii_case(name))
+    .map(|(_, value, _)| value)
+}
+
+/// The parameters of `ty` up to the first malformed one, each with its value and where the
+/// value stands in `ty`, quotes included.
+fn parameters(ty: &str) -> Vec<(&str, String, Range<usize>)> {
+  let mut found = Vec::new();
+  let Some(start) = ty.find(';') else {
+    return found;
+  };
+  let at = |rest: &str| ty.len() - rest.len();
+  let mut rest = &ty[start..];
   loop {
-    rest = rest.strip_prefix(';')?.trim_start();
+    let Some(next) = rest.strip_prefix(';') else {
+      return found;
+    };
+    rest = next.trim_start();
     let end = rest
       .find(|c: char| c == '=' || c == ';' || c.is_whitespace())
       .unwrap_or(rest.len());
     if end == 0 {
-      return None;
+      return found;
     }
     let (key, after) = rest.split_at(end);
-    let after = after.trim_start().strip_prefix('=')?.trim_start();
+    let Some(after) = after.trim_start().strip_prefix('=') else {
+      return found;
+    };
+    let after = after.trim_start();
+    let from = at(after);
     let (value, after) = match after.strip_prefix('"') {
-      Some(quoted) => unquoted(quoted)?,
+      Some(quoted) => match unquoted(quoted) {
+        Some(read) => read,
+        None => return found,
+      },
       None => {
         let end = after
           .find(|c: char| c == ';' || c.is_whitespace())
@@ -24,9 +50,7 @@ pub fn parameter_of(ty: &str, name: &str) -> Option<String> {
         (after[..end].to_string(), &after[end..])
       }
     };
-    if key.eq_ignore_ascii_case(name) {
-      return Some(value);
-    }
+    found.push((key, value, from..at(after)));
     rest = after.trim_start();
   }
 }
@@ -63,13 +87,30 @@ pub fn is_message(ty: &str) -> bool {
   !subtype.to_ascii_lowercase().starts_with("vnd.")
 }
 
+/// `ty` with each name its `ping` and `fyi` list as `rename` gives it, the rest as it was.
+pub fn renamed(ty: &str, rename: impl Fn(&str) -> String) -> String {
+  let mut out = String::new();
+  let mut at = 0;
+  for (key, value, span) in parameters(ty) {
+    if key.eq_ignore_ascii_case("ping") || key.eq_ignore_ascii_case("fyi") {
+      let names: Vec<String> = value.split_whitespace().map(&rename).collect();
+      out += &ty[at..span.start];
+      out += &quoted(&names);
+      at = span.end;
+    }
+  }
+  out + &ty[at..]
+}
+
+/// Names as a quoted parameter's value, separated by spaces.
+fn quoted(names: &[String]) -> String {
+  let joined = names.join(" ");
+  format!("\"{}\"", joined.replace('\\', "\\\\").replace('"', "\\\""))
+}
+
 /// A message's type: `base` with whom it pings, where `ping` is given, and whom it tells
 /// quietly. A message without `ping` pings everyone in its session; with an empty one, no one.
 pub fn message_type(base: &str, ping: Option<&[String]>, fyi: &[String]) -> String {
-  let quoted = |names: &[String]| {
-    let joined = names.join(" ");
-    format!("\"{}\"", joined.replace('\\', "\\\\").replace('"', "\\\""))
-  };
   let mut ty = base.to_string();
   if let Some(ping) = ping {
     ty += &format!("; ping={}", quoted(ping));
