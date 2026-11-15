@@ -22,49 +22,69 @@
     # TypeScript compiler and the type definitions are pinned by pnpm instead,
     # since editors look for them in node_modules.
     tools = pkgs: with pkgs; [nodejs pnpm biome just curl jq rsync];
-  in {
-    packages = forEachSystem (pkgs: {
-      # The backend as it runs, the MCP server in it: their sources and their
-      # production dependencies, which Node runs as they are, stripping the
-      # types itself.
-      vibetogether-backend = pkgs.stdenvNoCC.mkDerivation (finalAttrs: {
-        pname = "vibetogether-backend";
+
+    # A part of the workspace as it runs: its sources and those of the parts it
+    # depends on, with their production dependencies, which Node runs as they
+    # are, stripping the types itself.
+    workspacePackage = pkgs: {
+      pname,
+      bin,
+      parts,
+      main,
+      hash,
+    }:
+      pkgs.stdenvNoCC.mkDerivation (finalAttrs: {
+        inherit pname;
         version = "0.1.0";
         src = lib.fileset.toSource {
           root = ./.;
-          fileset = lib.fileset.unions [
-            ./package.json
-            ./pnpm-lock.yaml
-            ./pnpm-workspace.yaml
-            ./backend/package.json
-            ./backend/src
-            ./mcp/package.json
-            ./mcp/src
-          ];
+          fileset =
+            lib.fileset.unions ([./package.json ./pnpm-lock.yaml ./pnpm-workspace.yaml]
+              ++ lib.concatMap (part: [./${part}/package.json ./${part}/src]) parts);
         };
-        pnpmWorkspaces = ["vibetogether-backend..."];
+        pnpmWorkspaces = ["${pname}..."];
         nativeBuildInputs = [pkgs.nodejs pkgs.pnpm pkgs.pnpmConfigHook pkgs.makeWrapper];
         pnpmDeps = pkgs.fetchPnpmDeps {
           inherit (finalAttrs) pname version src pnpmWorkspaces;
+          inherit hash;
           fetcherVersion = 4;
-          hash = "sha256-a5jUcY2fVIVEVuHqSI4p4AoPCpSlpf7feZokubpfQzo=";
           # pnpm leaves an empty `links` in its store on Darwin only, which
           # fetchPnpmDeps keeps, so the hash would differ between platforms.
           preFixup = "rm -rf $storePath/v11/links";
         };
         pnpmInstallFlags = ["--prod"];
+        # Each part's node_modules links into the workspace's, so all go.
         installPhase = ''
-          # Each part's node_modules links into the workspace's, so all go.
-          dir=$out/lib/vibetogether-backend
-          mkdir -p $dir/backend $dir/mcp
+          dir=$out/lib/${pname}
+          mkdir -p $dir
           cp -r node_modules $dir
-          cp -r backend/package.json backend/src backend/node_modules $dir/backend
-          cp -r mcp/package.json mcp/src mcp/node_modules $dir/mcp
-          makeWrapper ${lib.getExe pkgs.nodejs} $out/bin/vibetogether-backend \
-            --add-flags $dir/backend/src/main.ts
+          ${lib.concatMapStrings (part: ''
+              mkdir -p $dir/${part}
+              cp -r ${part}/package.json ${part}/src ${part}/node_modules $dir/${part}
+            '')
+            parts}
+          makeWrapper ${lib.getExe pkgs.nodejs} $out/bin/${bin} --add-flags $dir/${main}
         '';
-        meta.mainProgram = "vibetogether-backend";
+        meta.mainProgram = bin;
       });
+  in {
+    packages = forEachSystem (pkgs: {
+      # The backend, the MCP server in it.
+      vibetogether-backend = workspacePackage pkgs {
+        pname = "vibetogether-backend";
+        bin = "vibetogether-backend";
+        parts = ["backend" "mcp"];
+        main = "backend/src/main.ts";
+        hash = "sha256-a5jUcY2fVIVEVuHqSI4p4AoPCpSlpf7feZokubpfQzo=";
+      };
+      # The command line, made from the MCP server's mapping.
+      vibetogether = workspacePackage pkgs {
+        pname = "vibetogether-cli";
+        bin = "vibetogether";
+        parts = ["cli" "mcp"];
+        main = "cli/src/cli.ts";
+        hash = "sha256-t2gYhMu+YZYxjRM1NW3cMoZAhHsktiauyPP+1+okvLw=";
+      };
     });
 
     nixosModules.backend = import ./backend/nixos-module.nix self;
