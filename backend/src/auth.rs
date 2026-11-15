@@ -265,6 +265,7 @@ struct GitHubUser {
 /// with a sign-in held in the browser's cookie.
 pub async fn signed_in(
   State(app): State<App>,
+  headers: HeaderMap,
   jar: CookieJar,
   Query(query): Query<Callback>,
 ) -> Result<Response> {
@@ -330,7 +331,17 @@ pub async fn signed_in(
     user.avatar_url.as_deref(),
   )
   .await?;
-  let secret = new_login(&app, &account, LoginKind::Browser, "a sign-in").await?;
+  let user_agent = headers
+    .get(axum::http::header::USER_AGENT)
+    .and_then(|v| v.to_str().ok())
+    .unwrap_or("");
+  let secret = new_login(
+    &app,
+    &account,
+    LoginKind::Browser,
+    &browser_name(user_agent),
+  )
+  .await?;
   let jar = jar.remove(removal(&app, pending_cookie(&app))).add(cookie(
     &app,
     cookie_name(&app),
@@ -338,6 +349,42 @@ pub async fn signed_in(
     time::Duration::days(400),
   ));
   Ok((jar, Redirect::to(callback)).into_response())
+}
+
+/// A browser login's name, its browser and device as its User-Agent tells them, such as
+/// "Safari on iPhone"; whichever part it doesn't tell is left out.
+fn browser_name(user_agent: &str) -> String {
+  let find = |table: &[(&str, &'static str)]| {
+    table
+      .iter()
+      .find(|(mark, _)| user_agent.contains(mark))
+      .map(|(_, name)| *name)
+  };
+  // The first match wins: each browser's agent also names those it descends from.
+  let browser = find(&[
+    ("Edg", "Edge"),
+    ("OPR/", "Opera"),
+    ("Firefox/", "Firefox"),
+    ("FxiOS/", "Firefox"),
+    ("Chrome/", "Chrome"),
+    ("CriOS/", "Chrome"),
+    ("Safari/", "Safari"),
+  ]);
+  let device = find(&[
+    ("iPhone", "iPhone"),
+    ("iPad", "iPad"),
+    ("Android", "Android"),
+    ("CrOS", "ChromeOS"),
+    ("Macintosh", "Mac"),
+    ("Windows", "Windows"),
+    ("Linux", "Linux"),
+  ]);
+  match (browser, device) {
+    (Some(browser), Some(device)) => format!("{browser} on {device}"),
+    (Some(browser), None) => browser.to_string(),
+    (None, Some(device)) => format!("a browser on {device}"),
+    (None, None) => "a browser".to_string(),
+  }
 }
 
 /// Signs the browser out: its sign-in is revoked.
@@ -658,6 +705,36 @@ mod tests {
       "/é",
     ] {
       assert!(!own_path(path), "{path:?}");
+    }
+  }
+
+  #[test]
+  fn a_browser_login_is_named_by_its_browser_and_device() {
+    for (agent, name) in [
+      (
+        "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1",
+        "Safari on iPhone",
+      ),
+      (
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:140.0) Gecko/20100101 Firefox/140.0",
+        "Firefox on Mac",
+      ),
+      (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36 Edg/140.0.0.0",
+        "Edge on Windows",
+      ),
+      (
+        "Mozilla/5.0 (Linux; Android 15) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Mobile Safari/537.36",
+        "Chrome on Android",
+      ),
+      (
+        "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/140.0 Mobile/15E148 Safari/604.1",
+        "Chrome on iPhone",
+      ),
+      ("curl/8.0", "a browser"),
+      ("", "a browser"),
+    ] {
+      assert_eq!(browser_name(agent), name);
     }
   }
 }
