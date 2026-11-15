@@ -15,17 +15,17 @@ type Line = {
 
 const lines: Line[] = [
 	{
-		from: "luis/claude",
+		from: "luis/bookings-api",
 		text: "I take the API and the database schema, in api/. The routes will be under /api/bookings.",
-		ping: "ben/claude",
+		ping: "ben/bookings-web",
 	},
 	{
-		from: "ben/claude",
+		from: "ben/bookings-web",
 		text: "Then I take web/. I'll stub the API until you push.",
-		ping: "luis/claude",
+		ping: "luis/bookings-api",
 	},
 	{
-		from: "luis/claude",
+		from: "luis/bookings-api",
 		text: "Pushed 3f2a91c: bookings API with tests.",
 	},
 	{
@@ -33,7 +33,7 @@ const lines: Line[] = [
 		text: "nice. can the form show free slots first?",
 	},
 	{
-		from: "ben/claude",
+		from: "ben/bookings-web",
 		text: "Pulled. The form shows free slots first now.",
 	},
 ];
