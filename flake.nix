@@ -2,6 +2,11 @@
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
 
+    rust-overlay.url = "github:oxalica/rust-overlay";
+    rust-overlay.inputs.nixpkgs.follows = "nixpkgs";
+
+    crane.url = "github:ipetkov/crane";
+
     treefmt-nix.url = "github:numtide/treefmt-nix";
     treefmt-nix.inputs.nixpkgs.follows = "nixpkgs";
   };
@@ -9,6 +14,8 @@
   outputs = {
     self,
     nixpkgs,
+    rust-overlay,
+    crane,
     treefmt-nix,
     ...
   }: let
@@ -16,77 +23,116 @@
 
     forEachSystem = f:
       lib.genAttrs ["aarch64-darwin" "x86_64-linux"]
-      (system: f nixpkgs.legacyPackages.${system});
+      (system:
+        f (import nixpkgs {
+          inherit system;
+          overlays = [(import rust-overlay)];
+        }));
 
-    # One environment, entered by the shell and by the checks alike. The
-    # TypeScript compiler and the type definitions are pinned by pnpm instead,
-    # since editors look for them in node_modules.
-    tools = pkgs: with pkgs; [nodejs pnpm biome just curl jq rsync];
+    toolchain = pkgs: pkgs.rust-bin.fromRustupToolchainFile ./rust-toolchain.toml;
 
-    # A part of the workspace as it runs: its sources and those of the parts it
-    # depends on, with their production dependencies, which Node runs as they
-    # are, stripping the types itself.
-    workspacePackage = pkgs: {
-      pname,
-      bin,
-      parts,
-      main,
-      hash,
-    }:
-      pkgs.stdenvNoCC.mkDerivation (finalAttrs: {
-        inherit pname;
+    # The command line that makes the website's bindings from the client's
+    # WebAssembly. It must be the version of the wasm-bindgen crate in
+    # Cargo.lock, which the client pins to it.
+    wasmBindgen = pkgs: pkgs.wasm-bindgen-cli_0_2_129;
+
+    # The Rust workspace: its sources, with the backend's migrations and the
+    # tests' fixtures, which are no Cargo sources.
+    rust = pkgs: let
+      craneLib = (crane.mkLib pkgs).overrideToolchain toolchain;
+      src = lib.fileset.toSource {
+        root = ./.;
+        fileset = lib.fileset.unions [
+          (craneLib.fileset.commonCargoSources ./.)
+          (lib.fileset.fileFilter (file: file.hasExt "sql") ./backend)
+        ];
+      };
+      common = {
+        inherit src;
+        pname = "vibetogether";
+        version = "0.1.0";
+        strictDeps = true;
+        # The tests run in `just ci`, against a backend on loopback.
+        doCheck = false;
+      };
+      native = common // {cargoArtifacts = craneLib.buildDepsOnly common;};
+      wasm =
+        common
+        // {
+          pname = "vibetogether-client-wasm";
+          CARGO_BUILD_TARGET = "wasm32-unknown-unknown";
+          cargoExtraArgs = "--locked -p vibetogether-client";
+        };
+    in {
+      backend = craneLib.buildPackage (native
+        // {
+          pname = "vibetogether-backend";
+          cargoExtraArgs = "--locked -p vibetogether-backend";
+          meta.mainProgram = "vibetogether-backend";
+        });
+      cli = craneLib.buildPackage (native
+        // {
+          pname = "vibetogether";
+          cargoExtraArgs = "--locked -p vibetogether";
+          meta.mainProgram = "vibetogether";
+        });
+      # The client compiled to WebAssembly, with its bindings for the
+      # website: an ES module, its WebAssembly and its types.
+      web = craneLib.mkCargoDerivation (wasm
+        // {
+          cargoArtifacts = craneLib.buildDepsOnly wasm;
+          nativeBuildInputs = [(wasmBindgen pkgs)];
+          buildPhaseCargoCommand = "cargo build --release $cargoExtraArgs";
+          installPhaseCommand = ''
+            wasm-bindgen --target web --out-dir $out \
+              target/wasm32-unknown-unknown/release/vibetogether_client.wasm
+          '';
+        });
+    };
+  in {
+    packages = forEachSystem (pkgs: let
+      built = rust pkgs;
+    in {
+      vibetogether-backend = built.backend;
+      vibetogether = built.cli;
+      default = built.cli;
+      # The website, as it is served: its pages with the client's bindings.
+      website = pkgs.stdenvNoCC.mkDerivation (finalAttrs: {
+        pname = "vibetogether-website";
         version = "0.1.0";
         src = lib.fileset.toSource {
           root = ./.;
-          fileset =
-            lib.fileset.unions ([./package.json ./pnpm-lock.yaml ./pnpm-workspace.yaml]
-              ++ lib.concatMap (part: [./${part}/package.json ./${part}/src]) parts);
+          fileset = lib.fileset.difference (lib.fileset.unions [
+            ./package.json
+            ./pnpm-lock.yaml
+            ./pnpm-workspace.yaml
+            ./website
+          ]) (lib.fileset.maybeMissing ./website/node_modules);
         };
-        pnpmWorkspaces = ["${pname}..."];
-        nativeBuildInputs = [pkgs.nodejs pkgs.pnpm pkgs.pnpmConfigHook pkgs.makeWrapper];
+        pnpmWorkspaces = ["vibetogether"];
+        nativeBuildInputs = [pkgs.nodejs pkgs.pnpm pkgs.pnpmConfigHook];
         pnpmDeps = pkgs.fetchPnpmDeps {
           inherit (finalAttrs) pname version src pnpmWorkspaces;
-          inherit hash;
+          hash = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
           fetcherVersion = 4;
           # pnpm leaves an empty `links` in its store on Darwin only, which
           # fetchPnpmDeps keeps, so the hash would differ between platforms.
           preFixup = "rm -rf $storePath/v11/links";
         };
-        pnpmInstallFlags = ["--prod"];
-        # Each part's node_modules links into the workspace's, so all go.
-        installPhase = ''
-          dir=$out/lib/${pname}
-          mkdir -p $dir
-          cp -r node_modules $dir
-          ${lib.concatMapStrings (part: ''
-              mkdir -p $dir/${part}
-              cp -r ${part}/package.json ${part}/src $dir/${part}
-              # A part with no dependencies of its own has none.
-              if [ -d ${part}/node_modules ]; then cp -r ${part}/node_modules $dir/${part}; fi
-            '')
-            parts}
-          makeWrapper ${lib.getExe pkgs.nodejs} $out/bin/${bin} --add-flags $dir/${main}
+        buildPhase = ''
+          runHook preBuild
+          rm -rf website/src/client
+          cp -r ${built.web} website/src/client
+          chmod -R u+w website/src/client
+          pnpm --filter vibetogether build
+          runHook postBuild
         '';
-        meta.mainProgram = bin;
+        installPhase = ''
+          runHook preInstall
+          cp -r website/dist $out
+          runHook postInstall
+        '';
       });
-  in {
-    packages = forEachSystem (pkgs: {
-      # The backend, the MCP server in it.
-      vibetogether-backend = workspacePackage pkgs {
-        pname = "vibetogether-backend";
-        bin = "vibetogether-backend";
-        parts = ["backend" "mcp" "operations"];
-        main = "backend/src/main.ts";
-        hash = "sha256-a5jUcY2fVIVEVuHqSI4p4AoPCpSlpf7feZokubpfQzo=";
-      };
-      # The command line, made from the operations' mapping alone.
-      vibetogether = workspacePackage pkgs {
-        pname = "vibetogether-cli";
-        bin = "vibetogether";
-        parts = ["cli" "operations"];
-        main = "cli/src/cli.ts";
-        hash = "sha256-k+kTjtSljaE+aMAQzBNVXpiA97lZsZdBWTdSVl1f47w=";
-      };
     });
 
     nixosModules.backend = import ./backend/nixos-module.nix self;
@@ -97,6 +143,8 @@
     formatter = forEachSystem (pkgs:
       treefmt-nix.lib.mkWrapper pkgs {
         projectRootFile = "flake.nix";
+        programs.rustfmt.enable = true;
+        programs.rustfmt.package = toolchain pkgs;
         programs.biome.enable = true;
         # One configuration for both, rather than treefmt's own default.
         # treefmt names the files itself, and Biome would look for the ignore
@@ -110,10 +158,14 @@
         programs.shfmt.enable = true;
         # direnv reads it, no shell runs it.
         settings.formatter.shellcheck.excludes = [".envrc"];
+        # Made by wasm-bindgen.
+        settings.global.excludes = ["website/src/client/*"];
       });
 
     devShells = forEachSystem (pkgs: {
-      default = pkgs.mkShell {packages = tools pkgs;};
+      default = pkgs.mkShell {
+        packages = with pkgs; [(toolchain pkgs) (wasmBindgen pkgs) nodejs pnpm biome just sqlite rsync];
+      };
     });
   };
 }

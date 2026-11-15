@@ -1,0 +1,25 @@
+[package]
+name = "vibetogether-backend"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[dependencies]
+axum = { version = "0.8.9", features = ["macros"] }
+axum-extra = { version = "0.12.6", features = ["cookie", "typed-header"], default-features = false }
+base64 = "0.22"
+jiff = "0.2.45"
+oauth2 = { version = "5.0.0", default-features = false }
+rand = "0.10.4"
+reqwest = { version = "0.13.5", default-features = false, features = ["json", "rustls"] }
+rustix = { version = "1.1.6", features = ["fs"] }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+sha2 = "0.11.1"
+sqlx = { version = "0.9.0", default-features = false, features = ["runtime-tokio", "sqlite", "migrate", "macros"] }
+thiserror = "2.0.21"
+time = "0.3.55"
+tokio = { version = "1.54.1", features = ["full"] }
+tracing = "0.1.44"
+tracing-subscriber = "0.3.23"
+vibetogether-protocol = { version = "0.1.0", path = "../protocol" }

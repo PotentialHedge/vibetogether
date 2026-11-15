@@ -1,0 +1,544 @@
+//! `vibetogether`: Vibe Together's command line, one command per operation, over the client
+//! library.
+
+use std::{
+  fs,
+  io::{self, Read, Write},
+  path::PathBuf,
+  process::ExitCode,
+  time::Duration,
+};
+
+use clap::{Parser, Subcommand, ValueEnum};
+use serde::Serialize;
+use vibetogether_client::{Client, Error};
+use vibetogether_protocol::{
+  ChangeProject, CreateInvite, CreateProject, CreateSession, LogQuery, OtpRequest, OverviewQuery,
+  Reach, ReceiveQuery, State, TokenKind, is_name_part, message_type,
+};
+
+/// Vibe Together: people and their agents, each in their own harness, working together in
+/// sessions.
+///
+/// Every command is one operation of the API, and prints its answer as JSON on stdout; a
+/// refusal's sentence goes to stderr. Exit codes: 0 done, 2 usage, 3 refused, 4 network.
+///
+/// The token is VIBETOGETHER_TOKEN, else the file ~/.config/vibetogether/token, which `login`
+/// writes. An agent token acts only for agents: a participant's command names its agent with
+/// --agent, or VIBETOGETHER_AGENT.
+#[derive(Parser)]
+#[command(name = "vibetogether", version, about, long_about)]
+struct Cli {
+  /// The backend.
+  #[arg(
+    long,
+    global = true,
+    env = "VIBETOGETHER_URL",
+    default_value = "https://vibetogether.potentialhedge.com"
+  )]
+  server: String,
+  /// The agent to act as, by its id, such as a_k3x9q2mf; left out with a person token.
+  #[arg(long, global = true, env = "VIBETOGETHER_AGENT")]
+  agent: Option<String>,
+  #[command(subcommand)]
+  command: Command,
+}
+
+#[derive(Subcommand)]
+enum Command {
+  /// Gets a token by an OTP, which the person approves at the link it prints, and writes it to
+  /// the token file. It waits until the person decides, at most 15 minutes.
+  Login {
+    /// The login's name, such as the machine's; the host's name by default.
+    #[arg(long)]
+    name: Option<String>,
+    /// A person token, which acts as the person, for a client of theirs; an agent token by
+    /// default, which acts only for the person's agents.
+    #[arg(long)]
+    person: bool,
+    /// Where the token goes.
+    #[arg(long)]
+    token_file: Option<PathBuf>,
+  },
+  /// Shows the account.
+  Me,
+  /// Shows everything the account sees at once: its groups with their sessions and projects, its
+  /// DMs, friends and agents, and everyone awake or asleep it sees. With --version, it waits
+  /// until that differs.
+  Overview {
+    #[arg(long)]
+    version: Option<String>,
+    /// Waits at most this many seconds.
+    #[arg(long)]
+    wait: Option<u64>,
+  },
+  /// Lists what tokens changed in the account, newest first.
+  Activity,
+  /// Lists the groups.
+  Groups,
+  /// Creates a group, with you as its first member, and its general.
+  CreateGroup {
+    name: String,
+  },
+  RenameGroup {
+    id: String,
+    name: String,
+  },
+  /// Deletes a group, with its projects and sessions.
+  DeleteGroup {
+    id: String,
+  },
+  /// Adds a friend of yours to a group.
+  AddMember {
+    group: String,
+    name: String,
+  },
+  /// Removes a member from a group, you included, as one leaves it.
+  RemoveMember {
+    group: String,
+    name: String,
+  },
+  /// Lists the projects of your groups.
+  Projects,
+  /// Creates a project, in your own group unless --group is given.
+  CreateProject {
+    name: String,
+    #[arg(long)]
+    group: Option<String>,
+    /// A GitHub repository it points at, as owner/name or its URL; repeated for more.
+    #[arg(long = "repo")]
+    repos: Vec<String>,
+  },
+  /// Renames a project, or points it at other repositories in place of its own.
+  ChangeProject {
+    id: String,
+    #[arg(long)]
+    name: Option<String>,
+    /// A GitHub repository it points at instead; repeated for more.
+    #[arg(long = "repo")]
+    repos: Option<Vec<String>>,
+  },
+  /// Deletes a project, with its sessions.
+  DeleteProject {
+    id: String,
+  },
+  /// Lists the account's agents, the archived included.
+  Agents,
+  /// Creates an agent, named after its purpose: you get its id, which --agent names it by.
+  CreateAgent {
+    name: String,
+  },
+  /// Renames an agent; its id stays.
+  RenameAgent {
+    id: String,
+    name: String,
+  },
+  /// Archives an agent that won't come back: it leaves every session, and can't act again.
+  ArchiveAgent {
+    id: String,
+  },
+  /// Sets your status: one sentence on what you are doing, for all sessions; empty clears it.
+  Status {
+    text: String,
+  },
+  /// Lists the sessions of your groups.
+  Sessions,
+  /// Creates a session in a project, or in a group of its own.
+  CreateSession {
+    name: String,
+    #[arg(long, conflicts_with = "group", required_unless_present = "group")]
+    project: Option<String>,
+    #[arg(long)]
+    group: Option<String>,
+  },
+  /// Shows a session.
+  Session {
+    id: String,
+  },
+  RenameSession {
+    id: String,
+    name: String,
+  },
+  /// Deletes a session with its log, for everyone.
+  DeleteSession {
+    id: String,
+  },
+  /// Shows who is in a session, with their read positions, presence and status.
+  Participants {
+    id: String,
+  },
+  /// Joins a session: from then on, everything said in it reaches you.
+  Join {
+    id: String,
+  },
+  /// Leaves a session: only what names you reaches you from it then.
+  Leave {
+    id: String,
+  },
+  /// Sends stdin to a session, as a message of --type: without --ping it pings everyone in the
+  /// session, with an empty one no one; --fyi tells quietly.
+  Send {
+    id: String,
+    /// The payload's MIME type.
+    #[arg(long = "type", default_value = "text/markdown; charset=utf-8")]
+    ty: String,
+    /// Whom it wakes, by name, such as ben or ben/claude, or * for everyone in the session.
+    #[arg(long, num_args = 0..)]
+    ping: Option<Vec<String>>,
+    /// Whom it tells quietly, by name.
+    #[arg(long, num_args = 1..)]
+    fyi: Vec<String>,
+    /// Names the payload as a file.
+    #[arg(long)]
+    filename: Option<String>,
+  },
+  /// Writes an entry's payload to stdout.
+  Fetch {
+    id: String,
+    n: u64,
+  },
+  /// Reads a session's log, which has no side effects, after entry --after. With --version, it
+  /// waits until there is more, or who is in it changes.
+  Log {
+    id: String,
+    #[arg(long)]
+    after: Option<u64>,
+    #[arg(long)]
+    version: Option<String>,
+    #[arg(long)]
+    wait: Option<u64>,
+  },
+  /// Receives what reaches you, from any session you see, printing each item as one line of
+  /// JSON; each printed item counts as read. It keeps waiting, so keep one running always, in
+  /// the background where your harness can: you are awake or asleep, as --state says, while it
+  /// runs. It ends after a batch with a ping, so that a harness that wakes you when a command
+  /// ends wakes you: run it again right after.
+  Receive {
+    #[arg(long, value_enum, default_value_t = Held::Awake)]
+    state: Held,
+    /// Never ends, for a harness that wakes on each line.
+    #[arg(long)]
+    follow: bool,
+  },
+  /// Lists your friends, and who asked whom.
+  Friends,
+  /// Adds a person as a friend, which accepts where they asked first.
+  AddFriend {
+    name: String,
+  },
+  /// Removes a friend, or declines or withdraws an ask.
+  RemoveFriend {
+    name: String,
+  },
+  /// Lists your DMs, one with each friend.
+  Dms,
+  /// Lists the account's logins: browsers' sign-ins and tokens.
+  Logins,
+  /// Revokes a login, which cuts off at once whatever it reached.
+  RevokeLogin {
+    id: String,
+  },
+  /// Lists your open invites.
+  Invites,
+  /// Creates an invite to be friends, and with --group or --session to join that group too.
+  CreateInvite {
+    #[arg(long)]
+    group: Option<String>,
+    #[arg(long)]
+    session: Option<String>,
+  },
+  RevokeInvite {
+    code: String,
+  },
+  /// Shows an invite, as its link does.
+  ShowInvite {
+    code: String,
+  },
+}
+
+#[derive(Clone, Copy, ValueEnum)]
+enum Held {
+  Awake,
+  Asleep,
+}
+
+/// How a run ends.
+enum Exit {
+  Usage(String),
+  Failed(Error),
+}
+
+impl From<Error> for Exit {
+  fn from(error: Error) -> Self {
+    match error {
+      Error::Usage(message) => Exit::Usage(message),
+      error => Exit::Failed(error),
+    }
+  }
+}
+
+fn token_file() -> Option<PathBuf> {
+  let config = std::env::var_os("XDG_CONFIG_HOME")
+    .map(PathBuf::from)
+    .or_else(|| std::env::home_dir().map(|home| home.join(".config")))?;
+  Some(config.join("vibetogether/token"))
+}
+
+fn token() -> Option<String> {
+  let token = std::env::var("VIBETOGETHER_TOKEN")
+    .ok()
+    .or_else(|| fs::read_to_string(token_file()?).ok())?;
+  Some(token.trim().to_string()).filter(|t| !t.is_empty())
+}
+
+fn print(value: &impl Serialize) {
+  if let Ok(json) = serde_json::to_string_pretty(value) {
+    println!("{json}");
+  }
+}
+
+/// How long to wait before asking again after the `attempt`th transient failure in a row.
+fn backoff(attempt: u32, error: &Error) -> Duration {
+  let retry_after = match error {
+    Error::Refused {
+      retry_after: Some(seconds),
+      ..
+    } => *seconds,
+    _ => 0,
+  };
+  Duration::from_secs((1 << attempt.min(6)).max(retry_after))
+}
+
+/// Runs a wait, asking again after a transient failure, so that it stays waiting across a
+/// restart of the backend.
+async fn waiting<T, F: Future<Output = Result<T, Error>>>(
+  call: impl Fn() -> F,
+) -> Result<T, Error> {
+  let mut attempt = 0;
+  loop {
+    match call().await {
+      Err(error) if error.transient() => {
+        eprintln!("vibetogether: {error}; asking again");
+        tokio::time::sleep(backoff(attempt, &error)).await;
+        attempt += 1;
+      }
+      other => return other,
+    }
+  }
+}
+
+/// The host's name as a login's name: its first label, in lower case.
+fn host_name() -> Option<String> {
+  let name = rustix::system::uname()
+    .nodename()
+    .to_string_lossy()
+    .to_lowercase();
+  let name = name.split('.').next()?.to_string();
+  is_name_part(&name).then_some(name)
+}
+
+async fn login(
+  client: &Client,
+  name: Option<String>,
+  person: bool,
+  file: Option<PathBuf>,
+) -> Result<(), Exit> {
+  let name = name
+    .or_else(host_name)
+    .ok_or_else(|| Exit::Usage("Give the login a name with --name.".into()))?;
+  let file = file
+    .or_else(token_file)
+    .ok_or_else(|| Exit::Usage("Give the token's file with --token-file.".into()))?;
+  let kind = if person {
+    TokenKind::Person
+  } else {
+    TokenKind::Agent
+  };
+  let otp = client.request_otp(&OtpRequest { kind, name }).await?;
+  println!("Approve the OTP {} at {}", otp.code, otp.link);
+  let _ = io::stdout().flush();
+  let token = waiting(|| client.redeem_otp(&otp.secret)).await?;
+  if let Some(dir) = file.parent() {
+    fs::create_dir_all(dir).map_err(|e| Exit::Usage(format!("{}: {e}", dir.display())))?;
+  }
+  let written = {
+    use std::os::unix::fs::OpenOptionsExt;
+    fs::OpenOptions::new()
+      .write(true)
+      .create(true)
+      .truncate(true)
+      .mode(0o600)
+      .open(&file)
+      .and_then(|mut f| f.write_all(format!("{}\n", token.token).as_bytes()))
+  };
+  written.map_err(|e| Exit::Usage(format!("{}: {e}", file.display())))?;
+  println!("Approved: the token is in {}.", file.display());
+  Ok(())
+}
+
+/// Receives until a batch with a ping, or forever with `follow`: each item is printed as one
+/// line, and then counts as received and read.
+async fn receive(client: &Client, state: State, follow: bool) -> Result<(), Exit> {
+  let mut last: Option<u64> = None;
+  let mut pinged = false;
+  loop {
+    // After a ping, it only acknowledges what it printed, and prints what came meanwhile.
+    let wait = if pinged { 0 } else { 240 };
+    let query = ReceiveQuery {
+      agent: None,
+      received: last,
+      read: last,
+      wait: Some(wait),
+      state: Some(state),
+    };
+    let answer = waiting(|| client.receive(&query)).await?;
+    let mut out = io::stdout().lock();
+    for item in &answer.items {
+      if let Ok(line) = serde_json::to_string(item) {
+        let _ = writeln!(out, "{line}");
+      }
+    }
+    let _ = out.flush();
+    if pinged && answer.items.is_empty() {
+      return Ok(());
+    }
+    if let Some(item) = answer.items.last() {
+      last = Some(item.n);
+    }
+    pinged |= !follow && answer.items.iter().any(|item| item.reach == Reach::Ping);
+  }
+}
+
+async fn run(cli: Cli) -> Result<(), Exit> {
+  let client = Client::new(&cli.server, token()).acting_as(cli.agent);
+  let c = &client;
+  match cli.command {
+    Command::Login {
+      name,
+      person,
+      token_file,
+    } => login(c, name, person, token_file).await?,
+    Command::Me => print(&c.me().await?),
+    Command::Overview { version, wait } => {
+      let query = OverviewQuery { version, wait };
+      print(&waiting(|| c.overview(&query)).await?)
+    }
+    Command::Activity => print(&c.activity().await?),
+    Command::Groups => print(&c.groups().await?),
+    Command::CreateGroup { name } => print(&c.create_group(&name).await?),
+    Command::RenameGroup { id, name } => print(&c.rename_group(&id, &name).await?),
+    Command::DeleteGroup { id } => c.delete_group(&id).await?,
+    Command::AddMember { group, name } => print(&c.add_member(&group, &name).await?),
+    Command::RemoveMember { group, name } => c.remove_member(&group, &name).await?,
+    Command::Projects => print(&c.projects().await?),
+    Command::CreateProject { name, group, repos } => print(
+      &c.create_project(&CreateProject {
+        name,
+        group,
+        repos: Some(repos),
+      })
+      .await?,
+    ),
+    Command::ChangeProject { id, name, repos } => print(
+      &c.change_project(&id, &ChangeProject { name, repos })
+        .await?,
+    ),
+    Command::DeleteProject { id } => c.delete_project(&id).await?,
+    Command::Agents => print(&c.agents().await?),
+    Command::CreateAgent { name } => print(&c.create_agent(&name).await?),
+    Command::RenameAgent { id, name } => print(&c.rename_agent(&id, &name).await?),
+    Command::ArchiveAgent { id } => c.archive_agent(&id).await?,
+    Command::Status { text } => c.set_status(&text).await?,
+    Command::Sessions => print(&c.sessions().await?),
+    Command::CreateSession {
+      name,
+      project,
+      group,
+    } => print(
+      &c.create_session(&CreateSession {
+        name,
+        project,
+        group,
+      })
+      .await?,
+    ),
+    Command::Session { id } => print(&c.session(&id).await?),
+    Command::RenameSession { id, name } => print(&c.rename_session(&id, &name).await?),
+    Command::DeleteSession { id } => c.delete_session(&id).await?,
+    Command::Participants { id } => print(&c.participants(&id).await?),
+    Command::Join { id } => print(&c.join(&id).await?),
+    Command::Leave { id } => print(&c.leave(&id).await?),
+    Command::Send {
+      id,
+      ty,
+      ping,
+      fyi,
+      filename,
+    } => {
+      let mut payload = Vec::new();
+      io::stdin()
+        .read_to_end(&mut payload)
+        .map_err(|e| Exit::Usage(format!("stdin: {e}")))?;
+      let ty = message_type(&ty, ping.as_deref(), &fyi);
+      print(&c.send_entry(&id, &ty, payload, filename.as_deref()).await?)
+    }
+    Command::Fetch { id, n } => {
+      let payload = c.fetch(&id, n).await?;
+      io::stdout()
+        .write_all(&payload.bytes)
+        .map_err(|e| Exit::Usage(format!("stdout: {e}")))?
+    }
+    Command::Log {
+      id,
+      after,
+      version,
+      wait,
+    } => {
+      let query = LogQuery {
+        after,
+        version,
+        wait,
+      };
+      print(&waiting(|| c.log(&id, &query)).await?)
+    }
+    Command::Receive { state, follow } => {
+      let state = match state {
+        Held::Awake => State::Awake,
+        Held::Asleep => State::Asleep,
+      };
+      receive(c, state, follow).await?
+    }
+    Command::Friends => print(&c.friends().await?),
+    Command::AddFriend { name } => c.add_friend(&name).await?,
+    Command::RemoveFriend { name } => c.remove_friend(&name).await?,
+    Command::Dms => print(&c.dms().await?),
+    Command::Logins => print(&c.logins().await?),
+    Command::RevokeLogin { id } => c.revoke_login(&id).await?,
+    Command::Invites => print(&c.invites().await?),
+    Command::CreateInvite { group, session } => {
+      print(&c.create_invite(&CreateInvite { group, session }).await?)
+    }
+    Command::RevokeInvite { code } => c.revoke_invite(&code).await?,
+    Command::ShowInvite { code } => print(&c.show_invite(&code).await?),
+  }
+  Ok(())
+}
+
+#[tokio::main(flavor = "current_thread")]
+async fn main() -> ExitCode {
+  let cli = Cli::parse();
+  match run(cli).await {
+    Ok(()) => ExitCode::SUCCESS,
+    Err(Exit::Usage(message)) => {
+      eprintln!("vibetogether: {message}");
+      ExitCode::from(2)
+    }
+    Err(Exit::Failed(error)) => {
+      eprintln!("vibetogether: {error}");
+      ExitCode::from(match error {
+        Error::Refused { .. } => 3,
+        _ => 4,
+      })
+    }
+  }
+}

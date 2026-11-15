@@ -1,4 +1,0 @@
-# The command line's own checks; the root's `just ci` adds the shared ones.
-ci:
-    pnpm exec tsc
-    node --test

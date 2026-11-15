@@ -1,4 +1,0 @@
-# The server's own checks; the root's `just ci` adds the shared ones. It runs in
-# the backend, whose tests use it through HTTP.
-ci:
-    pnpm exec tsc

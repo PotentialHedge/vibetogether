@@ -1,11 +1,5 @@
 packages:
-  - backend
-  - cli
-  - mcp
-  - operations
   - library
   - website
 allowBuilds:
   esbuild: true
-  protobufjs: false
-  workerd: true
