@@ -27,8 +27,14 @@ use vibetogether_protocol::{
 /// refused, also where the server speaks another version of the API, 4 network.
 ///
 /// The token is VIBETOGETHER_TOKEN, else the file ~/.config/vibetogether/token, which `login`
-/// writes. An agent token acts only for agents: every command of it names its agent with
-/// --agent, or VIBETOGETHER_AGENT, but create-agent, by which an agent creates itself.
+/// writes: the token on its first line, and the server it was issued by on its second. A token
+/// goes only to that server, and one without a server only to the default one. An agent token
+/// acts only for agents: every command of it names its agent with --agent, or
+/// VIBETOGETHER_AGENT, but create-agent, by which an agent creates itself. Adding a friend,
+/// inviting into a group, adding a member to one, deleting a group, project or session, and
+/// revoking another login are the person's alone, in the browser or with a person token.
+const DEFAULT_SERVER: &str = "https://vibetogether.potentialhedge.com";
+
 #[derive(Parser)]
 #[command(name = "vibetogether", version, about, long_about)]
 struct Cli {
@@ -37,7 +43,7 @@ struct Cli {
     long,
     global = true,
     env = "VIBETOGETHER_URL",
-    default_value = "https://vibetogether.potentialhedge.com"
+    default_value = DEFAULT_SERVER
   )]
   server: String,
   /// The agent to act as, by its id, such as a_k3x9q2mf; left out with a person token.
@@ -65,7 +71,8 @@ enum Command {
     command: inbox::Command,
   },
   /// Gets a token by an OTP, which the person approves at the link it prints, and writes it to
-  /// the token file. It waits until the person decides, at most 15 minutes.
+  /// the token file, with the server it goes to. It waits until the person decides, at most 15
+  /// minutes.
   Login {
     /// The login's name, such as the machine's; the host's name by default.
     #[arg(long)]
@@ -102,11 +109,11 @@ enum Command {
     id: String,
     name: String,
   },
-  /// Deletes a group, with its projects and sessions.
+  /// Deletes a group, with its projects and sessions: only the person.
   DeleteGroup {
     id: String,
   },
-  /// Adds a friend of yours to a group.
+  /// Adds a friend of yours to a group: only the person.
   AddMember {
     group: String,
     name: String,
@@ -136,7 +143,7 @@ enum Command {
     #[arg(long = "repo")]
     repos: Option<Vec<String>>,
   },
-  /// Deletes a project, with its sessions.
+  /// Deletes a project, with its sessions: only the person.
   DeleteProject {
     id: String,
   },
@@ -177,7 +184,7 @@ enum Command {
     id: String,
     name: String,
   },
-  /// Deletes a session with its log, for everyone.
+  /// Deletes a session with its log, for everyone: only the person.
   DeleteSession {
     id: String,
   },
@@ -240,7 +247,7 @@ enum Command {
   },
   /// Lists your friends, and who asked whom.
   Friends,
-  /// Adds a person as a friend, which accepts where they asked first.
+  /// Adds a person as a friend, which accepts where they asked first: only the person.
   AddFriend {
     name: String,
   },
@@ -252,13 +259,15 @@ enum Command {
   Dms,
   /// Lists the account's logins: browsers' sign-ins and tokens.
   Logins,
-  /// Revokes a login, which cuts off at once whatever it reached.
+  /// Revokes a login, which cuts off at once whatever it reached: an agent only its own token,
+  /// the person any.
   RevokeLogin {
     id: String,
   },
   /// Lists your open invites.
   Invites,
-  /// Creates an invite to be friends, and with --group or --session to join that group too.
+  /// Creates an invite to be friends, and with --group or --session to join that group too,
+  /// which only the person does.
   CreateInvite {
     #[arg(long)]
     group: Option<String>,
@@ -308,11 +317,30 @@ fn token_file() -> Option<PathBuf> {
   Some(config.join("vibetogether/token"))
 }
 
-fn token() -> Option<String> {
-  let token = std::env::var("VIBETOGETHER_TOKEN")
+/// The token for `server`, from VIBETOGETHER_TOKEN, else the token file: its first line, with
+/// the server it was issued by on its second, the default one where there is none. A token is
+/// never sent to another server than its own.
+fn token(server: &str) -> Result<Option<String>, Exit> {
+  let Some(stored) = std::env::var("VIBETOGETHER_TOKEN")
     .ok()
-    .or_else(|| fs::read_to_string(token_file()?).ok())?;
-  Some(token.trim().to_string()).filter(|t| !t.is_empty())
+    .or_else(|| fs::read_to_string(token_file()?).ok())
+  else {
+    return Ok(None);
+  };
+  let mut lines = stored.lines().map(str::trim);
+  let Some(token) = lines.next().filter(|t| !t.is_empty()) else {
+    return Ok(None);
+  };
+  let issued = lines
+    .next()
+    .filter(|s| !s.is_empty())
+    .unwrap_or(DEFAULT_SERVER);
+  if issued.trim_end_matches('/') != server.trim_end_matches('/') {
+    return Err(Exit::Usage(format!(
+      "The token was issued by {issued}, and goes to no other server: for {server}, get one with `vibetogether login --server {server}`."
+    )));
+  }
+  Ok(Some(token.to_string()))
 }
 
 fn print(value: &impl Serialize) {
@@ -382,7 +410,7 @@ async fn login(
   println!("Approve the OTP {} at {}", otp.code, otp.link);
   let _ = io::stdout().flush();
   let token = waiting(|| client.redeem_otp(&otp.secret)).await?;
-  write_secret(&file, &format!("{}\n", token.token))
+  write_secret(&file, &format!("{}\n{}\n", token.token, client.server()))
     .map_err(|e| Exit::Usage(format!("{}: {e}", file.display())))?;
   println!(
     "Approved by {}: the token is in {}.",
@@ -453,7 +481,13 @@ async fn receive(client: &Client, state: State, follow: bool) -> Result<(), Exit
 }
 
 async fn run(cli: Cli) -> Result<(), Exit> {
-  let client = Client::new(&cli.server, token()).acting_as(cli.agent);
+  // Logging in and the inbox's local commands send no token, so they need none.
+  let token = match &cli.command {
+    Command::Login { .. } => None,
+    Command::Inbox { command } if !matches!(command, inbox::Command::Receive) => None,
+    _ => token(&cli.server)?,
+  };
+  let client = Client::new(&cli.server, token).acting_as(cli.agent);
   let c = &client;
   match cli.command {
     Command::Inbox { command } => {

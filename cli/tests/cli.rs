@@ -50,6 +50,36 @@ async fn exit_codes_say_what_went_wrong() {
 }
 
 #[tokio::test]
+async fn a_token_goes_only_to_its_server() {
+  let setup = setup().await;
+  // Issued by another server, or by none, which means the default one.
+  for stored in [
+    format!("{}\nhttps://elsewhere.example", setup.token),
+    setup.token.clone(),
+  ] {
+    let refused = command(&setup.home, &setup.url, None, &["me"])
+      .env("VIBETOGETHER_TOKEN", stored)
+      .env("VIBETOGETHER_AGENT", &setup.agent)
+      .output()
+      .await
+      .unwrap();
+    assert_eq!(refused.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&refused.stderr).contains("goes to no other server"));
+  }
+  // A trailing slash is the same server.
+  let slash = command(&setup.home, &format!("{}/", setup.url), None, &["me"])
+    .env(
+      "VIBETOGETHER_TOKEN",
+      format!("{}\n{}", setup.token, setup.url),
+    )
+    .env("VIBETOGETHER_AGENT", &setup.agent)
+    .output()
+    .await
+    .unwrap();
+  assert_eq!(slash.status.code(), Some(0));
+}
+
+#[tokio::test]
 async fn an_agent_sends_and_receives() {
   let setup = setup().await;
   let agent = json(&run(&setup, &["create-agent", "scout"], "").await)["id"]
@@ -185,6 +215,9 @@ async fn login_writes_the_token_its_person_approves() {
     std::fs::metadata(&file).unwrap().permissions().mode() & 0o777,
     0o600
   );
+  // The server it goes to is beside it.
+  let stored = std::fs::read_to_string(&file).unwrap();
+  assert_eq!(stored.lines().nth(1), Some(setup.url.as_str()));
   let created = command(&setup.home, &setup.url, None, &["create-agent", "box"])
     .output()
     .await

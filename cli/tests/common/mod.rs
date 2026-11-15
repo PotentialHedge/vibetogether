@@ -75,7 +75,7 @@ pub fn command(home: &Path, url: &str, token: Option<&str>, args: &[&str]) -> Co
     .stdout(Stdio::piped())
     .stderr(Stdio::piped());
   if let Some(token) = token {
-    command.env("VIBETOGETHER_TOKEN", token);
+    command.env("VIBETOGETHER_TOKEN", format!("{token}\n{url}"));
   }
   command
 }
