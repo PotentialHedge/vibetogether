@@ -313,25 +313,38 @@ fn decode(name: &str) -> String {
   String::from_utf8_lossy(&out).into_owned()
 }
 
-/// `text` as an attribute's value: no `"`, `<` or `&` of its own.
+/// `text` as an attribute's value, on one line: no `"`, `<`, `&` or control character of its own.
 fn attribute(text: &str) -> String {
   text
-    .replace('&', "&amp;")
-    .replace('"', "&quot;")
-    .replace('<', "&lt;")
+    .chars()
+    .map(|c| match c {
+      '&' => "&amp;".to_string(),
+      '"' => "&quot;".to_string(),
+      '<' => "&lt;".to_string(),
+      c if c.is_control() => format!("&#{};", c as u32),
+      c => c.to_string(),
+    })
+    .collect()
 }
 
-/// `text` as an item's body, which can't end the item early: every `</inbox-item`, in any case,
-/// becomes `<\/inbox-item`.
+/// `text` as an item's body, which can neither end the item nor open another: every
+/// `<inbox-item` becomes `<\inbox-item`, and every `</inbox-item` `<\/inbox-item`, in any case.
 fn body(text: &str) -> String {
-  const END: &str = "</inbox-item";
+  const TAG: &str = "inbox-item";
   let lower = text.to_ascii_lowercase();
   let mut out = String::with_capacity(text.len());
   let mut last = 0;
-  for (i, _) in lower.match_indices(END) {
-    out.push_str(&text[last..i]);
-    out.push_str("<\\/");
-    last = i + 2;
+  for (i, _) in lower.match_indices(TAG) {
+    let open = if lower[..i].ends_with("</") {
+      i - 2
+    } else if lower[..i].ends_with('<') {
+      i - 1
+    } else {
+      continue;
+    };
+    out.push_str(&text[last..open]);
+    out.push_str("<\\");
+    last = open + 1;
   }
   out.push_str(&text[last..]);
   out

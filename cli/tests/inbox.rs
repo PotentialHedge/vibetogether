@@ -99,7 +99,7 @@ async fn vibe_together_delivers_into_the_inbox() {
   .await;
   let join = inbox.take().unwrap();
   assert!(
-    matches!(&join[0].content, vibetogether_inbox::Content::Text(t) if t.ends_with(" luis joined.\n"))
+    matches!(&join[0].content, vibetogether_inbox::Content::Text(t) if t.ends_with("\n\"luis\" joined.\n"))
   );
   std::fs::remove_file(inbox.wake_file()).unwrap();
   person
@@ -147,7 +147,8 @@ async fn vibe_together_delivers_into_the_inbox() {
     .collect();
   assert!(
     texts[0].starts_with("Vibe Together item ")
-      && texts[0].contains("(session) from luis, session general (")
+      && texts[0].contains("(session) from \"luis\", session \"general\" (")
+      && texts[0].contains("\nSaid by the participant named above, through Vibe Together")
   );
   assert!(texts[0].ends_with("\nQuiet here.\n"));
   assert!(texts[1].contains("(ping)") && texts[1].ends_with("\n**Scout?**\n"));
