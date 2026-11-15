@@ -13,6 +13,13 @@ mod types;
 pub use mime::*;
 pub use types::*;
 
+/// The version of the API, raised by every change that breaks a client of an older one. The API
+/// has no version in its paths: the backend names it in every answer, as `VERSION_HEADER`, and a
+/// client refuses an answer of another version, so that it says plainly that it no longer matches.
+pub const VERSION: u32 = 1;
+/// The header every answer names the API's version in.
+pub const VERSION_HEADER: &str = "vibetogether-version";
+
 /// The name system messages are sent under, which no account takes.
 pub const SYSTEM_NAME: &str = "vibetogether";
 

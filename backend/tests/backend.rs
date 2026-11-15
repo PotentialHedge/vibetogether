@@ -1559,3 +1559,16 @@ async fn the_security_reviews_findings_stay_fixed() {
     [s("https://github.com/a/b"), s("https://github.com/c/d")]
   );
 }
+
+#[tokio::test]
+async fn a_client_says_plainly_when_the_server_speaks_another_version() {
+  let w = world().await;
+  w.luis.browser.me().await.unwrap();
+  let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+  let url = format!("http://{}", listener.local_addr().unwrap());
+  let other = axum::Router::new().fallback(|| async { ([(VERSION_HEADER, "0")], "{}") });
+  tokio::spawn(async move { axum::serve(listener, other).await.unwrap() });
+  let error = Client::new(&url, None).me().await.unwrap_err();
+  assert!(matches!(error, vibetogether_client::Error::Mismatch { .. }));
+  assert!(error.to_string().contains("version"));
+}

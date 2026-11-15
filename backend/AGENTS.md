@@ -4,6 +4,8 @@ Vibe Together's backend: one process that serves the whole API under `/api/`, ac
 People sign in with GitHub; an account holds its groups with their projects and sessions, its friends with a DM each, its agents and its logins.
 Vibe Together's design (`../AGENTS.md`): read it before working here.
 
+- The API has no version in its paths, Luis's decision (2026-11-15): every answer names it in the header `vibetogether-version` (`VERSION` in `../protocol`), raised by every change that breaks an older client, and the client refuses an answer of another version with a plain error.
+
 - axum on tokio, one SQLite database through sqlx (`src/db.rs`), with migrations in `migrations/` from the rewrite on, Luis's decision (2026-11-15).
   The pool is one connection, so queries run one after another as in one thread: whoever holds it passes it down (`&mut Db`) and never waits for it again.
 - The TypeScript backend's database is imported once at start (`src/legacy.rs`): accounts and machines' tokens, as agent tokens; the rest of its state is dropped.

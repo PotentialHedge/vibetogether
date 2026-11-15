@@ -24,7 +24,7 @@ use vibetogether_protocol::{
 ///
 /// Every command is one operation of the API, and prints its answer as JSON on stdout; a
 /// refusal's sentence goes to stderr. Exit codes: 0 done, 1 the inbox failed, 2 usage, 3
-/// refused, 4 network.
+/// refused, also where the server speaks another version of the API, 4 network.
 ///
 /// The token is VIBETOGETHER_TOKEN, else the file ~/.config/vibetogether/token, which `login`
 /// writes. An agent token acts only for agents: a participant's command names its agent with
@@ -570,8 +570,8 @@ async fn main() -> ExitCode {
     Err(Exit::Failed(error)) => {
       eprintln!("vibetogether: {error}");
       ExitCode::from(match error {
-        Error::Refused { .. } => 3,
-        _ => 4,
+        Error::Network(_) => 4,
+        _ => 3,
       })
     }
   }

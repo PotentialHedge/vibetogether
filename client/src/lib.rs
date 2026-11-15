@@ -33,6 +33,11 @@ pub enum Error {
   /// The call itself is malformed, such as a path parameter that is `.` or `..`.
   #[error("{0}")]
   Usage(String),
+  /// The server speaks another version of the API than this client.
+  #[error(
+    "This client speaks version {VERSION} of Vibe Together's API, and the server version {server}: update the older one."
+  )]
+  Mismatch { server: String },
 }
 
 impl Error {
@@ -49,7 +54,7 @@ impl Error {
     match self {
       Error::Network(_) => true,
       Error::Refused { status, .. } => matches!(status, 408 | 429 | 502 | 503 | 504),
-      Error::Usage(_) => false,
+      Error::Usage(_) | Error::Mismatch { .. } => false,
     }
   }
 }
@@ -149,7 +154,15 @@ impl Client {
     }
   }
 
+  /// The answer, where it is a success of this client's version of the API.
   async fn answer(response: Response) -> Result<Response> {
+    let version = response
+      .headers()
+      .get(VERSION_HEADER)
+      .map(|v| v.to_str().unwrap_or_default().to_string());
+    if let Some(server) = version.filter(|v| *v != VERSION.to_string()) {
+      return Err(Error::Mismatch { server });
+    }
     let status = response.status();
     if status.is_success() {
       return Ok(response);

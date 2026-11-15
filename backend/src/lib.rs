@@ -24,13 +24,13 @@ use std::{ops::Deref, sync::Arc, time::Instant};
 use axum::{
   Router,
   extract::{DefaultBodyLimit, Request, State},
-  http::Method,
+  http::{HeaderValue, Method},
   middleware::{self, Next},
   response::Response,
   routing::{get, post, put},
 };
 use sqlx::SqlitePool;
-use vibetogether_protocol::{LoginKind, MAX_PAYLOAD};
+use vibetogether_protocol::{LoginKind, MAX_PAYLOAD, VERSION, VERSION_HEADER};
 
 pub use crate::config::Config;
 
@@ -95,7 +95,7 @@ impl App {
   }
 
   /// The API, with every request logged by its method, path, status and time: nothing of its
-  /// query, headers or body, which hold tokens and links.
+  /// query, headers or body, which hold tokens and links. Every answer names the API's version.
   pub fn router(&self) -> Router {
     let api = Router::new()
       .route("/me", get(account::me).delete(account::delete))
@@ -165,6 +165,7 @@ impl App {
     Router::new()
       .nest("/api", api)
       .layer(middleware::from_fn(logged))
+      .layer(middleware::map_response(versioned))
       .with_state(self.clone())
   }
 }
@@ -176,6 +177,13 @@ async fn written(State(app): State<App>, request: Request, next: Next) -> Respon
   if writes {
     app.changes.written();
   }
+  response
+}
+
+async fn versioned(mut response: Response) -> Response {
+  response
+    .headers_mut()
+    .insert(VERSION_HEADER, HeaderValue::from(VERSION));
   response
 }
 
