@@ -158,6 +158,7 @@ async fn login_writes_the_token_its_person_approves() {
     HeaderValue::from_str(&format!("vibetogether.session_token={cookie}")).unwrap(),
   );
   headers.insert(ORIGIN, HeaderValue::from_str(&setup.url).unwrap());
+  headers.insert("sec-fetch-site", HeaderValue::from_static("same-origin"));
   let browser = Client::with_http(
     reqwest::Client::builder()
       .default_headers(headers)

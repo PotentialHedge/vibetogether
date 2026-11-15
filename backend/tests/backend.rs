@@ -569,6 +569,20 @@ async fn a_change_by_the_cookie_comes_from_the_site_alone() {
     .unwrap();
   let evil = w.server.browser_from(&cookie, "https://evil.example");
   assert_eq!(status(evil.create_group("x").await), 403);
+  // Nor does a receive, which moves the read position, come from elsewhere.
+  assert_eq!(
+    status(evil.receive(&query(Some(1000), Some(1000), Some(0))).await),
+    403
+  );
+  let mut headers = reqwest::header::HeaderMap::new();
+  let cookie_header = format!("vibetogether.session_token={cookie}");
+  headers.insert(reqwest::header::COOKIE, cookie_header.parse().unwrap());
+  let bare = reqwest::Client::builder()
+    .default_headers(headers)
+    .build()
+    .unwrap();
+  let bare = Client::with_http(bare, &w.server.url, None);
+  assert_eq!(status(bare.me().await), 403);
   // A token is no cookie, nor a cookie a token.
   let as_bearer = Client::new(&w.server.url, Some(cookie));
   assert_eq!(status(as_bearer.me().await), 401);

@@ -72,7 +72,9 @@ pub fn kind_of(kind: &str) -> LoginKind {
 }
 
 /// The login a request is made by, while it lasts: a bearer token is a token's, a cookie a
-/// browser's. A browser's sign-in lasts 90 days from when it was last used. An agent token's
+/// browser's. A request by the cookie comes from the website's own pages: a change by its
+/// `Origin`, anything else, such as a receive that moves the read position, by
+/// `Sec-Fetch-Site: same-origin`, which a browser sets. A browser's sign-in lasts 90 days from when it was last used. An agent token's
 /// request names its agent with `agent=<id>`, unless `unnamed`; the person's names none.
 async fn caller_of(app: &App, parts: &Parts, unnamed: bool) -> Result<Option<Caller>> {
   let bearer = parts
@@ -90,14 +92,17 @@ async fn caller_of(app: &App, parts: &Parts, unnamed: bool) -> Result<Option<Cal
     (None, Some(cookie)) => (cookie, true),
     (None, None) => return Ok(None),
   };
-  if browser && !matches!(parts.method, Method::GET | Method::HEAD | Method::OPTIONS) {
-    let origin = parts
-      .headers
-      .get(header::ORIGIN)
-      .and_then(|v| v.to_str().ok());
-    if origin != Some(origin_of(&app.config.url)) {
+  if browser {
+    let header = |name| parts.headers.get(name).and_then(|v| v.to_str().ok());
+    let from_site = match parts.method {
+      Method::GET | Method::HEAD | Method::OPTIONS => {
+        header(header::HeaderName::from_static("sec-fetch-site")) == Some("same-origin")
+      }
+      _ => header(header::ORIGIN) == Some(origin_of(&app.config.url)),
+    };
+    if !from_site {
       return Err(Refusal::forbidden(
-        "A change by the person comes from the website.",
+        "A request by the person's cookie comes from the website.",
       ));
     }
   }

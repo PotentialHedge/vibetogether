@@ -177,6 +177,14 @@ fn cookie<'a>(app: &App, name: &'a str, value: String, age: time::Duration) -> C
     .build()
 }
 
+/// The removal of the cookie `name`, as it was set: a `__Host-` one is removed only with `Secure`.
+fn removal(app: &App, name: &'static str) -> Cookie<'static> {
+  Cookie::build(name)
+    .path("/")
+    .secure(app.config.secure())
+    .build()
+}
+
 /// The OAuth client, as GitHub's endpoints and this backend's callback configure it.
 type GitHub = BasicClient<EndpointSet, EndpointNotSet, EndpointNotSet, EndpointNotSet, EndpointSet>;
 
@@ -201,9 +209,14 @@ pub struct SignIn {
   callback: Option<String>,
 }
 
-/// A path of this host's own: one slash, then anything but a second one or a backslash.
+/// A path of this host's own: one slash, then anything printable but a second one or a
+/// backslash, with no whitespace, which a browser drops, so that `/\t/evil.example` can't become
+/// `//evil.example`.
 fn own_path(path: &str) -> bool {
-  path.starts_with('/') && !path.starts_with("//") && !path.contains('\\')
+  path.starts_with('/')
+    && !path.starts_with("//")
+    && !path.contains('\\')
+    && path.bytes().all(|b| b.is_ascii_graphic())
 }
 
 /// Starts signing in: sends the browser to GitHub, which sends it back to `signed_in`.
@@ -318,14 +331,12 @@ pub async fn signed_in(
   )
   .await?;
   let secret = new_login(&app, &account, LoginKind::Browser, "a sign-in").await?;
-  let jar = jar
-    .remove(Cookie::build(pending_cookie(&app)).path("/"))
-    .add(cookie(
-      &app,
-      cookie_name(&app),
-      secret,
-      time::Duration::days(400),
-    ));
+  let jar = jar.remove(removal(&app, pending_cookie(&app))).add(cookie(
+    &app,
+    cookie_name(&app),
+    secret,
+    time::Duration::days(400),
+  ));
   Ok((jar, Redirect::to(callback)).into_response())
 }
 
@@ -337,7 +348,7 @@ pub async fn sign_out(State(app): State<App>, caller: Caller, jar: CookieJar) ->
     .execute(&app.db)
     .await?;
   transport::end_login(&app, &caller.login);
-  let jar = jar.remove(Cookie::build(cookie_name(&app)).path("/"));
+  let jar = jar.remove(removal(&app, cookie_name(&app)));
   Ok((jar, StatusCode::NO_CONTENT).into_response())
 }
 
@@ -623,4 +634,26 @@ pub async fn deny_otp(
   Path(code): Path<String>,
 ) -> Result<StatusCode> {
   decide(&app, &caller, &code, Decision::Denied)
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  #[test]
+  fn a_callback_is_a_path_of_this_host() {
+    assert!(own_path("/account/"));
+    assert!(own_path("/invite/?code=abc"));
+    for path in [
+      "//evil.example",
+      "/\\evil.example",
+      "/\t/evil.example",
+      "/ /evil.example",
+      "/\n/evil.example",
+      "https://evil.example",
+      "/é",
+    ] {
+      assert!(!own_path(path), "{path:?}");
+    }
+  }
 }

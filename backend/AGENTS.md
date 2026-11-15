@@ -13,7 +13,7 @@ Vibe Together's design (`../AGENTS.md`): read it before working here.
   Only the hash of a secret is stored, and every request looks its login up, so revoking one cuts it off at once.
   A token is created only by an OTP the person approves on the website (`/account/otp/`), which names its kind; OTPs wait in memory, at most ten of one address, and redeeming one waits for the person's decision, one redeem at a time, and gives the token with the name of the account that approved it.
   Signing in is GitHub's OAuth with PKCE, through the `oauth2` crate; the account is keyed by the GitHub user id.
-  A change by the cookie comes from the site's origin alone, and over HTTPS every cookie is `__Host-`.
+  A request by the cookie comes from the site alone, a change by its `Origin` and anything else by `Sec-Fetch-Site: same-origin`, since a receive moves positions; over HTTPS every cookie is `__Host-`, and so removed with `Secure`; signing in lands only on a path of the site's own.
 - Signing in, approving an OTP and deleting the account are the browser's alone, and accepting an invite the person's, by the browser or a person token, Luis's decision (2026-11-15); everything else a token does too.
   What a token changes is recorded for its person (`activity`), and letting someone in is limited per hour.
 - The transport (`src/transport.rs`) is in memory beside the database: the log, the participants, each participant's stream and the waiting receives.

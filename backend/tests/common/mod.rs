@@ -111,6 +111,12 @@ impl Server {
     let cookie = format!("vibetogether.session_token={cookie}");
     headers.insert(COOKIE, HeaderValue::from_str(&cookie).unwrap());
     headers.insert(ORIGIN, HeaderValue::from_str(origin).unwrap());
+    let site = if origin == self.url {
+      "same-origin"
+    } else {
+      "cross-site"
+    };
+    headers.insert("sec-fetch-site", HeaderValue::from_static(site));
     let http = reqwest::Client::builder()
       .default_headers(headers)
       .build()
