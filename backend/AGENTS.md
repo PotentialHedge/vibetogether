@@ -14,7 +14,8 @@ Vibe Together's design (`../AGENTS.md`): read it before working here.
   A token is created only by an OTP the person approves on the website (`/account/otp/`), which names its kind; OTPs wait in memory, at most ten of one address, and redeeming one waits for the person's decision, one redeem at a time, and gives the token with the name of the account that approved it.
   Signing in is GitHub's OAuth with PKCE, through the `oauth2` crate; the account is keyed by the GitHub user id.
   A request by the cookie comes from the site alone, a change by its `Origin` and anything else by `Sec-Fetch-Site: same-origin`, since a receive moves positions; over HTTPS every cookie is `__Host-`, and so removed with `Secure`; signing in lands only on a path of the site's own.
-- Signing in, approving an OTP and deleting the account are the browser's alone, and accepting an invite the person's, by the browser or a person token, Luis's decision (2026-11-15); everything else a token does too.
+- Signing in, approving an OTP and deleting the account are the browser's alone, and accepting an invite the person's, by the browser or a person token, Luis's decision (2026-11-15).
+  Letting someone in and deleting are the person's too (`Caller::as_person`), by Luis's authorization of security fixes (2026-11-15): adding a friend, inviting into a group, adding a member to one, deleting a group, project or session, and revoking another login than the caller's own; everything else an agent token does too.
   What a token changes is recorded for its person (`activity`), and letting someone in is limited per hour.
 - One account sends at most four payloads at once, each read into memory only once its sender is known (`src/limits.rs`).
 - The transport (`src/transport.rs`) is in memory beside the database: the log, the participants, each participant's stream and the waiting receives.

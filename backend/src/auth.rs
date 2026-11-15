@@ -386,12 +386,16 @@ pub async fn logins(State(app): State<App>, caller: Caller) -> Result<Json<Vec<L
   ))
 }
 
-/// Revokes a login, which cuts off at once whatever it reached, a receive waiting included.
+/// Revokes a login, which cuts off at once whatever it reached, a receive waiting included: an
+/// agent revokes only its own token, the person any.
 pub async fn revoke(
   State(app): State<App>,
   caller: Caller,
   Path(id): Path<String>,
 ) -> Result<StatusCode> {
+  if id != caller.login {
+    caller.as_person()?;
+  }
   let mut db = app.db.acquire().await?;
   let gone = sqlx::query("DELETE FROM login WHERE id = ? AND account = ?")
     .bind(&id)

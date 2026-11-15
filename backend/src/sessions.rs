@@ -307,6 +307,7 @@ pub async fn delete(
   caller: Caller,
   Path(id): Path<String>,
 ) -> Result<StatusCode> {
+  caller.as_person()?;
   let mut db = app.db.acquire().await?;
   let session = of_group(&mut db, &id, &caller).await?;
   if session.general {

@@ -83,12 +83,14 @@ pub async fn list(State(app): State<App>, caller: Caller) -> Result<Json<Vec<Fri
   Ok(Json(friends_of(&mut db, &caller.account).await?))
 }
 
-/// Adds a person as a friend, which accepts where they asked first.
+/// Adds a person as a friend, which accepts where they asked first: the person's alone, never an
+/// agent's.
 pub async fn add(
   State(app): State<App>,
   caller: Caller,
   Path(name): Path<String>,
 ) -> Result<StatusCode> {
+  caller.as_person()?;
   let mut db = app.db.acquire().await?;
   caller.limit(&mut db, "add_friend").await?;
   let me = &caller.account;
@@ -122,7 +124,7 @@ pub async fn add(
         caller.person
       ),
       false => format!(
-        "{} asked to be your friend: add them back to accept (add_friend).",
+        "{} asked to be your friend: to accept, add them back on the website, or with a person token.",
         caller.person
       ),
     };

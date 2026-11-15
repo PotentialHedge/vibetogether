@@ -30,7 +30,7 @@ async fn world() -> World {
   luis.browser.add_friend("ben").await.unwrap();
   ben.browser.add_friend("luis").await.unwrap();
   let group = luis.browser.create_group("Potential Hedge").await.unwrap();
-  luis.machine.add_member(&group.id, "ben").await.unwrap();
+  luis.browser.add_member(&group.id, "ben").await.unwrap();
   let project = luis
     .browser
     .create_project(&CreateProject {
@@ -539,10 +539,18 @@ async fn a_tokens_changes_show_in_the_activity_its_sends_dont() {
   let claude = agent(&w.luis.machine, "claude").await;
   claude.join(&w.session.id).await.unwrap();
   send(&claude, &w.session.id, "hi", "text/plain").await;
+  claude
+    .create_session(&CreateSession {
+      name: s("notes"),
+      project: None,
+      group: Some(w.group.id.clone()),
+    })
+    .await
+    .unwrap();
   let activity = w.luis.browser.activity().await.unwrap();
-  assert!(activity.iter().any(|a| a.operation == "add_group_member"
+  assert!(activity.iter().any(|a| a.operation == "create_session"
     && a.name == "luis-laptop"
-    && a.agent.as_deref() == Some("luis/laptop")));
+    && a.agent.as_deref() == Some("luis/claude")));
   // An agent that creates itself, naming none yet, is recorded as itself.
   assert!(
     activity
@@ -745,7 +753,7 @@ async fn accepting_an_invite_makes_friends_joins_its_group_and_lands_in_its_sess
   let tristan = w.server.person("tristan").await;
   let invite = w
     .luis
-    .machine
+    .own
     .create_invite(&CreateInvite {
       group: None,
       session: Some(w.session.id.clone()),
@@ -795,7 +803,7 @@ async fn accepting_an_invite_makes_friends_joins_its_group_and_lands_in_its_sess
   // Friends already: an invite to a group lands in its general; one to friends alone, in the DM.
   let to_group = w
     .luis
-    .machine
+    .own
     .create_invite(&CreateInvite {
       group: Some(w.group.id.clone()),
       session: None,
@@ -838,15 +846,12 @@ async fn accepting_an_invite_makes_friends_joins_its_group_and_lands_in_its_sess
     group: Some(w.group.id.clone()),
     session: None,
   };
-  assert_eq!(status(stranger.machine.create_invite(&to_group).await), 404);
+  assert_eq!(status(stranger.own.create_invite(&to_group).await), 404);
   let to_session = CreateInvite {
     group: None,
     session: Some(w.session.id.clone()),
   };
-  assert_eq!(
-    status(stranger.machine.create_invite(&to_session).await),
-    404
-  );
+  assert_eq!(status(stranger.own.create_invite(&to_session).await), 404);
 }
 
 #[tokio::test]
@@ -915,7 +920,7 @@ async fn every_group_has_its_general_which_stays_as_long_as_the_group() {
       && e.text.as_deref() == Some("ben created the session `lounge`."))
   );
   assert!(log.iter().all(|e| e.ty.contains("ping=\"\"")));
-  w.ben.machine.delete_session(&own.id).await.unwrap();
+  w.ben.own.delete_session(&own.id).await.unwrap();
 
   // A group deleted takes its general with it, and tells its other members in their inbox.
   let doomed = w.luis.browser.create_group("doomed").await.unwrap();
@@ -1451,7 +1456,7 @@ async fn the_security_reviews_findings_stay_fixed() {
 
   // An invite accepted again changes nothing: it never undoes a removal or an unfriending.
   let invite = owner
-    .machine
+    .own
     .create_invite(&CreateInvite {
       group: Some(crew.id.clone()),
       session: None,
@@ -1671,4 +1676,73 @@ async fn adding_a_member_keeps_to_their_limit_of_groups() {
     status(w.luis.browser.add_member(&group.id, "ben").await),
     403
   );
+}
+
+#[tokio::test]
+async fn letting_someone_in_and_deleting_are_the_persons_alone() {
+  let w = world().await;
+  let tristan = w.server.person("tristan").await;
+  tristan.browser.add_friend("luis").await.unwrap();
+  fn refused<T>(result: Result<T, vibetogether_client::Error>) {
+    assert_eq!(status(result), 403);
+  }
+  let machine = &w.luis.machine;
+  refused(machine.add_friend("tristan").await);
+  refused(machine.add_member(&w.group.id, "ben").await);
+  refused(
+    machine
+      .create_invite(&CreateInvite {
+        group: Some(w.group.id.clone()),
+        session: None,
+      })
+      .await,
+  );
+  refused(
+    machine
+      .create_invite(&CreateInvite {
+        group: None,
+        session: Some(w.session.id.clone()),
+      })
+      .await,
+  );
+  refused(machine.delete_session(&w.session.id).await);
+  refused(machine.delete_project(&w.project.id).await);
+  refused(machine.delete_group(&w.group.id).await);
+  let logins = w.luis.browser.logins().await.unwrap();
+  let other = logins.iter().find(|l| l.kind == LoginKind::Person).unwrap();
+  refused(machine.revoke_login(&other.id).await);
+  // An agent may still invite to be friends, and revoke its own token.
+  machine
+    .create_invite(&CreateInvite::default())
+    .await
+    .unwrap();
+  // The ask addresses the person.
+  let overview = w
+    .luis
+    .browser
+    .overview(&OverviewQuery::default())
+    .await
+    .unwrap();
+  let inbox = &overview
+    .groups
+    .iter()
+    .find(|g| g.group.own)
+    .unwrap()
+    .sessions[0];
+  let log = w
+    .luis
+    .browser
+    .log(&inbox.id, &LogQuery::default())
+    .await
+    .unwrap()
+    .entries;
+  assert!(log.iter().any(|e| e.text.as_deref()
+    == Some("tristan asked to be your friend: to accept, add them back on the website, or with a person token.")));
+  // The person does all of it.
+  w.luis.own.add_friend("tristan").await.unwrap();
+  w.luis.own.delete_session(&w.session.id).await.unwrap();
+  w.luis.own.delete_project(&w.project.id).await.unwrap();
+  w.luis.own.delete_group(&w.group.id).await.unwrap();
+  let mine = logins.iter().find(|l| l.kind == LoginKind::Agent).unwrap();
+  machine.revoke_login(&mine.id).await.unwrap();
 }

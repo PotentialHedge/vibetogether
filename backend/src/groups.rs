@@ -259,6 +259,7 @@ pub async fn delete(
   caller: Caller,
   Path(id): Path<String>,
 ) -> Result<StatusCode> {
+  caller.as_person()?;
   let mut db = app.db.acquire().await?;
   let group = group_for(&mut db, &id, &caller.account).await?;
   if group.person.is_some() {
@@ -298,6 +299,7 @@ pub async fn add_member(
   caller: Caller,
   Path((id, name)): Path<(String, String)>,
 ) -> Result<Json<Group>> {
+  caller.as_person()?;
   let mut db = app.db.acquire().await?;
   caller.limit(&mut db, "add_group_member").await?;
   let group = group_for(&mut db, &id, &caller.account).await?;
@@ -582,6 +584,7 @@ pub async fn delete_project(
   caller: Caller,
   Path(id): Path<String>,
 ) -> Result<StatusCode> {
+  caller.as_person()?;
   let mut db = app.db.acquire().await?;
   let project = project_for(&mut db, &id, &caller.account).await?;
   sqlx::query("DELETE FROM project WHERE id = ?")
