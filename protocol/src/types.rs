@@ -480,3 +480,15 @@ wire! {
     pub from: String,
   }
 }
+
+impl Item {
+  /// Whether it wakes its receiver by default: a ping, or a message said in a session the
+  /// receiver is in; an fyi, a join, a leave or another extension's entry lands quietly.
+  pub fn wakes(&self) -> bool {
+    match self.reach {
+      Reach::Ping => true,
+      Reach::Session => crate::is_message(&self.entry.ty),
+      Reach::Fyi => false,
+    }
+  }
+}

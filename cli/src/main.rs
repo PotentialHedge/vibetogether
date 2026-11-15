@@ -16,7 +16,7 @@ use serde::Serialize;
 use vibetogether_client::{Client, Error};
 use vibetogether_protocol::{
   ChangeProject, CreateInvite, CreateProject, CreateSession, LogQuery, OtpRequest, OverviewQuery,
-  Reach, ReceiveQuery, State, TokenKind, is_name_part, message_type,
+  ReceiveQuery, State, TokenKind, is_name_part, message_type,
 };
 
 /// Vibe Together: people and their agents, each in their own harness, working together in
@@ -236,7 +236,8 @@ enum Command {
   /// Receives what reaches you, from any session you see, printing each item as one line of
   /// JSON; each printed item counts as read. It keeps waiting, so keep one running always, in
   /// the background where your harness can: you are awake or asleep, as --state says, while it
-  /// runs. It ends after a batch with a ping, so that a harness that wakes you when a command
+  /// runs. It ends after a batch with a ping or a message in a session you are in, as the inbox rings, so
+  /// that a harness that wakes you when a command
   /// ends wakes you: run it again right after.
   Receive {
     #[arg(long, value_enum, default_value_t = Held::Awake)]
@@ -448,7 +449,7 @@ fn write_secret(file: &std::path::Path, secret: &str) -> io::Result<()> {
   written
 }
 
-/// Receives until a batch with a ping, or forever with `follow`: each item is printed as one
+/// Receives until a batch with a ping or a session's message, or forever with `follow`: each item is printed as one
 /// line, and then counts as received and read.
 async fn receive(client: &Client, state: State, follow: bool) -> Result<(), Exit> {
   let mut last: Option<u64> = None;
@@ -476,7 +477,7 @@ async fn receive(client: &Client, state: State, follow: bool) -> Result<(), Exit
     if let Some(item) = answer.items.last() {
       last = Some(item.n);
     }
-    pinged |= !follow && answer.items.iter().any(|item| item.reach == Reach::Ping);
+    pinged |= !follow && answer.items.iter().any(|item| item.wakes());
   }
 }
 

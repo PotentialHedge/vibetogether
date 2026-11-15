@@ -181,7 +181,7 @@ fn accept(inbox: &Inbox, client: &Client, stream: &mut Stream, answer: Received)
   for item in &answer.items {
     let (content, ext) = render(item, client.server());
     let path = inbox.deliver(content.as_bytes(), &item.entry.from, &ext)?;
-    ring |= item.reach != Reach::Fyi;
+    ring |= item.wakes();
     stream
       .pending
       .insert(item.n, path.file_name().unwrap_or_default().to_owned());

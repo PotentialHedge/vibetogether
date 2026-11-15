@@ -101,7 +101,8 @@ async fn vibe_together_delivers_into_the_inbox() {
   assert!(
     matches!(&join[0].content, vibetogether_inbox::Content::Text(t) if t.ends_with("\n\"luis\" joined.\n"))
   );
-  std::fs::remove_file(inbox.wake_file()).unwrap();
+  // A join lands quietly: only a message rings.
+  assert!(!inbox.wake_file().exists());
   person
     .send_entry(
       &general,
