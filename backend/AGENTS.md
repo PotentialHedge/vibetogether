@@ -1,34 +1,23 @@
 # vibetogether-backend
 
-Vibe Together's backend: one Node process that serves the whole API, accounts and sessions alike, and the MCP server.
-People sign in with GitHub; an account holds its groups with their projects and sessions, its friends with a DM each, and its logins.
-Its interface is its operations, defined once in the code and served as an OpenAPI document and a reference, and `api.md` for the rest. Vibe Together's design (`../AGENTS.md`): read it before working here.
+Vibe Together's backend: one process that serves the whole API under `/api/`, accounts and sessions alike, as `../protocol` defines it.
+People sign in with GitHub; an account holds its groups with their projects and sessions, its friends with a DM each, its agents and its logins.
+Vibe Together's design (`../AGENTS.md`): read it before working here.
 
-- Hono on Node, which runs the TypeScript sources as they are.
-- Better Auth, Luis's decision, with its device authorization (OTPs), MCP plugin (the OAuth server for MCP clients) and bearer plugins.
-  Its session table is named `login`: a sign-in in a browser, or a machine's token, with the machine in `machine`.
-- One SQLite database, `node:sqlite`, holds Better Auth's tables and the backend's own (`src/db.ts`).
-  No migrations: a breaking change to the schema starts from a fresh database, Luis's decision (2026-11-11).
-- A token is an opaque Better Auth session token (a machine's, from an OTP) or OAuth access token (prefixed `vt_at_`), looked up at each request, so that revoking one cuts its agent off at once.
-- `overview` with a `version` waits until the account's overview changes, Luis's decision (2026-11-11), so a page or an agent sees what others change without polling (`src/changes.ts`): every write wakes each waiter, which compares its overview's version.
-- The transport is in memory beside the database: `src/transport.ts` holds the log, the participants, each participant's stream and the waiting receives, and `src/sessions.ts` its operations.
-  Observing and receiving are two things, Luis's decision (2026-11-15).
-  Observing a session reads its log (`read_session`, `observe`), with no side effects; with a `version` it waits as `overview` does, through `src/changes.ts`.
-  Receiving is a participant's own stream (`receive`), a person's or an agent's alike: every entry is delivered as it is appended (`deliver`), as an item of the stream of each participant it names, by the participant each name stands for as it is sent, and of each participant in its session.
-  A receive names two positions, `received` and `read`, as a messenger's checks: it returns what comes after `received`, the stream holds only the unread items, and each position moves the participant's own in the sessions of the items it passes, which everyone sees.
-  A participant is awake or asleep while its receive waits or ended within a minute, offline otherwise, Luis's decisions (2026-11-12, 2026-11-15): the receive is the heartbeat, kept in memory with the `state` it passes, and a change of presence wakes what waits for a change.
-  System messages are posted from `vibetogether` by `announce`.
-- A participant is a person, by their user id, or an agent, by its own id `a_…` (`src/participants.ts`), Luis's decision (2026-11-15).
-  Everything about one is keyed by its id, and a name is resolved only where it is given, such as in a `ping`, so a rename breaks nothing; an entry keeps the name it was sent under beside its sender's id.
-  An agent is created explicitly and held by one login at a time (`hold`), and its status, like a person's, is one for all sessions.
-- Every group has its general, a row of `group_session` (`generalOf`); the backend makes the missing ones at startup, since the schema has no migrations.
-- The website and agents use the same requests: nothing is only for the website.
-- Over HTTPS every cookie is `__Host-` and host-only, and `trustedOrigins` holds the exact origin alone, since other sites under the same domain are other people's.
-- The HTTP API is the foundation, Luis's decision (2026-11-10): each operation is declared once, as a route of `@hono/zod-openapi` through `operation()` (`src/openapi.ts`), whose `who` sets both its security in the document and the check, and whose description is written for agents.
-  The document (`/api/openapi.json`) is the only place an operation is defined: the MCP server's tools (`../mcp`) and the reference (`/api/reference.md`, `src/reference.ts`) are generated from it.
-  Each tag is a concept, whose paragraph opens its section of the reference and goes into the MCP server's instructions.
-  An operation the MCP server should not offer carries `x-tool: false`.
-  Hono matches routes in the order they are declared, so a fixed path is declared before one with a parameter in its place.
-- The MCP server is mounted at `/mcp` and calls the operations in this process.
-- Served from lwirth-cloud (`~/dev/dotcloud`) through the root flake's `nixosModules.backend`, which proxies `/api/`, `/mcp` and `/.well-known/` to it.
-- `just ci` runs its own checks. `just dev` runs a local instance, and `just seed <login>` signs a person in on it, since GitHub can't call back to it.
+- axum on tokio, one SQLite database through sqlx (`src/db.rs`), with migrations in `migrations/` from the rewrite on, Luis's decision (2026-11-15).
+  The pool is one connection, so queries run one after another as in one thread: whoever holds it passes it down (`&mut Db`) and never waits for it again.
+- The TypeScript backend's database is imported once at start (`src/legacy.rs`): accounts and machines' tokens, as agent tokens; the rest of its state is dropped.
+- A login (`src/caller.rs`, `src/auth.rs`) is a browser's sign-in, held in its cookie, or a token, `Authorization: Bearer`, of one of two kinds, Luis's decision (2026-11-15): an agent token acts only for the person's agents, naming one with `agent=<id>`; a person token acts as the person.
+  Only the hash of a secret is stored, and every request looks its login up, so revoking one cuts it off at once.
+  A token is created only by an OTP the person approves on the website (`/account/otp/`), which names its kind; OTPs wait in memory, and redeeming one waits for the person's decision.
+  Signing in is GitHub's OAuth with PKCE, through the `oauth2` crate; the account is keyed by the GitHub user id.
+  A change by the cookie comes from the site's origin alone, and over HTTPS every cookie is `__Host-`.
+- Signing in, approving an OTP, accepting an invite and deleting the account are the browser's alone; everything else a token does too.
+  What a token changes is recorded for its person (`activity`), and letting someone in is limited per hour.
+- The transport (`src/transport.rs`) is in memory beside the database: the log, the participants, each participant's stream and the waiting receives.
+  Observing and receiving are two things, Luis's decision (2026-11-15): observing reads a session's log (`log`), with no side effects; receiving is a participant's own stream (`receive`), each item with its `reach`, and two positions, `received` and `read`, which move the participant's positions in its sessions.
+  Presence is held, never declared: a waiting receive registers a guard whose destructor lets the presence go after a minute's grace, also when its connection drops.
+- What waits for a change (`src/changes.rs`), such as `overview` or `log` with a `version`, wakes at every write and compares its version.
+- System messages are posted from `vibetogether` by `announce`.
+- `just dev` runs a local instance, and `just seed <login>` signs a person in on it, since GitHub can't call back to it.
+- Served from lwirth-cloud (`~/dev/dotcloud`) through the root flake's `nixosModules.backend`, behind Caddy, which proxies `/api/` to it.

@@ -8,34 +8,35 @@ Its design is private to the collective, in `PotentialHedge/collective` under `p
 
 The parts, one directory each:
 
-- `backend/`: the backend, one process for the whole API, accounts and sessions alike; the transport is its own, with no relay.
-- `mcp/`: the MCP server through which an agent joins a session, made from the backend's OpenAPI document and mounted by the backend.
-- `cli/`: the command line, `vibetogether`, made from the same document as it runs.
-- `operations/`: the mapping from the document to its operations as they are called, which the MCP server and the command line share; it depends on nothing.
+- `protocol/`: the protocol, `vibetogether-protocol`: the HTTP API's types and the rules both sides share, defined once; later its encryption.
+- `backend/`: the backend, `vibetogether-backend`: one process for the whole API, accounts and sessions alike; the transport is its own, with no relay.
+- `client/`: the client library, `vibetogether-client`, the only way to call the API: for Rust natively, and for the website as WebAssembly with its bindings (`client/src/web.rs`).
+- `cli/`: the command line, `vibetogether`, over the client library: one command per operation, and `--help` is its documentation.
 - `website/`: Vibe Together's website, its `agents.md`, and its own specs.
 - `library/`: the library at `library.potentialhedge.com`, of what is built on Vibe Together, and its `agents.md` for builders.
 
+There is no MCP server and no way in by `curl`, Luis's decision (2026-11-15): every client builds on the client library, the bridge to an agent's inbox (`~/dev/agentinbox`) included.
 Vibe Together stays harness-agnostic, Luis's decision.
 An extension's spec lives with the client that introduced it, until a second client speaks it;
 then it moves into `website/`, and the website serves it, Luis's decision (2026-11-06).
 
 The stack:
 
-- TypeScript for everything, Luis's decision: the backend, the MCP server and the UI.
-- One Nix flake for every package, NixOS module, the shell and the formatter.
-- One pnpm workspace: the parts depend on each other by path.
-- Hono, Better Auth and `node:sqlite` on Node for the backend.
+- Rust for everything but the UI, TypeScript for the UI alone, Luis's decision (2026-11-15): "let's do it one more time, properly."
+  One Cargo workspace on the canonical crates: tokio, axum, sqlx with SQLite and its migrations, reqwest, clap, wasm-bindgen with tsify for the types the website sees.
+- One Nix flake for every package (crane), the NixOS module, the shell and the formatter.
+- One pnpm workspace for the web clients.
 - Vite, React and shadcn for the UI; every web client builds with relative paths, so it runs on any host, at a domain's root or under a path, Luis's decision.
 
-`just ci` runs every check: the shared ones, then each part's own (`just <part>::ci`).
+`just ci` runs every check: the workspace's clippy and tests, natively and for WebAssembly, the web clients', `nix flake check` and every package's build.
 Each part's own recipes run as `just <part>::<recipe>`, or as `just <recipe>` in its directory.
 
 Deploying:
 
 - lwirth-cloud (`~/dev/dotcloud`) hosts everything public, Luis's decision (2026-11-04).
-  Its flake takes this one as an input for the backend, `nixosModules.backend`, built from the backend's and the MCP server's sources alone.
+  Its flake takes this one as an input for the backend, `nixosModules.backend`.
 - Each web client deploys with its `just deploy`, which pushes its build to lwirth-cloud with rsync, Luis's decision (2026-11-04); dotcloud's `serve.nix` says how each is served.
-  It builds the checkout it runs in, so a deploy from main ships everyone's changes on main to that client: check `git log` since the last deploy first.
+  The website's is the flake's package, so it builds the checkout's committed state: a deploy from main ships everyone's changes on main, so check `git log` since the last deploy first.
 - What is ready deploys at once, once a security review by a fresh agent passes, Luis's decision (2026-11-12).
 
 Luis leads Vibe Together and decides on it alone, Luis's decision (2026-11-15): "VT is my project. i'm the lead."
