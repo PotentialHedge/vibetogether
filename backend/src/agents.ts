@@ -24,6 +24,8 @@ import {
 
 /** The most agents an account has that are not archived. */
 const maxAgents = 100;
+/** The most agents an account has ever had, so that archiving cannot make room without end. */
+const maxAgentsEver = 1000;
 
 export const Agent = z
 	.object({
@@ -191,6 +193,16 @@ export function agentOperations(api: ReturnType<typeof newApi>): void {
 					throw new Refused(
 						403,
 						`An account has at most ${maxAgents} agents that are not archived: archive one first.`,
+					);
+				const ever = (
+					db
+						.prepare("SELECT count(*) AS n FROM agent WHERE user = ?")
+						.get(caller.id) as { n: number }
+				).n;
+				if (ever >= maxAgentsEver)
+					throw new Refused(
+						403,
+						`An account has at most ${maxAgentsEver} agents, archived ones included.`,
 					);
 				const now = new Date().toISOString();
 				// A token creates its own agent, which it holds from the start.

@@ -170,9 +170,13 @@ export function urlOf(
 	for (const p of call.params) {
 		const value = args[p.name];
 		if (value === undefined || value === null) continue;
-		if (p.in === "path")
-			path = path.replace(`{${p.name}}`, encodeURIComponent(String(value)));
-		else query.set(p.name, String(value));
+		if (p.in === "path") {
+			const part = String(value);
+			// A path's `.` and `..` would reach another route.
+			if (part === "." || part === "..")
+				throw new Error(`${p.name} cannot be "${part}".`);
+			path = path.replace(`{${p.name}}`, encodeURIComponent(part));
+		} else query.set(p.name, String(value));
 	}
 	return `${base}${path}${query.size ? `?${query}` : ""}`;
 }
