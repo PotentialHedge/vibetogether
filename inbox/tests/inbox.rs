@@ -240,3 +240,22 @@ fn delivering_without_ringing_does_not_wake() {
   inbox.deliver(&b"quiet"[..], "tester", "txt").unwrap();
   assert!(!inbox.wake_file().exists());
 }
+
+#[test]
+fn the_inbox_is_its_owners_alone() {
+  use std::os::unix::fs::PermissionsExt;
+  let inbox = inbox("private");
+  let path = inbox.deliver(&b"x"[..], "tester", "txt").unwrap();
+  inbox.ring().unwrap();
+  let mode = |path: &std::path::Path| fs::metadata(path).unwrap().permissions().mode() & 0o777;
+  for dir in [
+    &inbox.root,
+    &inbox.new_dir(),
+    &inbox.cur_dir(),
+    &inbox.tmp_dir(),
+  ] {
+    assert_eq!(mode(dir), 0o700, "{}", dir.display());
+  }
+  assert_eq!(mode(&path), 0o600);
+  assert_eq!(mode(&inbox.wake_file()), 0o600);
+}

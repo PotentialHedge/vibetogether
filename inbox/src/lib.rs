@@ -7,10 +7,13 @@
 //! with the time in UTC to the microsecond, so that the names sort by time, and the sender
 //! encoded one to one: a `/` as `_`, and every other byte but ASCII letters, digits and `-` as
 //! `%XX`, such as `luis_lead` for `luis/lead`.
+//!
+//! What it creates is its owner's alone: its directories 0700, its items and files 0600.
 
 use std::{
   fs, io,
   io::{Read, Write},
+  os::unix::fs::{DirBuilderExt, OpenOptionsExt},
   path::{Path, PathBuf},
   sync::{
     atomic::{AtomicU64, Ordering},
@@ -66,10 +69,14 @@ impl Inbox {
     self.root.join("awake")
   }
 
-  /// Creates the inbox's directories where they are missing.
+  /// Creates the inbox's directories where they are missing, its owner's alone.
   pub fn create(&self) -> io::Result<()> {
     for dir in [self.new_dir(), self.cur_dir(), self.tmp_dir()] {
-      fs::create_dir_all(&dir).map_err(|e| at(e, &dir))?;
+      fs::DirBuilder::new()
+        .recursive(true)
+        .mode(0o700)
+        .create(&dir)
+        .map_err(|e| at(e, &dir))?;
     }
     Ok(())
   }
@@ -97,7 +104,12 @@ impl Inbox {
       "{}.{unique}.{sender}.{ext}",
       format_time(Timestamp::now())
     ));
-    let mut file = fs::File::create_new(&tmp).map_err(|e| at(e, &tmp))?;
+    let mut file = fs::OpenOptions::new()
+      .write(true)
+      .create_new(true)
+      .mode(0o600)
+      .open(&tmp)
+      .map_err(|e| at(e, &tmp))?;
     io::copy(&mut content, &mut file).map_err(|e| at(e, &tmp))?;
     file.sync_all().map_err(|e| at(e, &tmp))?;
     drop(file);
@@ -126,6 +138,7 @@ impl Inbox {
     fs::OpenOptions::new()
       .create(true)
       .append(true)
+      .mode(0o600)
       .open(&wake)
       .map_err(|e| at(e, &wake))?;
     Ok(())
@@ -166,6 +179,7 @@ impl Inbox {
     let file = fs::OpenOptions::new()
       .create(true)
       .append(true)
+      .mode(0o600)
       .open(&path)
       .map_err(|e| at(e, &path))?;
     file.lock().map_err(|e| at(e, &path))?;
