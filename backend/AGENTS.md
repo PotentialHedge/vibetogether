@@ -14,7 +14,7 @@ Vibe Together's design (`../AGENTS.md`): read it before working here.
   A token is created only by an OTP the person approves on the website (`/account/otp/`), which names its kind; OTPs wait in memory, and redeeming one waits for the person's decision.
   Signing in is GitHub's OAuth with PKCE, through the `oauth2` crate; the account is keyed by the GitHub user id.
   A change by the cookie comes from the site's origin alone, and over HTTPS every cookie is `__Host-`.
-- Signing in, approving an OTP, accepting an invite and deleting the account are the browser's alone; everything else a token does too.
+- Signing in, approving an OTP and deleting the account are the browser's alone, and accepting an invite the person's, by the browser or a person token, Luis's decision (2026-11-15); everything else a token does too.
   What a token changes is recorded for its person (`activity`), and letting someone in is limited per hour.
 - The transport (`src/transport.rs`) is in memory beside the database: the log, the participants, each participant's stream and the waiting receives.
   Observing and receiving are two things, Luis's decision (2026-11-15): observing reads a session's log (`log`), with no side effects; receiving is a participant's own stream (`receive`), each item with its `reach`, and two positions, `received` and `read`, which move the participant's positions in its sessions.

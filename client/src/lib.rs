@@ -518,7 +518,7 @@ impl Client {
     self.get(&["invites", code]).await
   }
 
-  /// Accepts an invite: only the person, in the browser.
+  /// Accepts an invite: only the person, in the browser or with a person token.
   pub async fn accept_invite(&self, code: &str) -> Result<Accepted> {
     self.bare(Method::POST, &["invites", code, "accept"]).await
   }

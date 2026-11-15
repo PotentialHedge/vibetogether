@@ -226,6 +226,16 @@ impl Caller {
     }
   }
 
+  /// Refuses an agent token: only the person does this, in the browser or with a person token.
+  pub fn as_person(&self) -> Result<()> {
+    match self.kind {
+      LoginKind::Agent => Err(Refusal::forbidden(
+        "Only the person does this, in the browser or with a person token, never an agent.",
+      )),
+      _ => Ok(()),
+    }
+  }
+
   /// Refuses `operation` by a token that did it too often this hour.
   pub async fn limit(&self, db: &mut Db, operation: &str) -> Result<()> {
     let Some((_, most)) = LIMITED.iter().find(|(op, _)| *op == operation) else {

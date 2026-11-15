@@ -272,6 +272,10 @@ enum Command {
   ShowInvite {
     code: String,
   },
+  /// Accepts an invite: only the person, with a person token.
+  AcceptInvite {
+    code: String,
+  },
 }
 
 #[derive(Clone, Copy, ValueEnum)]
@@ -549,6 +553,7 @@ async fn run(cli: Cli) -> Result<(), Exit> {
     }
     Command::RevokeInvite { code } => c.revoke_invite(&code).await?,
     Command::ShowInvite { code } => print(&c.show_invite(&code).await?),
+    Command::AcceptInvite { code } => print(&c.accept_invite(&code).await?),
   }
   Ok(())
 }

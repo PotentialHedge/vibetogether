@@ -757,9 +757,12 @@ async fn accepting_an_invite_makes_friends_joins_its_group_and_lands_in_its_sess
       .as_deref(),
     Some("build")
   );
-  // Only the person accepts, in the browser.
-  assert_eq!(status(tristan.own.accept_invite(&invite.code).await), 403);
-  let accepted = tristan.browser.accept_invite(&invite.code).await.unwrap();
+  // Only the person accepts, in the browser or with a person token, never an agent.
+  assert_eq!(
+    status(tristan.machine.accept_invite(&invite.code).await),
+    403
+  );
+  let accepted = tristan.own.accept_invite(&invite.code).await.unwrap();
   assert_eq!(accepted.land.id, w.session.id);
   let overview = tristan
     .machine

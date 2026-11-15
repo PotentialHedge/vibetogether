@@ -275,7 +275,7 @@ pub async fn show(
   }))
 }
 
-/// The invited person accepts, signed in in the browser: they become the inviter's friends,
+/// The invited person accepts, in the browser or with a person token: they become the inviter's friends,
 /// where they aren't yet, with a DM, and members of the group, if any. Accepted already, such as
 /// on a reload, it shows where it led and changes nothing, so that it never undoes a removal from
 /// the group or an unfriending since.
@@ -284,7 +284,7 @@ pub async fn accept(
   caller: Caller,
   Path(code): Path<String>,
 ) -> Result<Json<Accepted>> {
-  caller.in_browser()?;
+  caller.as_person()?;
   let me = &caller.account;
   let mut tx = app.db.begin().await?;
   let now = db::now();
