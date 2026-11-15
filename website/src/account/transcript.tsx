@@ -3,7 +3,16 @@
  * sign-in, so they are in exactly where they may. The page
  * observes the session while it is open in it. */
 
-import { ArrowUp, Download, Ellipsis, Minus, Plus, Users } from "lucide-react";
+import {
+	ArrowUp,
+	Check,
+	CheckCheck,
+	Download,
+	Ellipsis,
+	Minus,
+	Plus,
+	Users,
+} from "lucide-react";
 import {
 	type ReactNode,
 	useEffect,
@@ -22,6 +31,7 @@ import {
 	type Participants,
 	Seat,
 } from "@/account/live";
+import type { Participant } from "@/client/vibetogether_client";
 import { MoreInfo } from "@/components/more-info";
 import { Button } from "@/components/ui/button";
 import {
@@ -31,6 +41,11 @@ import {
 	DropdownMenuSeparator,
 	DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import {
+	Popover,
+	PopoverContent,
+	PopoverTrigger,
+} from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
 
 type Log = {
@@ -296,6 +311,69 @@ function Note({ entry }: { entry: Entry }) {
 	);
 }
 
+/** A message of the person's own, marked as a messenger marks it: one check
+ * once sent, two gray ones once everyone else in the session has received it,
+ * two blue ones once everyone else has read it. Hovering or tapping shows who
+ * is at what. */
+function Checks({
+	n,
+	others,
+}: {
+	n: number;
+	/** Everyone in the session but the person. */
+	others: [string, Participant][];
+}) {
+	const at = (p: Participant) =>
+		p.read >= n ? "read" : p.received >= n ? "received" : "not yet";
+	const received =
+		others.length > 0 && others.every(([, p]) => p.received >= n);
+	const read = others.length > 0 && others.every(([, p]) => p.read >= n);
+	const label = read
+		? "Read by everyone"
+		: received
+			? "Received by everyone"
+			: "Sent";
+	const Icon = received ? CheckCheck : Check;
+	return (
+		<Popover>
+			<PopoverTrigger
+				openOnHover
+				delay={200}
+				render={
+					<button
+						type="button"
+						aria-label={label}
+						className="inline-flex rounded-sm focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+					/>
+				}
+			>
+				<Icon
+					className={cn(
+						"size-[1.1em]",
+						read ? "text-sky-400" : "text-muted-foreground",
+					)}
+				/>
+			</PopoverTrigger>
+			<PopoverContent align="end" className="w-auto max-w-72 p-3 text-sm">
+				{others.length ? (
+					<ul className="flex flex-col gap-1">
+						{others.map(([name, p]) => (
+							<li key={name} className="flex items-baseline gap-3">
+								<span className="min-w-0 flex-1 truncate">
+									<Name name={name} />
+								</span>
+								<span className="shrink-0 text-muted-foreground">{at(p)}</span>
+							</li>
+						))}
+					</ul>
+				) : (
+					<p className="text-muted-foreground">No one else is here.</p>
+				)}
+			</PopoverContent>
+		</Popover>
+	);
+}
+
 const isMessage = (entry: Entry) =>
 	!base(entry.type).startsWith("application/vnd.");
 
@@ -451,6 +529,10 @@ export function Transcript({
 	};
 
 	const count = Object.keys(participants).length;
+	const others = useMemo(
+		() => Object.entries(participants).filter(([name]) => name !== as),
+		[participants, as],
+	);
 
 	return (
 		<div className="flex h-full min-h-0">
@@ -594,6 +676,11 @@ export function Transcript({
 												)}
 												<Body entry={entry} reader={reader} />
 											</div>
+											{entry.from === as && (
+												<span className="shrink-0 self-end leading-none">
+													<Checks n={entry.n} others={others} />
+												</span>
+											)}
 										</div>
 									) : (
 										<Note entry={entry} />
@@ -857,6 +944,7 @@ function made(): Omit<Log, "live" | "source" | "send" | "note"> {
 			"On it. It stops when a second receive gets a 409:\n\n```sh\nvibetogether receive\n```\n\nTwo loops ran under one name.",
 			4,
 		],
+		["luiswirth", "text/markdown", "Thanks, both.", 5],
 		["tristangabl/codex", JOIN, "", 9],
 		[
 			"tristangabl/codex",
