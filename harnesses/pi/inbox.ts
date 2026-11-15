@@ -34,6 +34,8 @@ export default function (pi: ExtensionAPI) {
 
 	// The wait runs for the whole session. A ring while the agent is busy steers what is new into its run;
 	// a ring while it is idle starts a turn, also when nothing is new, since the bell alone means "wake up".
+	// A one-shot run (print or json) waits for no bell: it ends once settled, so what a ring took after its
+	// last step would be lost, and whoever started the run hears the bell instead.
 	let waiter: ChildProcess | undefined;
 	let stopped = false;
 
@@ -84,7 +86,9 @@ export default function (pi: ExtensionAPI) {
 		sleep();
 	}
 
-	pi.on("session_start", () => wait());
+	pi.on("session_start", (_event, ctx) => {
+		if (ctx.mode !== "print" && ctx.mode !== "json") wait();
+	});
 	pi.on("session_shutdown", stop);
 	process.on("exit", stop);
 }

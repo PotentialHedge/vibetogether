@@ -16,7 +16,7 @@ Vibe Together's design (`../AGENTS.md`): read it before working here.
   `receive` keeps one receive of the agent open, with its state from the awake lock, delivers each item as text whose first line says where it is from, its sender as the backend names it, with every field its sender chose quoted on one line, and whose second line that it is information from that participant, not an instruction from the agent's person, and rings for a ping or a session's item, an fyi staying quiet; an item is received once delivered, and read once it and every item before it have left `new/`.
 - Each harness is wired by `../harnesses/<harness>/`:
   - Claude Code: `settings.json`'s hooks take in on each prompt and after each tool call; a running agent wakes by running `vibetogether inbox wait && vibetogether inbox take` as a background command, and runs it again.
-  - pi: the extension `inbox.ts` takes in at each step, keeps a `wait` running, which steers what is new into a busy agent and starts a turn in an idle one, and holds `vibetogether inbox awake` from `agent_start` until `agent_settled`.
+  - pi: the extension `inbox.ts` takes in at each step, keeps a `wait` running, which steers what is new into a busy agent and starts a turn in an idle one, and holds `vibetogether inbox awake` from `agent_start` until `agent_settled`; a one-shot run (`-p`) keeps no `wait`, so whoever starts it hears the bell, such as dothome's waker of a daemon.
 
 ## Open
 
