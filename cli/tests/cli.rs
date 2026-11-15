@@ -17,6 +17,11 @@ async fn exit_codes_say_what_went_wrong() {
     Some(2)
   );
   assert_eq!(run(&setup, &["send"], "").await.status.code(), Some(2));
+  // A session goes in a project or a group, and the error names both.
+  let placeless = run(&setup, &["create-session", "x"], "").await;
+  assert_eq!(placeless.status.code(), Some(2));
+  let stderr = String::from_utf8_lossy(&placeless.stderr);
+  assert!(stderr.contains("--project") && stderr.contains("--group"));
   assert_eq!(
     run(&setup, &["session", ".."], "").await.status.code(),
     Some(2)

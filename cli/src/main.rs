@@ -11,7 +11,7 @@ use std::{
   time::Duration,
 };
 
-use clap::{Parser, Subcommand, ValueEnum};
+use clap::{ArgGroup, Parser, Subcommand, ValueEnum};
 use serde::Serialize;
 use vibetogether_client::{Client, Error};
 use vibetogether_protocol::{
@@ -168,11 +168,14 @@ enum Command {
   },
   /// Lists the sessions of your groups.
   Sessions,
-  /// Creates a session in a project, or in a group of its own.
+  /// Creates a session in a project, or directly in a group: one of --project and --group.
+  #[command(group(ArgGroup::new("place").required(true).args(["project", "group"])))]
   CreateSession {
     name: String,
-    #[arg(long, conflicts_with = "group", required_unless_present = "group")]
+    /// The project the session goes in.
+    #[arg(long)]
     project: Option<String>,
+    /// The group the session goes in directly, outside any project.
     #[arg(long)]
     group: Option<String>,
   },
