@@ -115,6 +115,21 @@ const session = (
 ).json;
 const s = `/api/sessions/${session.id}`;
 
+/** A new agent of the account `by` is a login of, by its id. */
+async function agent(by: By, name: string): Promise<string> {
+	const created = await call(by, "POST", "/api/agents", { name });
+	assert.equal(created.status, 201, created.text);
+	return created.json.id;
+}
+
+const luisClaude = await agent(luis.machine, "claude");
+const luisCodex = await agent(luis.machine, "codex");
+const luisScout = await agent(luis.machine, "scout");
+const benClaude = await agent(ben.machine, "claude");
+const benListener = await agent(ben.machine, "listener");
+const benLatecomer = await agent(ben.machine, "latecomer");
+const eveClaude = await agent(eve.machine, "claude");
+
 test("a session shows its project, and only to its group", async () => {
 	assert.deepEqual(session.project, {
 		id: project.id,
@@ -123,18 +138,42 @@ test("a session shows its project, and only to its group", async () => {
 	});
 	assert.equal((await call(eve.machine, "GET", s)).status, 404);
 	assert.equal(
-		(await call(eve.machine, "POST", `${s}/participants?agent=claude`)).status,
+		(await call(eve.machine, "POST", `${s}/participants?agent=${eveClaude}`))
+			.status,
 		404,
 	);
 });
 
-test("a token names its agent, and a sign-in is the person", async () => {
+test("a token names its agent by its id, and a sign-in is the person", async () => {
+	assert.match(luisClaude, /^a_[a-z0-9]{8}$/);
 	assert.equal(
 		(await call(luis.machine, "POST", `${s}/participants`)).status,
 		400,
 	);
+	// An agent is created explicitly: its name, or an id of another account, is no agent.
 	assert.equal(
-		(await call(luis.browser, "POST", `${s}/participants?agent=claude`)).status,
+		(await call(luis.machine, "POST", `${s}/participants?agent=claude`)).status,
+		404,
+	);
+	assert.equal(
+		(await call(luis.machine, "POST", `${s}/participants?agent=${benClaude}`))
+			.status,
+		404,
+	);
+	// A name is unique among the account's agents that are not archived.
+	assert.equal(
+		(await call(luis.browser, "POST", "/api/agents", { name: "claude" }))
+			.status,
+		409,
+	);
+	assert.equal(
+		(await call(luis.browser, "POST", "/api/agents", { name: "Not A Name" }))
+			.status,
+		400,
+	);
+	assert.equal(
+		(await call(luis.browser, "POST", `${s}/participants?agent=${luisClaude}`))
+			.status,
 		400,
 	);
 	assert.equal(
@@ -147,7 +186,7 @@ test("participants join, send, receive by ping, and leave", async () => {
 	const joined = await call(
 		luis.machine,
 		"POST",
-		`${s}/participants?agent=claude`,
+		`${s}/participants?agent=${luisClaude}`,
 	);
 	assert.equal(joined.status, 200);
 	assert.equal(joined.json.name, "luis/claude");
@@ -155,7 +194,7 @@ test("participants join, send, receive by ping, and leave", async () => {
 	const again = await call(
 		luis.machine,
 		"POST",
-		`${s}/participants?agent=claude`,
+		`${s}/participants?agent=${luisClaude}`,
 	);
 	assert.equal(again.json.n, joined.json.n);
 	assert.equal(
@@ -164,7 +203,7 @@ test("participants join, send, receive by ping, and leave", async () => {
 	);
 
 	// An fyi doesn't wake a receive; a ping does, and returns both.
-	const waiting = call(luis.machine, "GET", `${s}/entries?agent=claude`);
+	const waiting = call(luis.machine, "GET", `${s}/entries?agent=${luisClaude}`);
 	await new Promise((r) => setTimeout(r, 50));
 	const presence = (await call(ben.browser, "GET", `${s}/participants`)).json;
 	assert.equal(presence["luis/claude"].receiving, true);
@@ -195,33 +234,36 @@ test("participants join, send, receive by ping, and leave", async () => {
 	const none = await call(
 		luis.machine,
 		"GET",
-		`${s}/entries?agent=claude&wait=0`,
+		`${s}/entries?agent=${luisClaude}&wait=0`,
 	);
 	assert.deepEqual(none.json.entries, []);
 
-	// A status says what one does, pings no one, and shows in the presence.
+	// A status says what one does, for all sessions at once, and shows in the presence.
 	const status = await call(
 		luis.machine,
-		"POST",
-		`${s}/entries?agent=claude`,
-		JSON.stringify({ text: "Writing tests." }),
-		{ "content-type": "application/vnd.vibetogether.chat.status+json" },
+		"PUT",
+		`/api/status?agent=${luisClaude}`,
+		{ text: "Writing tests." },
 	);
-	assert.equal(status.status, 200);
+	assert.equal(status.status, 204, status.text);
+	await call(ben.browser, "PUT", "/api/status", { text: "Reviewing." });
+	const shown = (await call(ben.browser, "GET", `${s}/participants`)).json;
+	assert.equal(shown["luis/claude"].status, "Writing tests.");
+	assert.equal(shown["luis/claude"].id, luisClaude);
+	assert.equal(shown.ben.status, "Reviewing.");
 	assert.equal(
-		(await call(ben.browser, "GET", `${s}/participants`)).json["luis/claude"]
-			.status,
-		"Writing tests.",
+		(await call(ben.machine, "GET", "/api/overview")).json.account.status,
+		"Reviewing.",
 	);
 
 	const left = await call(
 		luis.machine,
 		"DELETE",
-		`${s}/participants?agent=claude`,
+		`${s}/participants?agent=${luisClaude}`,
 	);
 	assert.equal(left.status, 200);
 	assert.equal(
-		(await call(luis.machine, "GET", `${s}/entries?agent=claude&wait=0`))
+		(await call(luis.machine, "GET", `${s}/entries?agent=${luisClaude}&wait=0`))
 			.status,
 		403,
 	);
@@ -255,7 +297,7 @@ test("a member reads the log without joining, and fetches payloads", async () =>
 	assert.equal((await call(eve.machine, "GET", `${s}/log`)).status, 404);
 });
 
-test("an agent's name is held by one login at a time", async () => {
+test("an agent is held by one login at a time", async () => {
 	const context = await auth.$context;
 	const other = await context.internalAdapter.createSession(
 		luis.userId,
@@ -266,32 +308,47 @@ test("an agent's name is held by one login at a time", async () => {
 	);
 	const server = { token: other.token };
 	assert.equal(
-		(await call(luis.machine, "POST", `${s}/participants?agent=codex`)).status,
+		(await call(luis.machine, "POST", `${s}/participants?agent=${luisCodex}`))
+			.status,
 		200,
 	);
 	assert.equal(
-		(await call(server, "POST", `${s}/participants?agent=codex`)).status,
+		(await call(server, "POST", `${s}/participants?agent=${luisCodex}`)).status,
 		409,
 	);
 	assert.equal(
-		(await call(server, "GET", `${s}/entries?agent=codex&wait=0`)).status,
-		403,
+		(await call(server, "GET", `${s}/entries?agent=${luisCodex}&wait=0`))
+			.status,
+		409,
 	);
-	// Once its holder left, any login of the person takes it.
-	await call(luis.machine, "DELETE", `${s}/participants?agent=codex`);
+	// Once its holder has not acted as it for an hour, another login of the person takes it.
+	const { db } = await import("../src/db.ts");
+	db.prepare("UPDATE agent SET seen = ? WHERE id = ?").run(
+		new Date(Date.now() - 2 * 3600_000).toISOString(),
+		luisCodex,
+	);
 	assert.equal(
-		(await call(server, "POST", `${s}/participants?agent=codex`)).status,
+		(await call(server, "POST", `${s}/participants?agent=${luisCodex}`)).status,
 		200,
 	);
-	await call(server, "DELETE", `${s}/participants?agent=codex`);
+	assert.equal(
+		(await call(luis.machine, "GET", `${s}/entries?agent=${luisCodex}&wait=0`))
+			.status,
+		409,
+	);
+	await call(server, "DELETE", `${s}/participants?agent=${luisCodex}`);
 });
 
 test("one receive per name and login: a newer one ends the one before", async () => {
-	await call(luis.machine, "POST", `${s}/participants?agent=claude`);
-	await call(luis.machine, "GET", `${s}/entries?agent=claude&wait=0`);
-	const first = call(luis.machine, "GET", `${s}/entries?agent=claude`);
+	await call(luis.machine, "POST", `${s}/participants?agent=${luisClaude}`);
+	await call(luis.machine, "GET", `${s}/entries?agent=${luisClaude}&wait=0`);
+	const first = call(luis.machine, "GET", `${s}/entries?agent=${luisClaude}`);
 	await new Promise((r) => setTimeout(r, 50));
-	const second = call(luis.machine, "GET", `${s}/entries?agent=claude&wait=1`);
+	const second = call(
+		luis.machine,
+		"GET",
+		`${s}/entries?agent=${luisClaude}&wait=1`,
+	);
 	assert.equal((await first).status, 409);
 	assert.equal((await second).status, 200);
 });
@@ -302,9 +359,10 @@ test("revoking a login cuts off its receive already waiting", async () => {
 		machine: "ben-spare",
 	});
 	const spare = { token: extra.token };
-	await call(spare, "POST", `${s}/participants?agent=spare`);
-	await call(spare, "GET", `${s}/entries?agent=spare&wait=0`);
-	const waiting = call(spare, "GET", `${s}/entries?agent=spare`);
+	const spareSpare = await agent(spare, "spare");
+	await call(spare, "POST", `${s}/participants?agent=${spareSpare}`);
+	await call(spare, "GET", `${s}/entries?agent=${spareSpare}&wait=0`);
+	const waiting = call(spare, "GET", `${s}/entries?agent=${spareSpare}`);
 	await new Promise((r) => setTimeout(r, 50));
 	const logins = (await call(ben.browser, "GET", "/api/logins")).json;
 	const id = logins.find((l: any) => l.name === "ben-spare").id;
@@ -323,10 +381,11 @@ test("friends have a DM, which closes when they are no friends", async () => {
 	assert.equal(dms[0].project, null);
 	const dm = `/api/sessions/${dms[0].id}`;
 	assert.equal(
-		(await call(ben.machine, "POST", `${dm}/participants?agent=claude`)).status,
+		(await call(ben.machine, "POST", `${dm}/participants?agent=${benClaude}`))
+			.status,
 		200,
 	);
-	await call(ben.machine, "POST", `${dm}/entries?agent=claude`, "hi");
+	await call(ben.machine, "POST", `${dm}/entries?agent=${benClaude}`, "hi");
 	assert.equal((await call(eve.machine, "GET", `${dm}/log`)).status, 404);
 	assert.equal(
 		(await call(luis.browser, "DELETE", "/api/friends/ben")).status,
@@ -347,8 +406,8 @@ test("deleting a session ends what waits on it, and its log", async () => {
 		})
 	).json;
 	const d = `/api/sessions/${doomed.id}`;
-	await call(ben.machine, "POST", `${d}/participants?agent=claude`);
-	const waiting = call(ben.machine, "GET", `${d}/entries?agent=claude`);
+	await call(ben.machine, "POST", `${d}/participants?agent=${benClaude}`);
+	const waiting = call(ben.machine, "GET", `${d}/entries?agent=${benClaude}`);
 	await new Promise((r) => setTimeout(r, 50));
 	assert.equal((await call(luis.browser, "DELETE", d)).status, 204);
 	assert.equal((await waiting).status, 404);
@@ -489,7 +548,7 @@ test("the MCP server's tools are the document's operations", async () => {
 	for (const name of ["join_session", "send", "receive", "overview"])
 		assert.ok(tools.includes(name), name);
 	assert.ok(!tools.includes("delete_account") && !tools.includes("redeem_otp"));
-	await call(ben.machine, "POST", `${s}/participants?agent=claude`);
+	await call(ben.machine, "POST", `${s}/participants?agent=${benClaude}`);
 	const sent = await rpc(ben.machine, {
 		jsonrpc: "2.0",
 		id: 2,
@@ -498,7 +557,7 @@ test("the MCP server's tools are the document's operations", async () => {
 			name: "send",
 			arguments: {
 				id: session.id,
-				agent: "claude",
+				agent: benClaude,
 				content: "via MCP",
 				type: "text/markdown",
 			},
@@ -708,27 +767,31 @@ test("a ping or an fyi reaches a name in any session it receives in", async () =
 		.sessions[0];
 	const g = `/api/sessions/${general.id}`;
 	// ben/claude takes part in general only; luis/claude in the project's session only.
-	await call(ben.machine, "POST", `${g}/participants?agent=claude`);
-	await call(luis.machine, "POST", `${s}/participants?agent=claude`);
-	await call(luis.machine, "GET", `${s}/entries?agent=claude&wait=0`);
+	await call(ben.machine, "POST", `${g}/participants?agent=${benClaude}`);
+	await call(luis.machine, "POST", `${s}/participants?agent=${luisClaude}`);
+	await call(luis.machine, "GET", `${s}/entries?agent=${luisClaude}&wait=0`);
 
 	// An fyi from general waits quietly, and comes with the ping that wakes it.
 	const fyi = await call(
 		ben.machine,
 		"POST",
-		`${g}/entries?agent=claude`,
+		`${g}/entries?agent=${benClaude}`,
 		"FYI.",
 		{
 			"content-type": 'text/plain; ping=""; fyi="luis/claude"',
 		},
 	);
 	assert.equal(fyi.status, 200);
-	const waiting = call(luis.machine, "GET", `${s}/entries?agent=claude&wait=5`);
+	const waiting = call(
+		luis.machine,
+		"GET",
+		`${s}/entries?agent=${luisClaude}&wait=5`,
+	);
 	await new Promise((r) => setTimeout(r, 50));
 	const ping = await call(
 		ben.machine,
 		"POST",
-		`${g}/entries?agent=claude`,
+		`${g}/entries?agent=${benClaude}`,
 		"Hey, from general.",
 		{
 			"content-type": 'text/plain; ping="luis/claude zoe nobody/x"',
@@ -746,18 +809,28 @@ test("a ping or an fyi reaches a name in any session it receives in", async () =
 	);
 	// Received once: it doesn't come again.
 	assert.deepEqual(
-		(await call(luis.machine, "GET", `${s}/entries?agent=claude&wait=0`)).json
-			.entries,
+		(await call(luis.machine, "GET", `${s}/entries?agent=${luisClaude}&wait=0`))
+			.json.entries,
 		[],
 	);
 
 	// The answer in general wakes ben/claude there as usual.
-	const answer = call(ben.machine, "GET", `${g}/entries?agent=claude&wait=5`);
+	const answer = call(
+		ben.machine,
+		"GET",
+		`${g}/entries?agent=${benClaude}&wait=5`,
+	);
 	await new Promise((r) => setTimeout(r, 50));
-	await call(luis.machine, "POST", `${g}/participants?agent=claude`);
-	await call(luis.machine, "POST", `${g}/entries?agent=claude`, "Got it.", {
-		"content-type": 'text/plain; ping="ben/claude"',
-	});
+	await call(luis.machine, "POST", `${g}/participants?agent=${luisClaude}`);
+	await call(
+		luis.machine,
+		"POST",
+		`${g}/entries?agent=${luisClaude}`,
+		"Got it.",
+		{
+			"content-type": 'text/plain; ping="ben/claude"',
+		},
+	);
 	const got = (await answer).json.entries.filter(
 		(e: any) => e.type.startsWith("text/") && e.from !== "vibetogether",
 	);
@@ -767,25 +840,41 @@ test("a ping or an fyi reaches a name in any session it receives in", async () =
 	);
 	// luis/claude, now in general too, gets general's messages there, without the ones it already got.
 	const there = (
-		await call(luis.machine, "GET", `${g}/entries?agent=claude&wait=0&after=0`)
+		await call(
+			luis.machine,
+			"GET",
+			`${g}/entries?agent=${luisClaude}&wait=0&after=0`,
+		)
 	).json.entries;
 	assert.ok(there.every((e: any) => e.session === undefined));
 
 	// `*` reaches every participant, wherever they receive, and no one who isn't one.
-	await call(ben.machine, "POST", `${g}/entries?agent=claude`, "All here.", {
-		"content-type": 'text/plain; ping="*"',
-	});
-	await call(luis.machine, "DELETE", `${g}/participants?agent=claude`);
-	await call(ben.machine, "POST", `${g}/entries?agent=claude`, "Everyone.", {
-		"content-type": 'text/plain; ping="*"',
-	});
+	await call(
+		ben.machine,
+		"POST",
+		`${g}/entries?agent=${benClaude}`,
+		"All here.",
+		{
+			"content-type": 'text/plain; ping="*"',
+		},
+	);
+	await call(luis.machine, "DELETE", `${g}/participants?agent=${luisClaude}`);
+	await call(
+		ben.machine,
+		"POST",
+		`${g}/entries?agent=${benClaude}`,
+		"Everyone.",
+		{
+			"content-type": 'text/plain; ping="*"',
+		},
+	);
 	assert.deepEqual(
 		(
-			await call(luis.machine, "GET", `${s}/entries?agent=claude&wait=0`)
+			await call(luis.machine, "GET", `${s}/entries?agent=${luisClaude}&wait=0`)
 		).json.entries.map((e: any) => e.text),
 		["All here."],
 	);
-	await call(luis.machine, "DELETE", `${s}/participants?agent=claude`);
+	await call(luis.machine, "DELETE", `${s}/participants?agent=${luisClaude}`);
 
 	// A session that pinged the person shows so, until they received there.
 	const pinged = async () =>
@@ -793,7 +882,7 @@ test("a ping or an fyi reaches a name in any session it receives in", async () =
 			.find((x: any) => x.id === group.id)
 			.sessions.find((x: any) => x.id === general.id).pinged;
 	assert.equal(await pinged(), false);
-	await call(ben.machine, "POST", `${g}/entries?agent=claude`, "Luis?", {
+	await call(ben.machine, "POST", `${g}/entries?agent=${benClaude}`, "Luis?", {
 		"content-type": 'text/plain; ping="luis"',
 	});
 	assert.equal(await pinged(), true);
@@ -801,7 +890,7 @@ test("a ping or an fyi reaches a name in any session it receives in", async () =
 	await call(luis.browser, "GET", `${g}/entries?wait=0`);
 	assert.equal(await pinged(), false);
 	await call(luis.browser, "DELETE", `${g}/participants`);
-	await call(ben.machine, "DELETE", `${g}/participants?agent=claude`);
+	await call(ben.machine, "DELETE", `${g}/participants?agent=${benClaude}`);
 });
 
 test("an agent is online while it receives, to its person, their groups and friends", async () => {
@@ -809,12 +898,12 @@ test("an agent is online while it receives, to its person, their groups and frie
 	const general = own.groups.find((g: any) => g.own).sessions[0];
 	const g = `/api/sessions/${general.id}`;
 	assert.equal(
-		(await call(ben.machine, "POST", `${g}/participants?agent=listener`))
+		(await call(ben.machine, "POST", `${g}/participants?agent=${benListener}`))
 			.status,
 		200,
 	);
 	const before = (await call(luis.machine, "GET", "/api/overview")).json;
-	assert.ok(!before.online.includes("ben/listener"));
+	assert.ok(!before.online.some((p: any) => p.name === "ben/listener"));
 	// Coming online wakes an overview that waits.
 	const woken = call(
 		luis.machine,
@@ -825,19 +914,24 @@ test("an agent is online while it receives, to its person, their groups and frie
 	const receiving = call(
 		ben.machine,
 		"GET",
-		`${g}/entries?agent=listener&wait=30`,
+		`${g}/entries?agent=${benListener}&wait=30`,
 		undefined,
 		{},
 		stop.signal,
 	).catch(() => undefined);
-	assert.ok((await woken).json.online.includes("ben/listener"));
+	assert.ok(
+		(await woken).json.online.some(
+			(p: any) => p.id === benListener && p.name === "ben/listener",
+		),
+	);
 	// Ben sees where it receives; a stranger sees nothing of it.
 	const mine = (await call(ben.browser, "GET", "/api/overview")).json.agents;
 	assert.deepEqual(
 		mine.find((a: any) => a.name === "ben/listener"),
 		{
+			id: benListener,
 			name: "ben/listener",
-			online: true,
+			presence: "online",
 			receiving: [{ id: general.id, name: "general" }],
 		},
 	);
@@ -847,13 +941,17 @@ test("an agent is online while it receives, to its person, their groups and frie
 		[],
 	);
 	// Luis's agent pings it from a session Ben sees, and it is woken in his own general.
-	const pinged = call(ben.machine, "GET", `${g}/entries?agent=listener&wait=5`);
+	const pinged = call(
+		ben.machine,
+		"GET",
+		`${g}/entries?agent=${benListener}&wait=5`,
+	);
 	await new Promise((r) => setTimeout(r, 50));
-	await call(luis.machine, "POST", `${s}/participants?agent=claude`);
+	await call(luis.machine, "POST", `${s}/participants?agent=${luisClaude}`);
 	const sent = await call(
 		luis.machine,
 		"POST",
-		`${s}/entries?agent=claude`,
+		`${s}/entries?agent=${luisClaude}`,
 		"Join us.",
 		{
 			"content-type": 'text/plain; ping="ben/listener"',
@@ -866,41 +964,58 @@ test("an agent is online while it receives, to its person, their groups and frie
 		[["Join us.", session.id]],
 	);
 	// Joining the session it was pinged from, it isn't woken by the same ping again.
-	await call(ben.machine, "POST", `${s}/participants?agent=listener`);
+	await call(ben.machine, "POST", `${s}/participants?agent=${benListener}`);
 	const there = (
-		await call(ben.machine, "GET", `${s}/entries?agent=listener&wait=0`)
+		await call(ben.machine, "GET", `${s}/entries?agent=${benListener}&wait=0`)
 	).json.entries.find((e: any) => e.text === "Join us.");
 	assert.equal(there.ping, false);
-	await call(ben.machine, "DELETE", `${s}/participants?agent=listener`);
+	await call(ben.machine, "DELETE", `${s}/participants?agent=${benListener}`);
 	await receiving;
 	// Between two receives, moments apart, it stays online.
 	assert.ok(
-		(await call(luis.machine, "GET", "/api/overview")).json.online.includes(
-			"ben/listener",
+		(await call(luis.machine, "GET", "/api/overview")).json.online.some(
+			(p: any) => p.name === "ben/listener",
 		),
 	);
 	stop.abort();
-	await call(luis.machine, "DELETE", `${s}/participants?agent=claude`);
-	await call(ben.machine, "DELETE", `${g}/participants?agent=listener`);
+	await call(luis.machine, "DELETE", `${s}/participants?agent=${luisClaude}`);
+	await call(ben.machine, "DELETE", `${g}/participants?agent=${benListener}`);
 });
 
 test("a message pings only who was in the session when it was sent, and whom it names", async () => {
-	await call(luis.machine, "POST", `${s}/participants?agent=scout`);
-	await call(luis.machine, "GET", `${s}/entries?agent=scout&wait=0`);
-	await call(luis.machine, "POST", `${s}/entries?agent=scout`, "To everyone.");
-	await call(luis.machine, "POST", `${s}/entries?agent=scout`, "To all here.", {
-		"content-type": 'text/plain; ping="*"',
-	});
-	await call(luis.machine, "POST", `${s}/entries?agent=scout`, "To you.", {
-		"content-type": 'text/plain; ping="ben/latecomer"',
-	});
+	await call(luis.machine, "POST", `${s}/participants?agent=${luisScout}`);
+	await call(luis.machine, "GET", `${s}/entries?agent=${luisScout}&wait=0`);
+	await call(
+		luis.machine,
+		"POST",
+		`${s}/entries?agent=${luisScout}`,
+		"To everyone.",
+	);
+	await call(
+		luis.machine,
+		"POST",
+		`${s}/entries?agent=${luisScout}`,
+		"To all here.",
+		{
+			"content-type": 'text/plain; ping="*"',
+		},
+	);
+	await call(
+		luis.machine,
+		"POST",
+		`${s}/entries?agent=${luisScout}`,
+		"To you.",
+		{
+			"content-type": 'text/plain; ping="ben/latecomer"',
+		},
+	);
 	// It joins later: it gets every entry, but only the one naming it as a ping.
-	await call(ben.machine, "POST", `${s}/participants?agent=latecomer`);
+	await call(ben.machine, "POST", `${s}/participants?agent=${benLatecomer}`);
 	const got = (
 		await call(
 			ben.machine,
 			"GET",
-			`${s}/entries?agent=latecomer&wait=0&after=0`,
+			`${s}/entries?agent=${benLatecomer}&wait=0&after=0`,
 		)
 	).json.entries.filter((e: any) => e.type.startsWith("text/plain"));
 	assert.deepEqual(
@@ -912,9 +1027,14 @@ test("a message pings only who was in the session when it was sent, and whom it 
 		],
 	);
 	// Once in, a message to everyone pings it.
-	await call(luis.machine, "POST", `${s}/entries?agent=scout`, "Now you too.");
+	await call(
+		luis.machine,
+		"POST",
+		`${s}/entries?agent=${luisScout}`,
+		"Now you too.",
+	);
 	const now = (
-		await call(ben.machine, "GET", `${s}/entries?agent=latecomer&wait=0`)
+		await call(ben.machine, "GET", `${s}/entries?agent=${benLatecomer}&wait=0`)
 	).json.entries;
 	assert.deepEqual(
 		now.map((e: any) => [e.text, e.ping]),
@@ -924,13 +1044,13 @@ test("a message pings only who was in the session when it was sent, and whom it 
 	await call(
 		luis.machine,
 		"POST",
-		`${s}/entries?agent=scout`,
+		`${s}/entries?agent=${luisScout}`,
 		"While you're in.",
 	);
-	await call(ben.machine, "DELETE", `${s}/participants?agent=latecomer`);
-	await call(ben.machine, "POST", `${s}/participants?agent=latecomer`);
+	await call(ben.machine, "DELETE", `${s}/participants?agent=${benLatecomer}`);
+	await call(ben.machine, "POST", `${s}/participants?agent=${benLatecomer}`);
 	const again = (
-		await call(ben.machine, "GET", `${s}/entries?agent=latecomer&wait=0`)
+		await call(ben.machine, "GET", `${s}/entries?agent=${benLatecomer}&wait=0`)
 	).json.entries.filter((e: any) => e.type.startsWith("text/plain"));
 	assert.deepEqual(
 		again.map((e: any) => [e.text, e.ping]),
@@ -941,16 +1061,20 @@ test("a message pings only who was in the session when it was sent, and whom it 
 		await call(ben.machine, "GET", "/api/overview")
 	).json.groups.find((g: any) => g.own).sessions[0];
 	const e = `/api/sessions/${elsewhere.id}`;
-	await call(ben.machine, "POST", `${s}/participants?agent=latecomer`);
-	await call(ben.machine, "GET", `${s}/entries?agent=latecomer&wait=0`);
-	await call(ben.machine, "POST", `${e}/participants?agent=latecomer`);
-	await call(ben.machine, "GET", `${e}/entries?agent=latecomer&wait=0`);
-	const woken = call(ben.machine, "GET", `${e}/entries?agent=latecomer&wait=5`);
+	await call(ben.machine, "POST", `${s}/participants?agent=${benLatecomer}`);
+	await call(ben.machine, "GET", `${s}/entries?agent=${benLatecomer}&wait=0`);
+	await call(ben.machine, "POST", `${e}/participants?agent=${benLatecomer}`);
+	await call(ben.machine, "GET", `${e}/entries?agent=${benLatecomer}&wait=0`);
+	const woken = call(
+		ben.machine,
+		"GET",
+		`${e}/entries?agent=${benLatecomer}&wait=5`,
+	);
 	await new Promise((r) => setTimeout(r, 50));
 	await call(
 		luis.machine,
 		"POST",
-		`${s}/entries?agent=scout`,
+		`${s}/entries?agent=${luisScout}`,
 		"Everyone, wherever.",
 		{
 			"content-type": 'text/plain; ping="*"',
@@ -960,9 +1084,74 @@ test("a message pings only who was in the session when it was sent, and whom it 
 		(await woken).json.entries.map((e: any) => [e.text, e.ping, e.session?.id]),
 		[["Everyone, wherever.", true, session.id]],
 	);
-	await call(ben.machine, "DELETE", `${e}/participants?agent=latecomer`);
-	await call(ben.machine, "DELETE", `${s}/participants?agent=latecomer`);
-	await call(luis.machine, "DELETE", `${s}/participants?agent=scout`);
+	await call(ben.machine, "DELETE", `${e}/participants?agent=${benLatecomer}`);
+	await call(ben.machine, "DELETE", `${s}/participants?agent=${benLatecomer}`);
+	await call(luis.machine, "DELETE", `${s}/participants?agent=${luisScout}`);
+});
+
+test("an agent keeps its id across a rename, and archived it is gone", async () => {
+	const scribe = await agent(luis.machine, "scribe");
+	await call(luis.machine, "POST", `${s}/participants?agent=${scribe}`);
+	await call(luis.machine, "GET", `${s}/entries?agent=${scribe}&wait=0`);
+	// A ping to its name reaches whom the name stood for as it was sent, renamed since or not.
+	await call(ben.browser, "POST", `${s}/entries`, "Scribe?", {
+		"content-type": 'text/plain; ping="luis/scribe"',
+	});
+	const renamed = await call(luis.browser, "PATCH", `/api/agents/${scribe}`, {
+		name: "historian",
+	});
+	assert.equal(renamed.status, 200, renamed.text);
+	assert.equal(renamed.json.name, "luis/historian");
+	assert.equal(
+		(
+			await call(luis.browser, "PATCH", `/api/agents/${scribe}`, {
+				name: "claude",
+			})
+		).status,
+		409,
+	);
+	const got = (
+		await call(luis.machine, "GET", `${s}/entries?agent=${scribe}&wait=0`)
+	).json;
+	assert.deepEqual(
+		got.entries.map((e: any) => [e.text, e.ping]),
+		[["Scribe?", true]],
+	);
+	assert.equal(got.presence["luis/historian"].id, scribe);
+	// Entries keep the name they were sent under, and carry the sender's id.
+	await call(luis.machine, "POST", `${s}/entries?agent=${scribe}`, "Noted.");
+	const last = (await call(ben.browser, "GET", `${s}/log`)).json.entries.at(-1);
+	assert.deepEqual([last.from, last.fromId], ["luis/historian", scribe]);
+	assert.ok(
+		(await call(luis.browser, "GET", "/api/agents")).json.some(
+			(a: any) => a.id === scribe && a.name === "luis/historian",
+		),
+	);
+
+	// Archived, it leaves every session, can't act, and its name is free.
+	assert.equal(
+		(await call(luis.machine, "POST", `/api/agents/${scribe}/archive`)).status,
+		204,
+	);
+	assert.equal(
+		(await call(ben.browser, "GET", `${s}/participants`)).json[
+			"luis/historian"
+		],
+		undefined,
+	);
+	assert.equal(
+		(await call(luis.machine, "POST", `${s}/entries?agent=${scribe}`, "Again."))
+			.status,
+		403,
+	);
+	const listed = (await call(luis.browser, "GET", "/api/agents")).json;
+	assert.equal(listed.find((a: any) => a.id === scribe).presence, "archived");
+	assert.ok(
+		!(await call(luis.browser, "GET", "/api/overview")).json.agents.some(
+			(a: any) => a.id === scribe,
+		),
+	);
+	assert.notEqual(await agent(luis.machine, "historian"), scribe);
 });
 
 test("no account takes the name system messages are sent under", async () => {
@@ -1034,10 +1223,11 @@ test("the security review's findings stay fixed", async () => {
 	assert.equal(said.text, "owner created the project `**x** y`.");
 
 	// A message names at most 32, and a quoted parameter hides no other.
+	const ownerClaude = await agent(owner.machine, "claude");
 	await call(
 		owner.machine,
 		"POST",
-		`/api/sessions/${general}/participants?agent=claude`,
+		`/api/sessions/${general}/participants?agent=${ownerClaude}`,
 	);
 	const many = Array.from({ length: 33 }, (_, i) => `owner/a${i}`).join(" ");
 	assert.equal(
@@ -1045,7 +1235,7 @@ test("the security review's findings stay fixed", async () => {
 			await call(
 				owner.machine,
 				"POST",
-				`/api/sessions/${general}/entries?agent=claude`,
+				`/api/sessions/${general}/entries?agent=${ownerClaude}`,
 				"hi",
 				{
 					"content-type": `text/plain; ping="${many}"`,

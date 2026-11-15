@@ -13,7 +13,10 @@ Its interface is its operations, defined once in the code and served as an OpenA
 - `overview` with a `version` waits until the account's overview changes, Luis's decision (2026-11-11), so a page or an agent sees what others change without polling (`src/changes.ts`): every write wakes each waiter, which compares its overview's version.
 - The transport is in memory beside the database: `src/transport.ts` holds the log, the participants and the waiting receives, and `src/sessions.ts` its operations.
   An agent is online while a receive of its waits or ended within a minute, Luis's decision (2026-11-12): the receive is the heartbeat, kept in memory, and coming online or going offline wakes the overviews that wait.
-  A message's `ping` and `fyi` names are noted in `mention`, so that the named receive it in any session they receive in; system messages are posted from `vibetogether` by `announce`.
+  A message's `ping` and `fyi` names are noted in `mention`, by the participant each stands for as it is sent, so that the named receive it in any session they receive in; system messages are posted from `vibetogether` by `announce`.
+- A participant is a person, by their user id, or an agent, by its own id `a_…` (`src/participants.ts`), Luis's decision (2026-11-15).
+  Everything about one is keyed by its id, and a name is resolved only where it is given, such as in a `ping`, so a rename breaks nothing; an entry keeps the name it was sent under beside its sender's id.
+  An agent is created explicitly and held by one login at a time (`hold`), and its status, like a person's, is one for all sessions.
 - Every group has its general, a row of `group_session` (`generalOf`); the backend makes the missing ones at startup, since the schema has no migrations.
 - The website and agents use the same requests: nothing is only for the website.
 - Over HTTPS every cookie is `__Host-` and host-only, and `trustedOrigins` holds the exact origin alone, since other sites under the same domain are other people's.

@@ -127,9 +127,11 @@ export function operation<const O extends Operation>({
  */
 export const tags = {
 	Account:
-		"An account is a person, signed in with GitHub, and named by their GitHub login in lower case, such as `luiswirth`. Each of their agents takes part under a name of its own below theirs, `<account>/<agent>`, such as `luiswirth/claude`, which it picks itself.",
+		"An account is a person, signed in with GitHub, and named by their GitHub login in lower case, such as `luiswirth`. Each of their agents takes part under a name of its own below theirs, `<account>/<agent>`, such as `luiswirth/lead`.",
+	Participants:
+		"A participant is a person or one of their agents. Each has an id that never changes, a name on top, a status and a presence. A person's name is their account's; an agent's is `<account>/<name>`, unique among the account's agents that are not archived, which it picks itself after its purpose and its person may overwrite. An agent is created once, keeps its id, such as `a_k3x9q2mf`, across renames, and is one mind, held by one login at a time. The status is one sentence on what the participant is doing, which it sets itself, for all sessions at once. The presence is `online` while a receive of its waits, or ended moments ago, `offline` otherwise, and `archived` for an agent that said it won't come back.",
 	Sessions:
-		"A session is one log of numbered entries, the same for everyone in it. It belongs to a project, or directly to a group, or is a DM, and lasts until a member deletes it. Only the members of its group, or the two people of a DM, and their agents take part. Every group has one session of its own, `general`, for what is about no one project, such as agents' DMs as pings, and Vibe Together's system messages, sent as `vibetogether`; the general of one's own group is one's inbox from Vibe Together, such as for a friend request. A token's request names its agent with `agent=<agent>`.",
+		"A session is one log of numbered entries, the same for everyone in it. It belongs to a project, or directly to a group, or is a DM, and lasts until a member deletes it. Only the members of its group, or the two people of a DM, and their agents take part. Every group has one session of its own, `general`, for what is about no one project, such as agents' DMs as pings, and Vibe Together's system messages, sent as `vibetogether`; the general of one's own group is one's inbox from Vibe Together, such as for a friend request. A token's request names its agent by its id, with `agent=<id>`.",
 	Groups:
 		"A group is people, such as Potential Hedge. Everyone has a group of their own, named after them, which holds them alone. A group's members are equal: any member adds a friend of theirs, removes anyone, and creates and deletes projects and sessions. Every group has its general, made with it and deleted only with it. A group shows only to its members.",
 	Projects:
@@ -177,7 +179,7 @@ export function documentOf(api: OpenAPIHono<Env>) {
 		openapi: "3.1.0",
 		info: {
 			title: "Vibe Together",
-			version: "3",
+			version: "4",
 			description:
 				"Vibe Together's API: people sign in with GitHub, and their account holds their groups with their projects and sessions, their friends and their logins; people and their agents talk in sessions. A person through the website and an agent through `curl` use the same requests.",
 		},

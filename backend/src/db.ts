@@ -102,13 +102,15 @@ export function createTables(): void {
 			PRIMARY KEY ("from", "to")
 		);
 
-		-- A session's log. "sender" is the name it was sent under, kept as it was.
+		-- A session's log. "sender" is the name it was sent under, kept as it was, and "participant"
+		-- the sender's id, which outlasts a rename; null for Vibe Together's own.
 		-- "text" is the payload as text where it is short text, and "payload" the payload otherwise.
 		CREATE TABLE IF NOT EXISTS entry (
 			session TEXT NOT NULL REFERENCES session(id) ON DELETE CASCADE,
 			n INTEGER NOT NULL,
 			time TEXT NOT NULL,
 			sender TEXT NOT NULL,
+			participant TEXT,
 			type TEXT NOT NULL,
 			size INTEGER NOT NULL,
 			filename TEXT,
@@ -116,21 +118,37 @@ export function createTables(): void {
 			payload BLOB,
 			PRIMARY KEY (session, n)
 		) WITHOUT ROWID;
-		-- A name in a session: the person, where "agent" is empty, or one of their agents.
-		-- "inside" while joined; "entry" its last join or leave. "holder" is the login that holds
-		-- an agent's name, null for the person, whose every login is theirs.
+		-- An agent of a person: "name" is its part below theirs, unique among their agents that
+		-- are not archived. "holder" is the login that holds it, since it is one mind at a time,
+		-- and "seen" when that login last acted as it. "archived" is when it said it won't come back.
+		CREATE TABLE IF NOT EXISTS agent (
+			id TEXT PRIMARY KEY,
+			user TEXT NOT NULL REFERENCES user(id) ON DELETE CASCADE,
+			name TEXT NOT NULL,
+			holder TEXT,
+			seen TEXT,
+			archived TEXT,
+			created TEXT NOT NULL
+		);
+		CREATE UNIQUE INDEX IF NOT EXISTS agent_name ON agent (user, name) WHERE archived IS NULL;
+		-- A participant's status, by its id: a person's user id, or an agent's.
+		CREATE TABLE IF NOT EXISTS status (
+			participant TEXT PRIMARY KEY,
+			user TEXT NOT NULL REFERENCES user(id) ON DELETE CASCADE,
+			text TEXT NOT NULL
+		);
+		-- A participant in a session, by its id ("id"), with its person ("user").
+		-- "inside" while joined; "entry" its last join or leave.
 		-- "since" is when its last receive ended, or when it joined.
 		CREATE TABLE IF NOT EXISTS participant (
 			session TEXT NOT NULL REFERENCES session(id) ON DELETE CASCADE,
+			id TEXT NOT NULL,
 			user TEXT NOT NULL REFERENCES user(id) ON DELETE CASCADE,
-			agent TEXT NOT NULL,
 			inside INTEGER NOT NULL,
 			entry INTEGER NOT NULL,
 			read INTEGER NOT NULL,
 			since TEXT NOT NULL,
-			holder TEXT,
-			status TEXT,
-			PRIMARY KEY (session, user, agent)
+			PRIMARY KEY (session, id)
 		);
 
 		-- A message that names a participant in its "ping" or "fyi", for it to receive in any session
@@ -138,15 +156,15 @@ export function createTables(): void {
 		-- message's own session, so that a session the person was pinged in shows as such till then.
 		CREATE TABLE IF NOT EXISTS mention (
 			id INTEGER PRIMARY KEY,
+			participant TEXT NOT NULL,
 			user TEXT NOT NULL REFERENCES user(id) ON DELETE CASCADE,
-			agent TEXT NOT NULL,
 			session TEXT NOT NULL REFERENCES session(id) ON DELETE CASCADE,
 			n INTEGER NOT NULL,
 			ping INTEGER NOT NULL,
 			delivered INTEGER NOT NULL DEFAULT 0,
 			created TEXT NOT NULL
 		);
-		CREATE INDEX IF NOT EXISTS mention_of ON mention (user, agent);
+		CREATE INDEX IF NOT EXISTS mention_of ON mention (participant);
 		CREATE INDEX IF NOT EXISTS mention_age ON mention (created);
 
 		-- What an agent changed in its person's account, for the person to see.

@@ -3,6 +3,7 @@
  * participants join, send to, receive from and leave (`transport.ts`).
  */
 import type { Context } from "hono";
+import { AgentQuery, participantOf, refused } from "./agents.ts";
 import {
 	db,
 	generalOf,
@@ -12,7 +13,6 @@ import {
 	sessionFor,
 	transaction,
 } from "./db.ts";
-import { isNamePart } from "./names.ts";
 import { type Env, type newApi, operation, z } from "./openapi.ts";
 import { reposOf } from "./repos.ts";
 import { body, count, done, Id, json, Login, Name, path } from "./schemas.ts";
@@ -22,7 +22,6 @@ import {
 	join,
 	leave,
 	maxPayload,
-	nameOf,
 	type Participant,
 	payloadOf,
 	presenceOf,
@@ -126,7 +125,7 @@ export function sessionJson(id: string, me: string): z.infer<typeof Session> {
 		pinged:
 			db
 				.prepare(
-					"SELECT 1 FROM mention WHERE user = ? AND agent = '' AND session = ? AND ping = 1",
+					"SELECT 1 FROM mention WHERE participant = ? AND session = ? AND ping = 1",
 				)
 				.get(me, id) !== undefined,
 		friend,
@@ -165,16 +164,15 @@ function whereOf(session: SessionAccess): string {
 
 const SessionPath = path({ id: Id("s", "session") });
 
-const Agent = z.string().optional().meta({
-	description:
-		"The agent's name, such as `claude`, which it picks itself: it takes part as `<account>/<agent>`. Required with a token, and left out by the person signed in in the browser.",
-});
-
 const Entry = z
 	.object({
 		n: z.number().meta({ description: "Its number in the log, from 1." }),
 		time: z.string().meta({ description: "When it was appended, in UTC." }),
 		from: z.string().meta({ description: "The name it was sent under." }),
+		fromId: z.string().optional().meta({
+			description:
+				"The id of the participant that sent it, which stays across renames; left out for Vibe Together's own.",
+		}),
 		type: z.string().meta({ description: "The payload's MIME type." }),
 		size: z.number().meta({ description: "The payload's length in bytes." }),
 		filename: z.string().optional(),
@@ -200,6 +198,10 @@ const Presence = z
 	.record(
 		z.string(),
 		z.object({
+			id: z.string().meta({
+				description:
+					"Its id, which never changes: a person's account's, or an agent's, as `a_…`.",
+			}),
 			read: z.number().meta({ description: "Its read position." }),
 			receiving: z.boolean().meta({
 				description: "Whether a receive of its is waiting right now.",
@@ -208,8 +210,7 @@ const Presence = z
 				description: "If not, when its last receive ended, or when it joined.",
 			}),
 			status: z.string().optional().meta({
-				description:
-					"One sentence on what it is doing, which it keeps current.",
+				description: "One sentence on what it is doing, which it sets itself.",
 			}),
 		}),
 	)
@@ -220,29 +221,14 @@ const Log = z
 	.object({ entries: z.array(Entry), presence: Presence })
 	.openapi("Log");
 
-/** The participant a request acts for: the person by a sign-in, one of their agents by a token. */
-function participantOf(
+/** The participant a request acts for in `session`, with its name. */
+function inSession(
 	c: Context<Env>,
 	session: string,
 	agent: string | undefined,
 ): { participant: Participant; name: string } {
-	const caller = c.var.caller;
-	if (caller.kind === "browser") {
-		if (agent !== undefined)
-			throw new Refused(
-				400,
-				"The person signed in in the browser takes part as themselves, with no agent.",
-			);
-		agent = "";
-	} else if (agent === undefined || !isNamePart(agent))
-		throw new Refused(
-			400,
-			"A token is only ever agents: name yours with agent=<agent>, in lower case, such as agent=claude.",
-		);
-	return {
-		participant: { session, user: caller.id, agent },
-		name: nameOf(caller.login, agent),
-	};
+	const { user, id, name } = participantOf(c, agent);
+	return { participant: { session, user, id }, name };
 }
 
 /** The session the caller takes part in, or 404. */
@@ -250,13 +236,6 @@ function accessible(c: Context<Env>, id: string): SessionAccess {
 	const session = sessionFor(id, c.var.caller.id);
 	if (!session) throw new Refused(404, "No such session.");
 	return session;
-}
-
-function refused(c: Context<Env>, error: unknown) {
-	if (!(error instanceof Refused)) throw error;
-	if (error.retryAfter !== undefined)
-		c.header("Retry-After", String(error.retryAfter));
-	return c.text(error.message, error.status);
 }
 
 /** A query's number, and its flag, as the operations take them. */
@@ -447,10 +426,10 @@ export function sessionOperations(api: ReturnType<typeof newApi>): void {
 			path: "/sessions/{id}/participants",
 			summary: "Join a session",
 			description:
-				"Joins a session, or joins again after leaving; joining while in does nothing. Joining is an entry in the log. An agent's name is held by one login at a time: another login takes it once its holder left, or has not received for an hour.",
+				"Joins a session, or joins again after leaving; joining while in does nothing. Joining is an entry in the log. An agent is one mind, held by one login at a time: another login takes it once its holder is revoked, or has not acted as it for an hour.",
 			request: {
 				...SessionPath,
-				query: z.object({ agent: Agent }).strict(),
+				query: z.object({ agent: AgentQuery }).strict(),
 			},
 			responses: {
 				200: json(
@@ -471,7 +450,7 @@ export function sessionOperations(api: ReturnType<typeof newApi>): void {
 		(c) => {
 			try {
 				const session = accessible(c, c.req.valid("param").id);
-				const { participant, name } = participantOf(
+				const { participant, name } = inSession(
 					c,
 					session.id,
 					c.req.valid("query").agent,
@@ -502,7 +481,7 @@ export function sessionOperations(api: ReturnType<typeof newApi>): void {
 				"Leaves a session, which is an entry in the log; leaving twice does nothing. A receive still waiting returns.",
 			request: {
 				...SessionPath,
-				query: z.object({ agent: Agent }).strict(),
+				query: z.object({ agent: AgentQuery }).strict(),
 			},
 			responses: {
 				200: json(
@@ -518,7 +497,7 @@ export function sessionOperations(api: ReturnType<typeof newApi>): void {
 		(c) => {
 			try {
 				const session = accessible(c, c.req.valid("param").id);
-				const { participant, name } = participantOf(
+				const { participant, name } = inSession(
 					c,
 					session.id,
 					c.req.valid("query").agent,
@@ -564,12 +543,12 @@ export function sessionOperations(api: ReturnType<typeof newApi>): void {
 			method: "post",
 			path: "/sessions/{id}/entries",
 			summary: "Send an entry",
-			description: `Appends an entry with the request's body as its payload, of at most ${maxPayload / 1024 / 1024} MB, and its \`Content-Type\` as its type, \`text/plain; charset=utf-8\` where none is given. A message is \`text/plain\`, \`text/markdown\`, an image or a file; a \`ping\` parameter of its type names whom it wakes, separated by spaces, or \`*\` for everyone, such as \`text/markdown; ping="ben ben/claude"\`: left out, it pings everyone in the session, and empty, no one; left out, it pings only those in the session as it is sent, and who joins later gets it, but not as a ping; \`*\` notifies every participant at that time wherever they receive, as naming each would. An \`fyi\` parameter names whom it tells without waking them. A name in either reaches that person or agent wherever it receives, from any session it sees, even one it is not in. A status, \`application/vnd.vibetogether.chat.status+json\` as \`{"text": "<one sentence>"}\`, says what the sender is doing, until its next one, and pings no one.`,
+			description: `Appends an entry with the request's body as its payload, of at most ${maxPayload / 1024 / 1024} MB, and its \`Content-Type\` as its type, \`text/plain; charset=utf-8\` where none is given. A message is \`text/plain\`, \`text/markdown\`, an image or a file; a \`ping\` parameter of its type names whom it wakes, separated by spaces, or \`*\` for everyone, such as \`text/markdown; ping="ben ben/claude"\`: left out, it pings everyone in the session, and empty, no one; left out, it pings only those in the session as it is sent, and who joins later gets it, but not as a ping; \`*\` notifies every participant at that time wherever they receive, as naming each would. An \`fyi\` parameter names whom it tells without waking them. A name in either reaches whom it names as the message is sent, wherever they receive, from any session they see, even one they are not in.`,
 			request: {
 				...SessionPath,
 				query: z
 					.object({
-						agent: Agent,
+						agent: AgentQuery,
 						filename: z
 							.string()
 							.max(256)
@@ -602,7 +581,7 @@ export function sessionOperations(api: ReturnType<typeof newApi>): void {
 			try {
 				const session = accessible(c, c.req.valid("param").id);
 				const query = c.req.valid("query");
-				const { participant, name } = participantOf(c, session.id, query.agent);
+				const { participant, name } = inSession(c, session.id, query.agent);
 				const given = c.req.header("content-type");
 				// curl's own default for --data-binary counts as none, so that it sends text.
 				const type =
@@ -649,7 +628,7 @@ export function sessionOperations(api: ReturnType<typeof newApi>): void {
 				...SessionPath,
 				query: z
 					.object({
-						agent: Agent,
+						agent: AgentQuery,
 						after: Count.optional().meta({
 							description:
 								"Receives after entry number `after` instead, such as again after a receive was cut off.",
@@ -675,11 +654,10 @@ export function sessionOperations(api: ReturnType<typeof newApi>): void {
 			try {
 				const session = accessible(c, c.req.valid("param").id);
 				const query = c.req.valid("query");
-				const { participant, name } = participantOf(c, session.id, query.agent);
+				const { participant } = inSession(c, session.id, query.agent);
 				const answer: Answer = await receive(
 					participant,
 					c.var.caller.loginId,
-					name,
 					{
 						...(query.after !== undefined && { after: query.after }),
 						...(query.wait !== undefined && { wait: query.wait }),

@@ -9,11 +9,10 @@ import { lasts } from "./caller.ts";
 import { written } from "./changes.ts";
 import { config } from "./config.ts";
 import { db, sessionFor, transaction } from "./db.ts";
-import { isNamePart } from "./names.ts";
+import { participantByName } from "./participants.ts";
 
 export const joinType = "application/vnd.vibetogether.join";
 export const leaveType = "application/vnd.vibetogether.leave";
-export const statusType = "application/vnd.vibetogether.chat.status+json";
 
 /** The most a payload holds. */
 export const maxPayload = 10 * 1024 * 1024;
@@ -21,28 +20,30 @@ export const maxPayload = 10 * 1024 * 1024;
 const maxInline = 64 * 1024;
 /** About the most one answer carries, of the entries' inline text; it always carries one. */
 const maxAnswer = 1024 * 1024;
-/** How long a name an agent holds stays its login's after its last receive, unless it leaves. */
+/** How long an agent stays its login's after that login last acted as it, while no receive of its waits. */
 const holdFor = 3600_000;
-/** How long an agent stays online after its last receive ended, so that receiving again keeps it. */
+/** How long a participant stays online after its last receive ended, so that receiving again keeps it. */
 const onlineFor = 60_000;
 
-/** A participant: a person, where `agent` is empty, or one of their agents. */
-export type Participant = { session: string; user: string; agent: string };
+/**
+ * A participant in a session: `id` is the person's own, which is `user`, or one of their agents'.
+ */
+export type Participant = { session: string; user: string; id: string };
 
 type ParticipantRow = Participant & {
 	login: string;
+	agentName: string | null;
 	inside: number;
 	entry: number;
 	read: number;
 	since: string;
-	holder: string | null;
-	status: string | null;
 };
 
 export type Entry = {
 	n: number;
 	time: string;
 	from: string;
+	fromId?: string;
 	type: string;
 	size: number;
 	filename?: string;
@@ -53,6 +54,7 @@ type EntryRow = {
 	n: number;
 	time: string;
 	sender: string;
+	participant: string | null;
 	type: string;
 	size: number;
 	filename: string | null;
@@ -61,7 +63,13 @@ type EntryRow = {
 
 export type Presence = Record<
 	string,
-	{ read: number; receiving: boolean; since?: string; status?: string }
+	{
+		id: string;
+		read: number;
+		receiving: boolean;
+		since?: string;
+		status?: string;
+	}
 >;
 
 /** An entry as a receive answers it: whether it pings, and the session it was sent in, where that is another. */
@@ -92,18 +100,19 @@ export class Refused extends Error {
 	}
 }
 
-export function nameOf(login: string, agent: string): string {
-	return agent ? `${login}/${agent}` : login;
+const participants = `SELECT p.*, u.login, a.name AS agentName FROM participant p
+	JOIN user u ON u.id = p.user LEFT JOIN agent a ON a.id = p.id`;
+
+function rowName(row: ParticipantRow): string {
+	return row.agentName === null ? row.login : `${row.login}/${row.agentName}`;
 }
 
-const participants = `SELECT p.*, u.login FROM participant p JOIN user u ON u.id = p.user`;
-
-function participantRow(p: Participant): ParticipantRow | undefined {
+function participantRow(
+	p: Pick<Participant, "session" | "id">,
+): ParticipantRow | undefined {
 	return db
-		.prepare(
-			`${participants} WHERE p.session = ? AND p.user = ? AND p.agent = ?`,
-		)
-		.get(p.session, p.user, p.agent) as ParticipantRow | undefined;
+		.prepare(`${participants} WHERE p.session = ? AND p.id = ?`)
+		.get(p.session, p.id) as ParticipantRow | undefined;
 }
 
 function entryJson(row: EntryRow): Entry {
@@ -111,6 +120,7 @@ function entryJson(row: EntryRow): Entry {
 		n: row.n,
 		time: row.time,
 		from: row.sender,
+		...(row.participant !== null && { fromId: row.participant }),
 		type: row.type,
 		size: row.size,
 		...(row.filename !== null && { filename: row.filename }),
@@ -158,42 +168,32 @@ function namesOf(type: string, parameter: string): string[] {
  * out, a message pings everyone, and an entry of an extension, of a `vnd.` type, no one.
  */
 export function pings(type: string, name: string): boolean {
+	return pingsEveryone(type) || namesOf(type, "ping").includes(name);
+}
+
+/** Whether `entry` pings everyone in its session: its `ping` is `*`, or left out of a message. */
+function pingsEveryone(type: string): boolean {
 	if (parameterOf(type, "ping") === undefined) return isMessage(type);
-	const names = namesOf(type, "ping");
-	return names.includes("*") || names.includes(name);
+	return namesOf(type, "ping").includes("*");
 }
 
 /** The most names one message lists in its `ping` and `fyi` together. */
 const maxNamed = 32;
 
-/** A participant a name stands for, as `login` or `login/agent`, where it is an account's. */
-function participantByName(
-	name: string,
-): { user: string; agent: string } | undefined {
-	const [login, agent = "", ...rest] = name.split("/");
-	if (!login || rest.length || (name.includes("/") && !isNamePart(agent)))
-		return undefined;
-	const user = db.prepare("SELECT id FROM user WHERE login = ?").get(login) as
-		| { id: string }
-		| undefined;
-	return user && { user: user.id, agent };
-}
-
 /**
  * Notes entry `n` of `session` for every name its `ping` or `fyi` lists, and for `*` every
- * participant, which sees the session, so that it reaches them in any session they receive in. Returns the participants
- * noted, and the names that see it not.
+ * participant, which sees the session, so that it reaches them in any session they receive in.
+ * A name stands for whom it names as the entry is sent. Returns the participants noted, and the
+ * names that see the session not.
  */
 function mention(
 	session: string,
 	n: number,
-	sender: string,
+	sender: string | null,
 	type: string,
-): { noted: { user: string; agent: string }[]; unreached: string[] } {
-	const noted: { user: string; agent: string }[] = [];
+): { noted: { user: string; id: string }[]; unreached: string[] } {
 	const unreached: string[] = [];
-	if (!isMessage(type)) return { noted, unreached };
-	const now = new Date();
+	if (!isMessage(type)) return { noted: [], unreached };
 	const named = namesOf(type, "ping");
 	const ping = new Set(named.filter((name) => name !== "*"));
 	const fyi = [
@@ -204,57 +204,58 @@ function mention(
 			400,
 			`A message names at most ${maxNamed} in its ping and fyi together.`,
 		);
+	const reached = new Map<string, { user: string; ping: boolean }>();
+	for (const name of [...ping, ...fyi]) {
+		const p = participantByName(name);
+		if (p?.id === sender) continue;
+		if (!p || !sessionFor(session, p.user)) {
+			unreached.push(name);
+			continue;
+		}
+		reached.set(p.id, {
+			user: p.user,
+			ping: ping.has(name) || reached.get(p.id)?.ping === true,
+		});
+	}
 	// An explicit ping to everyone notifies every participant wherever they receive, as naming each would.
-	const everyone = new Set<string>();
 	if (named.includes("*"))
 		for (const row of db
 			.prepare(`${participants} WHERE p.session = ? AND p.inside = 1`)
-			.all(session) as ParticipantRow[]) {
-			const name = nameOf(row.login, row.agent);
-			if (!ping.has(name)) everyone.add(name);
-			ping.add(name);
-		}
-	for (const name of [...ping, ...fyi.filter((name) => !ping.has(name))]) {
-		if (name === sender) continue;
-		const p = participantByName(name);
-		if (!p || !sessionFor(session, p.user)) {
-			// Only a name the sender gave is reported, not one `*` stood for.
-			if (!everyone.has(name)) unreached.push(name);
-			continue;
-		}
+			.all(session) as ParticipantRow[])
+			if (row.id !== sender)
+				reached.set(row.id, { user: row.user, ping: true });
+	const now = new Date().toISOString();
+	for (const [id, { user, ping }] of reached)
 		db.prepare(
-			"INSERT INTO mention (user, agent, session, n, ping, created) VALUES (?, ?, ?, ?, ?, ?)",
-		).run(
-			p.user,
-			p.agent,
-			session,
-			n,
-			ping.has(name) ? 1 : 0,
-			now.toISOString(),
-		);
-		noted.push(p);
-	}
-	return { noted, unreached };
+			"INSERT INTO mention (participant, user, session, n, ping, created) VALUES (?, ?, ?, ?, ?, ?)",
+		).run(id, user, session, n, ping ? 1 : 0, now);
+	return {
+		noted: [...reached].map(([id, { user }]) => ({ user, id })),
+		unreached,
+	};
 }
 
 /** Who is in the session, with their read position, whether they are receiving, and their status. */
 export function presenceOf(session: string): Presence {
 	const rows = db
 		.prepare(
-			`${participants} WHERE p.session = ? AND p.inside = 1 ORDER BY u.login, p.agent`,
+			`SELECT p.*, u.login, a.name AS agentName, st.text FROM participant p
+			 JOIN user u ON u.id = p.user LEFT JOIN agent a ON a.id = p.id
+			 LEFT JOIN status st ON st.participant = p.id
+			 WHERE p.session = ? AND p.inside = 1 ORDER BY u.login, a.name`,
 		)
-		.all(session) as ParticipantRow[];
+		.all(session) as (ParticipantRow & { text: string | null })[];
 	const presence: Presence = {};
 	for (const row of rows) {
 		const receiving = [...waiting].some(
-			(w) =>
-				w.session === session && w.user === row.user && w.agent === row.agent,
+			(w) => !w.reads && w.session === session && w.id === row.id,
 		);
-		presence[nameOf(row.login, row.agent)] = {
+		presence[rowName(row)] = {
+			id: row.id,
 			read: row.read,
 			receiving,
 			...(!receiving && { since: row.since }),
-			...(row.status && { status: row.status }),
+			...(row.text !== null && { status: row.text }),
 		};
 	}
 	return presence;
@@ -263,12 +264,11 @@ export function presenceOf(session: string): Presence {
 /** A receive or a read that waits: a participant's, or a member's reading. */
 type Waiter = {
 	session: string;
-	/** The participant's, where it is a receive; a read is no participant. */
+	/** The participant's person and id, where it is a receive; a read is no participant. */
 	user: string;
-	agent: string;
+	id: string;
 	reads: boolean;
 	login: string;
-	name: string;
 	wake: Wake;
 	own: boolean;
 	after: number;
@@ -296,67 +296,65 @@ type MentionRow = EntryRow & {
 
 const waiting = new Set<Waiter>();
 
-/** When each agent's last receive started or ended, keyed by `keyOf`. */
-const lastReceived = new Map<
-	string,
-	{ user: string; agent: string; time: number }
->();
+/** When each participant's last receive started or ended, by its id. */
+const lastReceived = new Map<string, { user: string; time: number }>();
 
-function keyOf(user: string, agent: string): string {
-	return JSON.stringify([user, agent]);
-}
-
-/** Whether the agent is online: a receive of its waits, or ended moments ago. */
-function isOnline(user: string, agent: string): boolean {
-	const last = lastReceived.get(keyOf(user, agent));
+/** Whether the participant is online: a receive of its waits, or ended moments ago. */
+function isOnline(id: string): boolean {
+	const last = lastReceived.get(id);
 	if (last && Date.now() - last.time < onlineFor) return true;
-	for (const w of waiting)
-		if (!w.reads && w.user === user && w.agent === agent) return true;
+	for (const w of waiting) if (!w.reads && w.id === id) return true;
 	return false;
 }
 
-/** Every agent online now, each with the sessions it receives in. */
-export function onlineAgents(): {
+/**
+ * A participant's presence: `online` while a receive of its waits, or ended moments ago,
+ * `offline` otherwise. An agent is `asleep` once a watch on it can wait, which isn't built yet.
+ */
+export function presenceOfParticipant(id: string): "online" | "offline" {
+	return isOnline(id) ? "online" : "offline";
+}
+
+/** Every participant online now, each with the sessions it receives in. */
+export function onlineParticipants(): {
 	user: string;
-	agent: string;
+	id: string;
 	sessions: string[];
 }[] {
 	const online = new Map<
 		string,
-		{ user: string; agent: string; sessions: string[] }
+		{ user: string; id: string; sessions: string[] }
 	>();
 	const now = Date.now();
-	for (const [key, { user, agent, time }] of lastReceived)
-		if (now - time < onlineFor) online.set(key, { user, agent, sessions: [] });
+	for (const [id, { user, time }] of lastReceived)
+		if (now - time < onlineFor) online.set(id, { user, id, sessions: [] });
 	for (const w of waiting) {
-		if (w.reads || !w.agent) continue;
-		const key = keyOf(w.user, w.agent);
-		const agent = online.get(key) ?? {
-			user: w.user,
-			agent: w.agent,
-			sessions: [],
-		};
-		if (!agent.sessions.includes(w.session)) agent.sessions.push(w.session);
-		online.set(key, agent);
+		if (w.reads) continue;
+		const p = online.get(w.id) ?? { user: w.user, id: w.id, sessions: [] };
+		if (!p.sessions.includes(w.session)) p.sessions.push(w.session);
+		online.set(w.id, p);
 	}
 	return [...online.values()];
 }
 
 /**
- * Notes that a receive of the agent started or ended: what shows who is online changes where it
- * comes online now, or once it stays offline.
+ * Notes that a receive of the participant started or ended: what shows who is online changes
+ * where it comes online now, or once it stays offline.
  */
-function received(user: string, agent: string): void {
-	if (!agent) return;
-	const was = isOnline(user, agent);
-	const key = keyOf(user, agent);
-	lastReceived.set(key, { user, agent, time: Date.now() });
+function received(user: string, id: string): void {
+	const was = isOnline(id);
+	lastReceived.set(id, { user, time: Date.now() });
+	if (id !== user)
+		db.prepare("UPDATE agent SET seen = ? WHERE id = ?").run(
+			new Date().toISOString(),
+			id,
+		);
 	if (!was) written();
 	setTimeout(() => {
-		const last = lastReceived.get(key);
+		const last = lastReceived.get(id);
 		if (last && Date.now() - last.time >= onlineFor) {
-			lastReceived.delete(key);
-			if (!isOnline(user, agent)) written();
+			lastReceived.delete(id);
+			if (!isOnline(id)) written();
 		}
 	}, onlineFor + 100).unref();
 }
@@ -366,14 +364,11 @@ function received(user: string, agent: string): void {
  * answer's worth, and for a receive the messages of other sessions that name it.
  */
 function entriesFor(
-	w: Pick<
-		Waiter,
-		"session" | "user" | "agent" | "name" | "own" | "reads" | "after"
-	>,
+	w: Pick<Waiter, "session" | "user" | "id" | "own" | "reads" | "after">,
 ): Found {
 	const rows = db
 		.prepare(
-			"SELECT n, time, sender, type, size, filename, text FROM entry WHERE session = ? AND n > ? ORDER BY n LIMIT 1000",
+			"SELECT n, time, sender, participant, type, size, filename, text FROM entry WHERE session = ? AND n > ? ORDER BY n LIMIT 1000",
 		)
 		.all(w.session, w.after) as EntryRow[];
 	const entries: EntryRow[] = [];
@@ -383,7 +378,7 @@ function entriesFor(
 		bytes += (row.text?.length ?? 0) + 200;
 		if (entries.length && bytes > maxAnswer) break;
 		covered = row.n;
-		if (!w.reads && !w.own && row.sender === w.name) continue;
+		if (!w.reads && !w.own && row.participant === w.id) continue;
 		entries.push(row);
 	}
 	return {
@@ -396,11 +391,11 @@ function entriesFor(
 
 /**
  * Which entries of its session ping a participant: one that names it in its `ping`, until it
- * received it in another session; any other that pings it, such as by `*`, only where it was in
- * the session when it was sent, so that who joins later gets earlier entries, but not as pings.
+ * received it in another session; one that pings everyone, only where it was in the session when
+ * it was sent, so that who joins later gets earlier entries, but not as pings.
  */
 function pingingOf(
-	w: Pick<Waiter, "session" | "user" | "agent" | "name" | "after">,
+	w: Pick<Waiter, "session" | "id" | "after">,
 ): (row: EntryRow) => boolean {
 	// It is in since its last join, where it is in; for an entry before that, whether it was in
 	// comes from its joins and leaves in the log, read only where needed.
@@ -411,47 +406,46 @@ function pingingOf(
 		if (n > since) return true;
 		turns ??= db
 			.prepare(
-				"SELECT n, type FROM entry WHERE session = ? AND sender = ? AND type IN (?, ?) ORDER BY n",
+				"SELECT n, type FROM entry WHERE session = ? AND participant = ? AND type IN (?, ?) ORDER BY n",
 			)
-			.all(w.session, w.name, joinType, leaveType) as {
+			.all(w.session, w.id, joinType, leaveType) as {
 			n: number;
 			type: string;
 		}[];
 		return turns.findLast((turn) => turn.n < n)?.type === joinType;
 	};
+	// Whom a name stood for was decided as it was sent, so a rename since changes nothing.
 	const named = new Map(
 		(
 			db
 				.prepare(
-					"SELECT n, delivered FROM mention WHERE user = ? AND agent = ? AND session = ? AND ping = 1 AND n > ?",
+					"SELECT n, delivered FROM mention WHERE participant = ? AND session = ? AND ping = 1 AND n > ?",
 				)
-				.all(w.user, w.agent, w.session, w.after) as {
+				.all(w.id, w.session, w.after) as {
 				n: number;
 				delivered: number;
 			}[]
 		).map((row) => [row.n, row.delivered === 1]),
 	);
 	return (row) => {
-		if (!pings(row.type, w.name)) return false;
 		const delivered = named.get(row.n);
-		return delivered === undefined ? wasIn(row.n) : !delivered;
+		if (delivered !== undefined) return !delivered;
+		return pingsEveryone(row.type) && wasIn(row.n);
 	};
 }
 
 /** The messages of sessions other than the waiter's that name it, which it still sees. */
-function mentionsOf(
-	w: Pick<Waiter, "session" | "user" | "agent">,
-): MentionRow[] {
+function mentionsOf(w: Pick<Waiter, "session" | "user" | "id">): MentionRow[] {
 	const rows = db
 		.prepare(
 			`SELECT m.id, m.session, m.ping AS pinged, s.name AS sessionName,
-			 e.n, e.time, e.sender, e.type, e.size, e.filename, e.text
+			 e.n, e.time, e.sender, e.participant, e.type, e.size, e.filename, e.text
 			 FROM mention m JOIN entry e ON e.session = m.session AND e.n = m.n
 			 JOIN session s ON s.id = m.session
-			 WHERE m.user = ? AND m.agent = ? AND m.session != ? AND m.delivered = 0
+			 WHERE m.participant = ? AND m.session != ? AND m.delivered = 0
 			 ORDER BY m.id LIMIT 100`,
 		)
-		.all(w.user, w.agent, w.session) as MentionRow[];
+		.all(w.id, w.session) as MentionRow[];
 	return rows.filter((row) => {
 		if (sessionFor(row.session, w.user)) return true;
 		db.prepare("DELETE FROM mention WHERE id = ?").run(row.id);
@@ -514,13 +508,10 @@ function notify(session: string, presenceChanged: boolean): void {
 }
 
 /** Wakes the receives of `named` in other sessions than `session` that have something now. */
-function notifyNamed(
-	session: string,
-	named: { user: string; agent: string }[],
-): void {
+function notifyNamed(session: string, named: { id: string }[]): void {
 	for (const w of [...waiting]) {
 		if (w.reads || w.session === session) continue;
-		if (!named.some((p) => p.user === w.user && p.agent === w.agent)) continue;
+		if (!named.some((p) => p.id === w.id)) continue;
 		const found = entriesFor(w);
 		if (ready(w, found)) w.end(found, presenceOf(w.session));
 	}
@@ -546,7 +537,7 @@ export function sessionGone(session: string): void {
 	);
 }
 
-/** Checks that the caller may still be in `session`, as a member, and holds the participant's name. */
+/** Checks that the caller may still be in `session`, as a member, and holds its agent. */
 function stillIn(w: Waiter): Refused | undefined {
 	if (!lasts(w.user, w.login)) return new Refused(403, "The login is revoked.");
 	if (!sessionFor(w.session, w.user))
@@ -554,8 +545,14 @@ function stillIn(w: Waiter): Refused | undefined {
 	if (w.reads) return undefined;
 	const row = participantRow(w);
 	if (!row?.inside) return new Refused(403, "You left the session.");
-	if (row.holder !== null && row.holder !== w.login)
-		return new Refused(403, "Another login took this name.");
+	if (w.id !== w.user) {
+		const agent = db
+			.prepare("SELECT holder, archived FROM agent WHERE id = ?")
+			.get(w.id) as { holder: string | null; archived: string | null };
+		if (agent.archived) return new Refused(403, "The agent is archived.");
+		if (agent.holder !== w.login)
+			return new Refused(403, "Another login took this agent.");
+	}
 	return undefined;
 }
 
@@ -568,18 +565,55 @@ setInterval(() => {
 	}
 }, 5000).unref();
 
-/** The participant as `login` acts for it, or why not: joined, and its name held by `login`. */
-function inside(p: Participant, login: string): ParticipantRow {
+/**
+ * Has `login` act as the agent `id` of `user`, which is one mind at a time, so held by one login:
+ * another login takes it once its holder is revoked, or has neither acted as it for an hour nor
+ * has a receive of it waiting. A person is no agent, and every login of theirs is them.
+ */
+export function hold(user: string, id: string, login: string): void {
+	if (id === user) return;
+	const agent = db
+		.prepare(
+			"SELECT holder, seen, archived FROM agent WHERE id = ? AND user = ?",
+		)
+		.get(id, user) as
+		| { holder: string | null; seen: string | null; archived: string | null }
+		| undefined;
+	if (!agent) throw new Refused(404, "No such agent.");
+	if (agent.archived)
+		throw new Refused(
+			403,
+			"This agent is archived: it receives and sends no more.",
+		);
+	const other = agent.holder !== null && agent.holder !== login;
+	if (other) {
+		const busy = [...waiting].some((w) => !w.reads && w.id === id);
+		const recent =
+			agent.seen !== null && Date.now() - Date.parse(agent.seen) < holdFor;
+		if (lasts(user, agent.holder as string) && (busy || recent))
+			throw new Refused(
+				409,
+				"Another login holds this agent, which is one mind at a time: it takes it once that login is revoked, or has not acted as it for an hour.",
+			);
+	}
+	db.prepare("UPDATE agent SET holder = ?, seen = ? WHERE id = ?").run(
+		login,
+		new Date().toISOString(),
+		id,
+	);
+	if (other)
+		for (const w of [...waiting])
+			if (!w.reads && w.id === id && w.login !== login)
+				w.end(new Refused(403, "Another login took this agent."));
+}
+
+/** The participant, joined, or why not. */
+function inside(p: Participant): ParticipantRow {
 	const row = participantRow(p);
 	if (!row?.inside)
 		throw new Refused(
 			403,
 			"Join the session first, or join again after leaving.",
-		);
-	if (row.holder !== null && row.holder !== login)
-		throw new Refused(
-			403,
-			"Another login took this name: join again to take it back, or take another.",
 		);
 	return row;
 }
@@ -615,9 +649,10 @@ function adds(user: string, bytes: number): void {
 	count.bytes += bytes;
 }
 
+/** Appends an entry from `sender`, by its name and its participant's id, null for Vibe Together's own. */
 function append(
 	session: string,
-	sender: string,
+	sender: { name: string; id: string | null },
 	type: string,
 	payload: Uint8Array,
 	filename: string | null,
@@ -625,12 +660,13 @@ function append(
 	const n = lastOf(session) + 1;
 	const text = inlineText(type, payload);
 	db.prepare(
-		"INSERT INTO entry (session, n, time, sender, type, size, filename, text, payload) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+		"INSERT INTO entry (session, n, time, sender, participant, type, size, filename, text, payload) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
 	).run(
 		session,
 		n,
 		new Date().toISOString().replace(/\.\d+Z$/, "Z"),
-		sender,
+		sender.name,
+		sender.id,
 		type,
 		payload.length,
 		filename,
@@ -655,64 +691,35 @@ function inlineText(type: string, payload: Uint8Array): string | undefined {
 	}
 }
 
-/**
- * Joins `p` as `login`, or joins again; joining while in does nothing. An agent's name is held
- * by one login at a time: another login takes it once its holder left, was revoked, or has not
- * received for an hour.
- */
+/** Joins `p` as `login`, under `name`, or joins again; joining while in does nothing. */
 export function join(
 	p: Participant,
 	login: string,
 	name: string,
 ): { n: number; name: string; read: number } {
-	const holder = p.agent ? login : null;
+	hold(p.user, p.id, login);
 	const result = transaction(() => {
 		const row = participantRow(p);
-		if (row?.inside) {
-			if (row.holder === null || row.holder === login)
-				return { n: row.entry, read: row.read, took: false };
-			const busy = [...waiting].some(
-				(w) =>
-					!w.reads &&
-					w.session === p.session &&
-					w.user === p.user &&
-					w.agent === p.agent,
-			);
-			const recent = Date.now() - Date.parse(row.since) < holdFor;
-			if (lasts(p.user, row.holder) && (busy || recent))
-				throw new Refused(
-					409,
-					`${name} is held by another login: pick another name, such as ${name}-2.`,
-				);
-			db.prepare(
-				"UPDATE participant SET holder = ? WHERE session = ? AND user = ? AND agent = ?",
-			).run(holder, p.session, p.user, p.agent);
-			return { n: row.entry, read: row.read, took: true };
-		}
-		const n = append(p.session, name, joinType, new Uint8Array(), null);
-		const now = new Date().toISOString();
-		db.prepare(
-			`INSERT INTO participant (session, user, agent, inside, entry, read, since, holder)
-			 VALUES (?, ?, ?, 1, ?, ?, ?, ?)
-			 ON CONFLICT DO UPDATE SET inside = 1, entry = excluded.entry, since = excluded.since, holder = excluded.holder`,
-		).run(p.session, p.user, p.agent, n, row?.read ?? 0, now, holder);
-		return { n, read: row?.read ?? 0, took: false };
-	});
-	if (result.took)
-		endWaiters(
+		if (row?.inside) return { n: row.entry, read: row.read };
+		const n = append(
 			p.session,
-			(w) =>
-				!w.reads &&
-				w.user === p.user &&
-				w.agent === p.agent &&
-				w.login !== login,
-			() => new Refused(403, "Another login took this name."),
+			{ name, id: p.id },
+			joinType,
+			new Uint8Array(),
+			null,
 		);
+		db.prepare(
+			`INSERT INTO participant (session, id, user, inside, entry, read, since)
+			 VALUES (?, ?, ?, 1, ?, ?, ?)
+			 ON CONFLICT DO UPDATE SET inside = 1, entry = excluded.entry, since = excluded.since`,
+		).run(p.session, p.id, p.user, n, row?.read ?? 0, new Date().toISOString());
+		return { n, read: row?.read ?? 0 };
+	});
 	notify(p.session, true);
 	return { n: result.n, name, read: result.read };
 }
 
-/** Leaves: the name's receives still waiting return, on every login. */
+/** Leaves: the participant's receives still waiting there return, on every login. */
 export function leave(
 	p: Participant,
 	login: string,
@@ -720,27 +727,31 @@ export function leave(
 ): { n: number } {
 	const row = participantRow(p);
 	if (row && !row.inside) return { n: row.entry };
-	inside(p, login);
+	hold(p.user, p.id, login);
+	inside(p);
+	return leaveAs(p, name);
+}
+
+function leaveAs(p: Participant, name: string): { n: number } {
 	const n = transaction(() => {
-		const n = append(p.session, name, leaveType, new Uint8Array(), null);
+		const n = append(
+			p.session,
+			{ name, id: p.id },
+			leaveType,
+			new Uint8Array(),
+			null,
+		);
 		db.prepare(
-			"UPDATE participant SET inside = 0, entry = ?, holder = NULL, status = NULL, since = ? WHERE session = ? AND user = ? AND agent = ?",
-		).run(n, new Date().toISOString(), p.session, p.user, p.agent);
+			"UPDATE participant SET inside = 0, entry = ?, since = ? WHERE session = ? AND id = ?",
+		).run(n, new Date().toISOString(), p.session, p.id);
 		return n;
 	});
-	endWaiters(
-		p.session,
-		(w) => !w.reads && w.user === p.user && w.agent === p.agent,
-		entriesFor,
-	);
+	endWaiters(p.session, (w) => !w.reads && w.id === p.id, entriesFor);
 	notify(p.session, true);
 	return { n };
 }
 
-/**
- * Sends an entry, and returns its number, and the names its `ping` or `fyi` lists that don't see
- * the session. A status sets the sender's status as well.
- */
+/** Sends an entry, and returns its number, and the names its `ping` or `fyi` lists that don't see the session. */
 export function send(
 	p: Participant,
 	login: string,
@@ -749,37 +760,50 @@ export function send(
 	payload: Uint8Array,
 	filename: string | null,
 ): { n: number; unreached?: string[] } {
-	inside(p, login);
+	hold(p.user, p.id, login);
+	inside(p);
 	if (payload.length > maxPayload)
 		throw new Refused(
 			413,
 			`A payload is at most ${maxPayload / 1024 / 1024} MB.`,
 		);
-	let status: string | null | undefined;
-	if (type.split(";")[0]?.trim().toLowerCase() === statusType) {
-		const text = (() => {
-			try {
-				return JSON.parse(new TextDecoder().decode(payload))?.text;
-			} catch {
-				return undefined;
-			}
-		})();
-		if (typeof text !== "string")
-			throw new Refused(400, 'A status is {"text": "<one sentence>"}.');
-		status = text.trim().slice(0, 500) || null;
-	}
 	adds(p.user, payload.length);
 	const { n, noted, unreached } = transaction(() => {
-		const n = append(p.session, name, type, payload, filename);
-		if (status !== undefined)
-			db.prepare(
-				"UPDATE participant SET status = ? WHERE session = ? AND user = ? AND agent = ?",
-			).run(status, p.session, p.user, p.agent);
-		return { n, ...mention(p.session, n, name, type) };
+		const n = append(p.session, { name, id: p.id }, type, payload, filename);
+		return { n, ...mention(p.session, n, p.id, type) };
 	});
-	notify(p.session, status !== undefined);
+	notify(p.session, false);
 	notifyNamed(p.session, noted);
 	return { n, ...(unreached.length && { unreached }) };
+}
+
+/** Shows a change to the participant, such as to its name or status, in every session it is in. */
+export function participantChanged(id: string): void {
+	for (const { session } of db
+		.prepare("SELECT session FROM participant WHERE id = ? AND inside = 1")
+		.all(id) as { session: string }[])
+		notify(session, true);
+}
+
+/**
+ * Archives the agent `id` of `user`, which said it won't come back: it leaves every session it is
+ * in, under `name`, and receives and sends no more, and its name is free for another.
+ */
+export function archive(user: string, id: string, name: string): void {
+	for (const { session } of db
+		.prepare("SELECT session FROM participant WHERE id = ? AND inside = 1")
+		.all(id) as { session: string }[])
+		leaveAs({ session, user, id }, name);
+	transaction(() => {
+		db.prepare(
+			"UPDATE agent SET archived = ?, holder = NULL WHERE id = ? AND user = ?",
+		).run(new Date().toISOString(), id, user);
+		db.prepare("DELETE FROM status WHERE participant = ?").run(id);
+		db.prepare("DELETE FROM mention WHERE participant = ?").run(id);
+	});
+	for (const w of [...waiting])
+		if (!w.reads && w.id === id)
+			w.end(new Refused(403, "The agent is archived."));
 }
 
 /**
@@ -816,12 +840,12 @@ export function announce(
 	const { noted } = transaction(() => {
 		const n = append(
 			session,
-			systemName,
+			{ name: systemName, id: null },
 			type,
 			new TextEncoder().encode(text),
 			null,
 		);
-		return mention(session, n, systemName, type);
+		return mention(session, n, null, type);
 	});
 	notify(session, false);
 	notifyNamed(session, noted);
@@ -835,15 +859,14 @@ export function announce(
 export function receive(
 	p: Participant,
 	login: string,
-	name: string,
 	options: { after?: number; wait?: number; wake: Wake; own: boolean },
 	signal: AbortSignal,
 ): Promise<Answer> {
-	const row = inside(p, login);
+	hold(p.user, p.id, login);
+	const row = inside(p);
 	endWaiters(
 		p.session,
-		(w) =>
-			!w.reads && w.user === p.user && w.agent === p.agent && w.login === login,
+		(w) => !w.reads && w.id === p.id && w.login === login,
 		() =>
 			new Refused(
 				409,
@@ -852,15 +875,14 @@ export function receive(
 	);
 	const after = Math.min(options.after ?? row.read, lastOf(p.session));
 	seen(p, after);
-	received(p.user, p.agent);
+	received(p.user, p.id);
 	return wait(
 		{
 			session: p.session,
 			user: p.user,
-			agent: p.agent,
+			id: p.id,
 			reads: false,
 			login,
-			name,
 			wake: options.wake,
 			own: options.own,
 			after,
@@ -882,10 +904,9 @@ export function read(
 		{
 			session,
 			user,
-			agent: "",
+			id: "",
 			reads: true,
 			login,
-			name: "",
 			wake: "entry",
 			own: true,
 			after: options.after,
@@ -920,7 +941,7 @@ function wait(
 			if (!waiting.delete(waiter)) return false;
 			clearTimeout(timer);
 			signal.removeEventListener("abort", abort);
-			if (!waiter.reads) received(waiter.user, waiter.agent);
+			if (!waiter.reads) received(waiter.user, waiter.id);
 			return true;
 		};
 		waiter.end = (outcome, presence) => {
@@ -938,8 +959,8 @@ function wait(
 			reject(new Refused(400, "The receive was cut off."));
 			if (waiter.reads) return;
 			db.prepare(
-				"UPDATE participant SET since = ? WHERE session = ? AND user = ? AND agent = ?",
-			).run(new Date().toISOString(), w.session, w.user, w.agent);
+				"UPDATE participant SET since = ? WHERE session = ? AND id = ?",
+			).run(new Date().toISOString(), w.session, w.id);
 			if (counted) notify(w.session, true);
 		};
 		waiting.add(waiter);
@@ -954,12 +975,12 @@ function wait(
  * The participant has received its session up to `n`: what named it there up to it no longer
  * marks the session as pinging it.
  */
-function seen(p: Participant, n: number): void {
+function seen(p: Pick<Participant, "session" | "id">, n: number): void {
 	const gone = db
 		.prepare(
-			"DELETE FROM mention WHERE user = ? AND agent = ? AND session = ? AND n <= ?",
+			"DELETE FROM mention WHERE participant = ? AND session = ? AND n <= ?",
 		)
-		.run(p.user, p.agent, p.session, n).changes;
+		.run(p.id, p.session, n).changes;
 	if (gone) written();
 }
 
@@ -982,12 +1003,12 @@ function finish(
 	seen(w, found.covered);
 	const moved = db
 		.prepare(
-			"UPDATE participant SET read = ? WHERE session = ? AND user = ? AND agent = ? AND read < ?",
+			"UPDATE participant SET read = ? WHERE session = ? AND id = ? AND read < ?",
 		)
-		.run(found.covered, w.session, w.user, w.agent, found.covered).changes;
+		.run(found.covered, w.session, w.id, found.covered).changes;
 	db.prepare(
-		"UPDATE participant SET since = ? WHERE session = ? AND user = ? AND agent = ?",
-	).run(new Date().toISOString(), w.session, w.user, w.agent);
+		"UPDATE participant SET since = ? WHERE session = ? AND id = ?",
+	).run(new Date().toISOString(), w.session, w.id);
 	if (moved || wasReceiving) queueMicrotask(() => notify(w.session, true));
 	return answer;
 }
