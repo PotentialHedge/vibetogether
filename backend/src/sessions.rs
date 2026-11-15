@@ -5,7 +5,6 @@ use std::collections::BTreeMap;
 
 use axum::{
   Json,
-  body::Bytes,
   extract::State,
   http::{HeaderMap, HeaderValue, StatusCode, header},
   response::{IntoResponse, Response},
@@ -377,19 +376,28 @@ pub async fn leave(
   Ok(Json(Left { n: n as u64 }))
 }
 
+/// The most sends of one account at once, each holding its payload in memory.
+const MAX_SENDS: usize = 4;
+
 /// Appends an entry with the request's body as its payload, and its `Content-Type` as its type,
-/// `text/plain; charset=utf-8` where none is given.
+/// `text/plain; charset=utf-8` where none is given. The body is read only once the caller is
+/// known and has a send of its account's to spare.
 pub async fn send(
   State(app): State<App>,
   caller: Caller,
   Path(id): Path<String>,
   Query(query): Query<SendQuery>,
   headers: HeaderMap,
-  payload: Bytes,
+  body: axum::body::Body,
 ) -> Result<Json<Sent>> {
-  if payload.len() > MAX_PAYLOAD {
-    return Err(transport::too_large());
-  }
+  let _sending = app.limits.sends.start(
+    &caller.account,
+    MAX_SENDS,
+    "This account sends too much at once.",
+  )?;
+  let payload = axum::body::to_bytes(body, MAX_PAYLOAD)
+    .await
+    .map_err(|_| transport::too_large())?;
   if query.filename.as_ref().is_some_and(|f| f.len() > 256) {
     return Err(Refusal::bad("filename: at most 256 characters."));
   }

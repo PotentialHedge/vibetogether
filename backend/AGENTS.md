@@ -16,6 +16,7 @@ Vibe Together's design (`../AGENTS.md`): read it before working here.
   A request by the cookie comes from the site alone, a change by its `Origin` and anything else by `Sec-Fetch-Site: same-origin`, since a receive moves positions; over HTTPS every cookie is `__Host-`, and so removed with `Secure`; signing in lands only on a path of the site's own.
 - Signing in, approving an OTP and deleting the account are the browser's alone, and accepting an invite the person's, by the browser or a person token, Luis's decision (2026-11-15); everything else a token does too.
   What a token changes is recorded for its person (`activity`), and letting someone in is limited per hour.
+- One account sends at most four payloads at once, each read into memory only once its sender is known (`src/limits.rs`).
 - The transport (`src/transport.rs`) is in memory beside the database: the log, the participants, each participant's stream and the waiting receives.
   Observing and receiving are two things, Luis's decision (2026-11-15): observing reads a session's log (`log`), with no side effects; receiving is a participant's own stream (`receive`), each item with its `reach`, and two positions, `received` and `read`, which move the participant's positions in its sessions.
   Presence is held, never declared: a waiting receive registers a guard whose destructor lets the presence go after a minute's grace, also when its connection drops.

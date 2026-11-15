@@ -1639,3 +1639,22 @@ async fn one_redeem_of_an_otp_waits_at_a_time_and_any_wait_is_bounded() {
   let token: Token = newer.await.unwrap().json().await.unwrap();
   assert_eq!(token.account, "luis");
 }
+
+#[tokio::test]
+async fn a_payload_past_the_most_is_refused() {
+  let w = world().await;
+  w.luis.browser.join(&w.session.id).await.unwrap();
+  let big = vec![b'x'; MAX_PAYLOAD + 1];
+  let sent = w
+    .luis
+    .browser
+    .send_entry(&w.session.id, "text/plain", big, None)
+    .await;
+  assert_eq!(status(sent), 413);
+  let most = vec![b'x'; MAX_PAYLOAD];
+  w.luis
+    .browser
+    .send_entry(&w.session.id, "application/octet-stream", most, None)
+    .await
+    .unwrap();
+}

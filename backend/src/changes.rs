@@ -3,15 +3,14 @@
 //! has to say what it changed, and sessions are assumed small. A waiter checks at most every
 //! `SETTLE`, once for all the writes meanwhile, so that a burst of writes costs it one check.
 
-use std::{collections::HashMap, sync::Mutex, time::Duration};
+use std::time::Duration;
 
-use axum::http::StatusCode;
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 use tokio::sync::watch;
 
-use crate::error::{Refusal, Result};
+use crate::{error::Result, limits::Concurrent};
 
 /// The most waits of one account at once.
 const MAX_WAITS: usize = 64;
@@ -20,14 +19,14 @@ const SETTLE: Duration = Duration::from_millis(100);
 
 pub struct Changes {
   writes: watch::Sender<u64>,
-  waits: Mutex<HashMap<String, usize>>,
+  waits: Concurrent,
 }
 
 impl Default for Changes {
   fn default() -> Self {
     Self {
       writes: watch::Sender::new(0),
-      waits: Mutex::default(),
+      waits: Concurrent::default(),
     }
   }
 }
@@ -36,24 +35,6 @@ impl Default for Changes {
 pub fn version_of(value: &impl Serialize) -> String {
   let json = serde_json::to_vec(value).unwrap_or_default();
   URL_SAFE_NO_PAD.encode(Sha256::digest(json))[..16].to_string()
-}
-
-/// One account's wait, counted while it lasts.
-struct Wait<'a> {
-  changes: &'a Changes,
-  account: String,
-}
-
-impl Drop for Wait<'_> {
-  fn drop(&mut self) {
-    let mut waits = self.changes.waits.lock().unwrap();
-    if let Some(n) = waits.get_mut(&self.account) {
-      *n -= 1;
-      if *n == 0 {
-        waits.remove(&self.account);
-      }
-    }
-  }
 }
 
 impl Changes {
@@ -76,7 +57,11 @@ impl Changes {
     if differs(&now) || wait == Some(0) {
       return Ok(now);
     }
-    let _wait = self.count(account)?;
+    let _wait = self.waits.start(
+      account,
+      MAX_WAITS,
+      "This account has too many waits at once.",
+    )?;
     let timeout = async {
       match wait {
         Some(seconds) => tokio::time::sleep(Duration::from_secs(seconds)).await,
@@ -97,22 +82,5 @@ impl Changes {
         () = &mut timeout => return current().await,
       }
     }
-  }
-
-  fn count(&self, account: &str) -> Result<Wait<'_>> {
-    let mut waits = self.waits.lock().unwrap();
-    let n = waits.entry(account.to_string()).or_default();
-    if *n >= MAX_WAITS {
-      return Err(Refusal::busy(
-        StatusCode::SERVICE_UNAVAILABLE,
-        "This account has too many waits at once.",
-        10,
-      ));
-    }
-    *n += 1;
-    Ok(Wait {
-      changes: self,
-      account: account.to_string(),
-    })
   }
 }

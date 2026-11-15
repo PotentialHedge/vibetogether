@@ -21,6 +21,8 @@ pub struct Limits {
   pub otps: PerAddress,
   /// Invites looked up, per address.
   pub invites: PerAddress,
+  /// Sends of one account at once, whose payloads are held in memory meanwhile.
+  pub sends: Concurrent,
   added: Mutex<HashMap<String, Added>>,
   /// When one person last asked another to be friends.
   asks: Mutex<HashMap<(String, String), Instant>>,
@@ -87,6 +89,44 @@ impl PerAddress {
       ));
     }
     Ok(())
+  }
+}
+
+/// How many of something run at once, by whom.
+#[derive(Default)]
+pub struct Concurrent(Mutex<HashMap<String, usize>>);
+
+/// One of something that runs, counted while it lasts.
+pub struct Running<'a> {
+  concurrent: &'a Concurrent,
+  key: String,
+}
+
+impl Drop for Running<'_> {
+  fn drop(&mut self) {
+    let mut running = self.concurrent.0.lock().unwrap();
+    if let Some(n) = running.get_mut(&self.key) {
+      *n -= 1;
+      if *n == 0 {
+        running.remove(&self.key);
+      }
+    }
+  }
+}
+
+impl Concurrent {
+  /// Starts one more of `key`'s, or refuses with `message` where `max` run already.
+  pub fn start(&self, key: &str, max: usize, message: &str) -> Result<Running<'_>> {
+    let mut running = self.0.lock().unwrap();
+    let n = running.entry(key.to_string()).or_default();
+    if *n >= max {
+      return Err(Refusal::busy(StatusCode::SERVICE_UNAVAILABLE, message, 10));
+    }
+    *n += 1;
+    Ok(Running {
+      concurrent: self,
+      key: key.to_string(),
+    })
   }
 }
 
@@ -181,6 +221,19 @@ mod tests {
     let mut headers = HeaderMap::new();
     headers.insert("x-forwarded-for", "2001:db8:1:2::1".parse().unwrap());
     assert_eq!(address_of(&headers), "2001:db8:1::/48");
+  }
+
+  #[test]
+  fn at_most_max_run_at_once_of_one_key() {
+    let sends = Concurrent::default();
+    let running: Vec<_> = (0..2)
+      .map(|_| sends.start("u_1", 2, "busy").unwrap())
+      .collect();
+    assert!(sends.start("u_1", 2, "busy").is_err());
+    assert!(sends.start("u_2", 2, "busy").is_ok());
+    drop(running);
+    assert!(sends.start("u_1", 2, "busy").is_ok());
+    assert!(sends.0.lock().unwrap().is_empty());
   }
 
   #[test]

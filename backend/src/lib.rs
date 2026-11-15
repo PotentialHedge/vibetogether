@@ -23,14 +23,14 @@ use std::{ops::Deref, sync::Arc, time::Instant};
 
 use axum::{
   Router,
-  extract::{DefaultBodyLimit, Request, State},
+  extract::{Request, State},
   http::{HeaderValue, Method},
   middleware::{self, Next},
   response::Response,
   routing::{get, post, put},
 };
 use sqlx::SqlitePool;
-use vibetogether_protocol::{LoginKind, MAX_PAYLOAD, VERSION, VERSION_HEADER};
+use vibetogether_protocol::{LoginKind, VERSION, VERSION_HEADER};
 
 pub use crate::config::Config;
 
@@ -135,10 +135,7 @@ impl App {
           .post(sessions::join)
           .delete(sessions::leave),
       )
-      .route(
-        "/sessions/{id}/entries",
-        post(sessions::send).layer(DefaultBodyLimit::max(MAX_PAYLOAD + 1)),
-      )
+      .route("/sessions/{id}/entries", post(sessions::send))
       .route("/sessions/{id}/entries/{n}", get(sessions::fetch))
       .route("/sessions/{id}/log", get(sessions::log))
       .route("/receive", get(sessions::receive))
