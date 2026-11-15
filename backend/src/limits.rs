@@ -2,6 +2,7 @@
 
 use std::{
   collections::HashMap,
+  hash::Hash,
   net::IpAddr,
   path::Path,
   sync::Mutex,
@@ -32,15 +33,17 @@ struct Added {
   bytes: u64,
 }
 
+const MINUTE: Duration = Duration::from_secs(60);
 const HOUR: Duration = Duration::from_secs(3600);
+const DAY: Duration = Duration::from_secs(86400);
 const MAX_ENTRIES: u64 = 3000;
 const MAX_BYTES: u64 = 1024 * 1024 * 1024;
 /// What the disk keeps free beyond a payload.
 const DISK_RESERVE: u64 = 1024 * 1024 * 1024;
 
 /// The address a request came from, which the proxy in front sets as `X-Forwarded-For`, by the
-/// network it counts by: an IPv4 address itself, and an IPv6 address's /64, which one client
-/// holds whole.
+/// network it counts by: an IPv4 address itself, and an IPv6 address's /48, which one client
+/// may hold whole.
 pub fn address_of(headers: &HeaderMap) -> String {
   let given = headers
     .get("x-forwarded-for")
@@ -51,7 +54,7 @@ pub fn address_of(headers: &HeaderMap) -> String {
   match given.parse::<IpAddr>() {
     Ok(IpAddr::V6(ip)) => {
       let s = ip.segments();
-      format!("{:x}:{:x}:{:x}:{:x}::/64", s[0], s[1], s[2], s[3])
+      format!("{:x}:{:x}:{:x}::/48", s[0], s[1], s[2])
     }
     Ok(ip) => ip.to_string(),
     Err(_) if given.is_empty() => "an unknown address".to_string(),
@@ -66,12 +69,13 @@ pub struct PerAddress(Mutex<HashMap<String, (Instant, u32)>>);
 impl PerAddress {
   pub fn allow(&self, headers: &HeaderMap, max: u32) -> Result<()> {
     let mut seen = self.0.lock().unwrap();
-    if seen.len() > 10_000 {
-      seen.clear();
+    let address = address_of(headers);
+    if !seen.contains_key(&address) {
+      make_room(&mut seen, 10_000, MINUTE, |(at, _)| *at);
     }
     let now = Instant::now();
-    let entry = seen.entry(address_of(headers)).or_insert((now, 0));
-    if now.duration_since(entry.0) > Duration::from_secs(60) {
+    let entry = seen.entry(address).or_insert((now, 0));
+    if now.duration_since(entry.0) > MINUTE {
       *entry = (now, 0);
     }
     entry.1 += 1;
@@ -134,17 +138,60 @@ impl Limits {
   /// again tells them once a day.
   pub fn first_ask(&self, from: &str, to: &str) -> bool {
     let mut asks = self.asks.lock().unwrap();
-    if asks.len() > 100_000 {
-      asks.clear();
-    }
     let key = (from.to_string(), to.to_string());
-    if asks
-      .get(&key)
-      .is_some_and(|at| at.elapsed() < Duration::from_secs(86400))
-    {
+    if asks.get(&key).is_some_and(|at| at.elapsed() < DAY) {
       return false;
+    }
+    if !asks.contains_key(&key) {
+      make_room(&mut asks, 100_000, DAY, |at| *at);
     }
     asks.insert(key, Instant::now());
     true
+  }
+}
+
+/// Makes room in `map` for one more, so that it holds at most `max`: drops what is older than
+/// `age`, as `at` dates it, and where that is not enough, the oldest.
+fn make_room<K: Clone + Eq + Hash, V>(
+  map: &mut HashMap<K, V>,
+  max: usize,
+  age: Duration,
+  at: impl Fn(&V) -> Instant,
+) {
+  if map.len() < max {
+    return;
+  }
+  map.retain(|_, v| at(v).elapsed() < age);
+  if map.len() >= max
+    && let Some(oldest) = map
+      .iter()
+      .min_by_key(|(_, v)| at(v))
+      .map(|(k, _)| k.clone())
+  {
+    map.remove(&oldest);
+  }
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  #[test]
+  fn an_ipv6_address_counts_by_its_48() {
+    let mut headers = HeaderMap::new();
+    headers.insert("x-forwarded-for", "2001:db8:1:2::1".parse().unwrap());
+    assert_eq!(address_of(&headers), "2001:db8:1::/48");
+  }
+
+  #[test]
+  fn a_full_map_drops_its_oldest_not_everything() {
+    let start = Instant::now();
+    let mut map: HashMap<u32, Instant> = (0..3)
+      .map(|i| (i, start + Duration::from_secs(i.into())))
+      .collect();
+    make_room(&mut map, 3, DAY, |at| *at);
+    let mut kept: Vec<_> = map.keys().copied().collect();
+    kept.sort();
+    assert_eq!(kept, [1, 2]);
   }
 }

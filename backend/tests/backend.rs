@@ -1389,6 +1389,8 @@ async fn a_token_comes_from_an_otp_its_person_approves_which_names_its_kind() {
   w.luis.browser.approve_otp(&otp.code).await.unwrap();
   let token = redeemed.await.unwrap().unwrap();
   assert_eq!(token.kind, TokenKind::Person);
+  // It names who approved it, so that the asker sees whose it is.
+  assert_eq!(token.account, "luis");
   let person = Client::new(&w.server.url, Some(token.token));
   assert_eq!(person.join(&w.session.id).await.unwrap().name, "luis");
   assert!(
@@ -1588,4 +1590,38 @@ async fn a_client_says_plainly_when_the_server_speaks_another_version() {
   let error = Client::new(&url, None).me().await.unwrap_err();
   assert!(matches!(error, vibetogether_client::Error::Mismatch { .. }));
   assert!(error.to_string().contains("version"));
+}
+
+#[tokio::test]
+async fn one_redeem_of_an_otp_waits_at_a_time_and_any_wait_is_bounded() {
+  let w = world().await;
+  let anyone = Client::new(&w.server.url, None);
+  let otp = anyone
+    .request_otp(&OtpRequest {
+      kind: TokenKind::Agent,
+      name: s("box"),
+    })
+    .await
+    .unwrap();
+  let older = {
+    let (anyone, secret) = (anyone.clone(), otp.secret.clone());
+    tokio::spawn(async move { anyone.redeem_otp(&secret).await })
+  };
+  sleep(50).await;
+  // A wait past any bound waits as long as the OTP lasts, and ends the redeem before.
+  let newer = {
+    let (url, secret) = (w.server.url.clone(), otp.secret.clone());
+    tokio::spawn(async move {
+      reqwest::Client::new()
+        .post(format!("{url}/api/otp/redeem"))
+        .json(&serde_json::json!({ "secret": secret, "wait": u64::MAX }))
+        .send()
+        .await
+        .unwrap()
+    })
+  };
+  assert_eq!(status(older.await.unwrap()), 409);
+  w.luis.browser.approve_otp(&otp.code).await.unwrap();
+  let token: Token = newer.await.unwrap().json().await.unwrap();
+  assert_eq!(token.account, "luis");
 }

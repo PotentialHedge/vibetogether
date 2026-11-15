@@ -467,6 +467,8 @@ wire! {
   pub struct Token {
     pub token: String,
     pub kind: TokenKind,
+    /// The account's name, of the person who approved it.
+    pub account: String,
   }
 
   /// An OTP as the person sees it before approving it: who asks, for what, when and from where.

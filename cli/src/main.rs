@@ -396,7 +396,11 @@ async fn login(
       .and_then(|mut f| f.write_all(format!("{}\n", token.token).as_bytes()))
   };
   written.map_err(|e| Exit::Usage(format!("{}: {e}", file.display())))?;
-  println!("Approved: the token is in {}.", file.display());
+  println!(
+    "Approved by {}: the token is in {}.",
+    token.account,
+    file.display()
+  );
   Ok(())
 }
 

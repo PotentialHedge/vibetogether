@@ -25,7 +25,7 @@ use oauth2::{
 use serde::Deserialize;
 use serde_json::json;
 use sha2::{Digest, Sha256};
-use tokio::sync::watch;
+use tokio::sync::{oneshot, watch};
 use vibetogether_protocol::{
   Login, LoginKind, Otp, OtpRedeem, OtpRequest, OtpShown, SYSTEM_NAME, Token, TokenKind,
   is_name_part,
@@ -402,6 +402,10 @@ pub async fn revoke(
 
 /// How long an OTP waits for its person.
 const OTP_LIFETIME: Duration = Duration::from_secs(15 * 60);
+/// The most OTPs that wait at once, and of one address. Each has at most one redeem waiting, so
+/// this bounds those too.
+const MAX_OTPS: usize = 10_000;
+const MAX_OTPS_PER_ADDRESS: usize = 10;
 /// Letters and digits that no one misreads for another.
 const OTP_ALPHABET: &str = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 
@@ -418,12 +422,15 @@ struct Pending {
   from: String,
   expires: Instant,
   decision: watch::Sender<Decision>,
+  /// The redeem waiting, which a newer one ends by dropping this.
+  redeem: Option<oneshot::Sender<()>>,
 }
 
 #[derive(Clone, PartialEq)]
 enum Decision {
   Waiting,
-  Approved(String),
+  /// Approved by the account, by its id and its name.
+  Approved(String, String),
   Denied,
 }
 
@@ -457,11 +464,19 @@ pub async fn request_otp(
       "name: lower case letters, digits and hyphens, starting with a letter or digit, such as the machine's name.",
     ));
   }
+  let from = address_of(&headers);
   let mut otps = app.otps.lock();
-  if otps.len() >= 10_000 {
+  if otps.len() >= MAX_OTPS {
     return Err(Refusal::busy(
       StatusCode::SERVICE_UNAVAILABLE,
       "Too many OTPs wait at once.",
+      60,
+    ));
+  }
+  if otps.values().filter(|otp| otp.from == from).count() >= MAX_OTPS_PER_ADDRESS {
+    return Err(Refusal::busy(
+      StatusCode::TOO_MANY_REQUESTS,
+      "Too many OTPs of this address wait at once: use one, or wait until one expires.",
       60,
     ));
   }
@@ -474,9 +489,10 @@ pub async fn request_otp(
       kind: request.kind,
       name: request.name,
       requested: db::now(),
-      from: address_of(&headers),
+      from,
       expires: Instant::now() + OTP_LIFETIME,
       decision: watch::Sender::new(Decision::Waiting),
+      redeem: None,
     },
   );
   let shown = format!("{}-{}", &code[..4], &code[4..]);
@@ -491,35 +507,47 @@ pub async fn request_otp(
 }
 
 /// Redeems an OTP for its token, once its person approved it: it waits for the decision, at most
-/// `wait` seconds and never past the OTP's life.
+/// `wait` seconds and never past the OTP's life. One redeem of an OTP waits at a time: a newer
+/// one ends the one before.
 pub async fn redeem_otp(
   State(app): State<App>,
   crate::extract::Json(request): crate::extract::Json<OtpRedeem>,
 ) -> Result<Json<Token>> {
   let hash = token_hash(&request.secret);
   let gone = || Refusal::not_found("No such OTP: it expired or was redeemed. Ask for a new one.");
+  let (replaced, ends) = oneshot::channel();
   let (code, mut decision, expires) = {
-    let otps = app.otps.lock();
+    let mut otps = app.otps.lock();
     let (code, otp) = otps
-      .iter()
+      .iter_mut()
       .find(|(_, otp)| otp.secret == hash)
       .ok_or_else(gone)?;
+    otp.redeem = Some(replaced);
     (code.clone(), otp.decision.subscribe(), otp.expires)
   };
-  let wait = request.wait.map_or(OTP_LIFETIME, Duration::from_secs);
+  let wait = request
+    .wait
+    .map_or(OTP_LIFETIME, Duration::from_secs)
+    .min(OTP_LIFETIME);
   let deadline = (Instant::now() + wait).min(expires);
-  let decided = match tokio::time::timeout_at(
-    deadline.into(),
-    decision.wait_for(|d| *d != Decision::Waiting),
-  )
-  .await
-  {
-    Ok(Ok(decided)) => decided.clone(),
-    Ok(Err(_)) => return Err(gone()),
-    Err(_) => {
-      return Err(Refusal::new(
-        StatusCode::REQUEST_TIMEOUT,
-        "Not approved yet: ask again.",
+  let decided = tokio::select! {
+    biased;
+    decided = tokio::time::timeout_at(
+      deadline.into(),
+      decision.wait_for(|d| *d != Decision::Waiting),
+    ) => match decided {
+      Ok(Ok(decided)) => decided.clone(),
+      Ok(Err(_)) => return Err(gone()),
+      Err(_) => {
+        return Err(Refusal::new(
+          StatusCode::REQUEST_TIMEOUT,
+          "Not approved yet: ask again.",
+        ));
+      }
+    },
+    _ = ends => {
+      return Err(Refusal::conflict(
+        "A newer redeem of this OTP took over from this one.",
       ));
     }
   };
@@ -527,7 +555,7 @@ pub async fn redeem_otp(
     return Err(gone());
   };
   match decided {
-    Decision::Approved(account) => {
+    Decision::Approved(account, person) => {
       let kind = match otp.kind {
         TokenKind::Agent => LoginKind::Agent,
         TokenKind::Person => LoginKind::Person,
@@ -536,6 +564,7 @@ pub async fn redeem_otp(
       Ok(Json(Token {
         token,
         kind: otp.kind,
+        account: person,
       }))
     }
     _ => Err(Refusal::forbidden("The person denied this OTP.")),
@@ -584,8 +613,8 @@ pub async fn approve_otp(
   caller: Caller,
   Path(code): Path<String>,
 ) -> Result<StatusCode> {
-  let account = caller.account.clone();
-  decide(&app, &caller, &code, Decision::Approved(account))
+  let approved = Decision::Approved(caller.account.clone(), caller.person.clone());
+  decide(&app, &caller, &code, approved)
 }
 
 pub async fn deny_otp(
