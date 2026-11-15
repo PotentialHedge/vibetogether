@@ -167,11 +167,20 @@ async fn login_writes_the_token_its_person_approves() {
     &setup.url,
     None,
   );
+  // A link where the token goes is replaced, never followed.
+  let file = setup.home.join("config/vibetogether/token");
+  let elsewhere = setup.home.join("elsewhere");
+  std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+  std::os::unix::fs::symlink(&elsewhere, &file).unwrap();
   assert_eq!(browser.show_otp(&code).await.unwrap().name, "test-box");
   browser.approve_otp(&code).await.unwrap();
+  // It names who approved it.
+  let approved = lines.next_line().await.unwrap().unwrap();
+  assert!(approved.starts_with("Approved by luis:"), "{approved}");
   assert_eq!(login.wait().await.unwrap().code(), Some(0));
-  let file = setup.home.join("config/vibetogether/token");
   use std::os::unix::fs::PermissionsExt;
+  assert!(!elsewhere.exists());
+  assert!(!std::fs::symlink_metadata(&file).unwrap().is_symlink());
   assert_eq!(
     std::fs::metadata(&file).unwrap().permissions().mode() & 0o777,
     0o600

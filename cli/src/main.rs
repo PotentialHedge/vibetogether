@@ -382,26 +382,42 @@ async fn login(
   println!("Approve the OTP {} at {}", otp.code, otp.link);
   let _ = io::stdout().flush();
   let token = waiting(|| client.redeem_otp(&otp.secret)).await?;
-  if let Some(dir) = file.parent() {
-    fs::create_dir_all(dir).map_err(|e| Exit::Usage(format!("{}: {e}", dir.display())))?;
-  }
-  let written = {
-    use std::os::unix::fs::OpenOptionsExt;
-    fs::OpenOptions::new()
-      .write(true)
-      .create(true)
-      .truncate(true)
-      .mode(0o600)
-      .open(&file)
-      .and_then(|mut f| f.write_all(format!("{}\n", token.token).as_bytes()))
-  };
-  written.map_err(|e| Exit::Usage(format!("{}: {e}", file.display())))?;
+  write_secret(&file, &format!("{}\n", token.token))
+    .map_err(|e| Exit::Usage(format!("{}: {e}", file.display())))?;
   println!(
     "Approved by {}: the token is in {}.",
     token.account,
     file.display()
   );
   Ok(())
+}
+
+/// Writes `secret` to `file`, readable by its owner alone: into a new file beside it, then renamed
+/// over it, so that it never follows a link there nor is readable by others for a moment. A
+/// directory it makes is its owner's alone.
+fn write_secret(file: &std::path::Path, secret: &str) -> io::Result<()> {
+  use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
+  let dir = file
+    .parent()
+    .filter(|d| !d.as_os_str().is_empty())
+    .unwrap_or(std::path::Path::new("."));
+  fs::DirBuilder::new()
+    .recursive(true)
+    .mode(0o700)
+    .create(dir)?;
+  let name = file.file_name().unwrap_or_default().to_string_lossy();
+  let temporary = dir.join(format!(".{name}.{}", std::process::id()));
+  let written = fs::OpenOptions::new()
+    .write(true)
+    .create_new(true)
+    .mode(0o600)
+    .open(&temporary)
+    .and_then(|mut f| f.write_all(secret.as_bytes()).and_then(|()| f.sync_all()))
+    .and_then(|()| fs::rename(&temporary, file));
+  if written.is_err() {
+    let _ = fs::remove_file(&temporary);
+  }
+  written
 }
 
 /// Receives until a batch with a ping, or forever with `follow`: each item is printed as one
