@@ -9,6 +9,9 @@
 #[cfg(target_arch = "wasm32")]
 mod web;
 
+/// The protocol's types, which the client's methods take and give.
+pub use vibetogether_protocol as protocol;
+
 use reqwest::{Method, RequestBuilder, Response, StatusCode, header};
 use serde::{Serialize, de::DeserializeOwned};
 use vibetogether_protocol::*;
