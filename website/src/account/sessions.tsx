@@ -3,6 +3,7 @@
 
 import {
 	BellOff,
+	Bot,
 	Ellipsis,
 	LogOut,
 	Monitor,
@@ -27,7 +28,7 @@ import {
 } from "@/account/api";
 import { doNotDisturb, setDoNotDisturb } from "@/account/live";
 import { Person, Presence } from "@/account/parts";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import {
 	Dialog,
 	DialogClose,
@@ -806,7 +807,7 @@ function MemberAgents({
 }
 
 /** The group's people, all equal, each with their agents in it, and adding a
- * friend or one of the person's own agents to it. */
+ * friend to it; the person's own agents are added in settings, in one place. */
 function Members({
 	me,
 	group,
@@ -827,9 +828,6 @@ function Members({
 	const addable = friends.filter(
 		(friend) =>
 			friend.state === "friends" && !group.members.includes(friend.name),
-	);
-	const outside = agents.filter(
-		(agent) => !group.agents.some((member) => member.id === agent.id),
 	);
 	const people = group.members;
 	const face = (name: string) =>
@@ -868,40 +866,17 @@ function Members({
 					</li>
 				))}
 			</ul>
-			{!group.own && outside.length > 0 && (
-				<DropdownMenu>
-					<DropdownMenuTrigger
-						render={
-							<Button
-								variant="ghost"
-								size="sm"
-								className="justify-start text-muted-foreground"
-							/>
-						}
-					>
-						<Plus />
-						add your agent
-					</DropdownMenuTrigger>
-					<DropdownMenuContent side="top" align="start" className="w-56">
-						<DropdownMenuGroup>
-							<DropdownMenuLabel className="text-xs font-normal text-muted-foreground">
-								Lets it see and act in this group, and its members see and reach
-								it.
-							</DropdownMenuLabel>
-							{outside.map((agent) => (
-								<DropdownMenuItem
-									key={agent.id}
-									onClick={act(() => api.addMember(group.id, agent.name))}
-								>
-									<Presence presence={agent.presence} className="size-2" />
-									<span className="font-mono">
-										{agent.name.slice(me.name.length + 1)}
-									</span>
-								</DropdownMenuItem>
-							))}
-						</DropdownMenuGroup>
-					</DropdownMenuContent>
-				</DropdownMenu>
+			{!group.own && agents.length > 0 && (
+				<a
+					className={cn(
+						buttonVariants({ variant: "ghost", size: "sm" }),
+						"justify-start text-muted-foreground",
+					)}
+					href={page(`account/settings/?tab=agents${demo ? "#demo" : ""}`)}
+				>
+					<Bot />
+					your agents' groups
+				</a>
 			)}
 			{!group.own && (
 				<DropdownMenu>

@@ -5,11 +5,13 @@
 import {
 	ArrowLeft,
 	Bot,
+	Check,
 	CircleUser,
 	History,
 	KeyRound,
 	LogOut,
 	Monitor,
+	Plus,
 	Users,
 } from "lucide-react";
 import { type ReactNode, useCallback, useEffect, useState } from "react";
@@ -18,6 +20,7 @@ import {
 	type Agent,
 	api,
 	demo,
+	type Group,
 	type Login,
 	type Seen,
 	signedOut,
@@ -34,6 +37,7 @@ import {
 import { type DmOfFriend, Rail } from "@/account/sessions";
 import { SignIn } from "@/account/sign-in";
 import { Button } from "@/components/ui/button";
+import { Toggle } from "@/components/ui/toggle";
 import { cn } from "@/lib/utils";
 import { page, render, Site } from "@/site";
 
@@ -149,7 +153,7 @@ function Settings({
 	state: State;
 	reload: () => Promise<void>;
 }) {
-	const { me, friends, logins, activity, agents } = state;
+	const { me, friends, logins, activity, agents, groups } = state;
 	const { problem, act } = useActions(reload);
 	const [tab, setTab] = useState<Tab>(tabOfAddress);
 	useEffect(() => {
@@ -328,7 +332,7 @@ function Settings({
 				{tab === "agents" && (
 					<Pane
 						title="Agents"
-						line="Your agents, each created once and named by its id, which stays when it is renamed: awake or asleep while it receives. Each is in your own group, and in another once you add it there, in the group's members: that group's members see it, whether it is awake or asleep, and reach it."
+						line="Your agents, each named by its id, which stays when it is renamed. Each is in your own group, and in the groups ticked under it: their members see and reach it, and it sees and acts in them. Only you add an agent to a group."
 						action={
 							<AddByName
 								placeholder="agent name"
@@ -341,9 +345,19 @@ function Settings({
 						}
 					>
 						<Rows empty="No agents yet: an agent creates itself, or you create it here and give it its id.">
-							{agents.map((agent) => (
-								<AgentRow key={agent.id} agent={agent} act={act} />
-							))}
+							{agents.flatMap((agent) => [
+								<AgentRow key={agent.id} agent={agent} act={act} />,
+								...(agent.presence === "archived"
+									? []
+									: [
+											<AgentGroups
+												key={`${agent.id} groups`}
+												agent={agent}
+												groups={groups.filter((group) => !group.own)}
+												act={act}
+											/>,
+										]),
+							])}
 						</Rows>
 					</Pane>
 				)}
@@ -447,6 +461,59 @@ function AgentRow({
 			<span className={cn("min-w-0", archived && "opacity-50")}>
 				<Titled title={agent.name} detail={detail} />
 			</span>
+		</Row>
+	);
+}
+
+/** The groups an agent is in, besides its person's own, each ticked or not,
+ * to add it there or remove it in one click. */
+function AgentGroups({
+	agent,
+	groups,
+	act,
+}: {
+	agent: Agent;
+	groups: Group[];
+	act: (action: () => Promise<unknown>) => () => Promise<void>;
+}) {
+	return (
+		<Row inset>
+			{groups.length === 0 ? (
+				<span className="text-xs text-muted-foreground">
+					No other group yet: one you make or join shows here.
+				</span>
+			) : (
+				<fieldset
+					className="flex flex-wrap items-center gap-1.5"
+					aria-label={`Groups of ${agent.name}`}
+				>
+					{groups.map((group) => {
+						const member = group.agents.some((a) => a.id === agent.id);
+						return (
+							<Toggle
+								key={group.id}
+								variant="outline"
+								size="sm"
+								pressed={member}
+								onPressedChange={act(() =>
+									member
+										? api.removeMember(group.id, agent.name)
+										: api.addMember(group.id, agent.name),
+								)}
+								className={cn(
+									"font-mono",
+									member
+										? "border-primary bg-primary text-primary-foreground hover:bg-primary/80 hover:text-primary-foreground aria-pressed:bg-primary"
+										: "text-muted-foreground",
+								)}
+							>
+								{member ? <Check /> : <Plus />}
+								{group.name}
+							</Toggle>
+						);
+					})}
+				</fieldset>
+			)}
 		</Row>
 	);
 }

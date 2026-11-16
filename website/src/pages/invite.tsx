@@ -2,7 +2,7 @@
  * GitHub and accepting; then the prompt for the person's agent. */
 
 import { useEffect, useState } from "react";
-import { api } from "@/account/api";
+import { type Agent, api } from "@/account/api";
 import { Person } from "@/account/parts";
 import { GitHubIcon, useMe } from "@/account/sign-in";
 import { Frame } from "@/components/frame";
@@ -30,6 +30,80 @@ const accepting = `vibetogether accept ${code}`;
 /** The invite's title: where it leads, kept short. */
 function what(invite: InviteShown, who: string): string {
 	return invite.group ? `Join ${invite.group}` : `${who} invites you`;
+}
+
+/** The person's agents, each with a checkbox, none ticked: only the person
+ * adds an agent to a group, and only the ones they tick. Nothing shows where
+ * they have no agent yet. */
+function AgentsInto({ group }: { group: { id: string; name: string } }) {
+	const [agents, setAgents] = useState<Agent[]>([]);
+	const [ticked, setTicked] = useState<string[]>([]);
+	const [added, setAdded] = useState<string[] | null>(null);
+	const [busy, setBusy] = useState(false);
+	const [problem, setProblem] = useState<string | null>(null);
+	useEffect(() => {
+		api.agents().then(
+			(all) => setAgents(all.filter((a) => a.presence !== "archived")),
+			() => setAgents([]),
+		);
+	}, []);
+	if (agents.length === 0) return null;
+	if (added)
+		return (
+			<p className="text-sm text-muted-foreground">
+				In {group.name} now: {added.join(", ")}. Change it any time in settings,
+				under Agents.
+			</p>
+		);
+	const add = async () => {
+		setBusy(true);
+		setProblem(null);
+		try {
+			for (const name of ticked) await api.addMember(group.id, name);
+			setAdded(ticked);
+		} catch (error) {
+			setProblem(error instanceof Error ? error.message : String(error));
+		}
+		setBusy(false);
+	};
+	return (
+		<section className="flex flex-col gap-3">
+			<p className="text-sm text-muted-foreground">
+				Which of your agents join {group.name}? Its members then see and reach
+				them, and they see and act in it.
+			</p>
+			<div className="flex flex-col gap-2">
+				{agents.map((agent) => (
+					<label
+						key={agent.id}
+						className="flex items-center gap-3 font-mono text-sm"
+					>
+						<input
+							type="checkbox"
+							className="size-4 accent-primary"
+							checked={ticked.includes(agent.name)}
+							onChange={(event) =>
+								setTicked((now) =>
+									event.target.checked
+										? [...now, agent.name]
+										: now.filter((n) => n !== agent.name),
+								)
+							}
+						/>
+						{agent.name}
+					</label>
+				))}
+			</div>
+			<Button
+				className="self-start"
+				disabled={busy || ticked.length === 0}
+				onClick={add}
+			>
+				Add to {group.name}
+			</Button>
+			{problem && <p className="text-sm text-destructive">{problem}</p>}
+		</section>
+	);
 }
 
 /** What the agent does once set up: joining the session of the group the
@@ -105,6 +179,7 @@ function InvitePage() {
 						: `You and ${who} are friends. Your agent does the rest.`
 				}
 			>
+				{accepted.group && <AgentsInto group={accepted.group} />}
 				<AgentPrompt then={thenFor(accepted)} />
 				<a
 					className="self-start text-sm underline underline-offset-4"
