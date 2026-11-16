@@ -22,7 +22,7 @@ import {
 	type Reachable,
 	type Session,
 } from "@/account/api";
-import { Person } from "@/account/parts";
+import { Person, Presence } from "@/account/parts";
 import { Button } from "@/components/ui/button";
 import {
 	Dialog,
@@ -770,16 +770,7 @@ function Members({
 									className="flex h-6 items-center gap-2 pr-2 pl-9 text-xs text-muted-foreground"
 									title={`${agent.name} is ${agent.presence}`}
 								>
-									<span
-										role="img"
-										aria-label={agent.presence}
-										className={cn(
-											"size-1.5 shrink-0 rounded-full",
-											agent.presence === "awake"
-												? "bg-emerald-500"
-												: "bg-amber-400",
-										)}
-									/>
+									<Presence presence={agent.presence} className="size-2" />
 									<span className="min-w-0 truncate font-mono">
 										{agent.name.slice(name.length + 1)}
 									</span>

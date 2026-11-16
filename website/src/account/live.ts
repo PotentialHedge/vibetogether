@@ -111,17 +111,27 @@ export class Seat {
 }
 
 /** The person's own stream, received while the page is open, which shows
- * them awake: its unread items, by their session, and its positions, once
- * the first answer gave them. */
+ * them awake while they look at it and asleep otherwise: its unread items, by
+ * their session, and its positions, once the first answer gave them. */
 const stream = {
 	unread: [] as { n: number; session: string }[],
 	received: undefined as number | undefined,
 	read: 0,
 	/** The session open and visible, whose items are read. */
 	shown: null as string | null,
-	/** The receive waiting, which a change of `read` issues again. */
+	/** The state the waiting receive holds. */
+	state: "awake" as "awake" | "asleep",
+	/** The receive waiting, which a change of `read` or the state issues again. */
 	request: null as AbortController | null,
 };
+
+/** Awake while the person looks at the page: it is visible and has focus, as
+ * an agent is awake while a turn runs; asleep while it is open but not looked
+ * at, Luis's decision (2026-11-16). */
+const stateNow = () =>
+	document.visibilityState === "visible" && document.hasFocus()
+		? "awake"
+		: "asleep";
 
 /** The highest item with every one before it read: the unread ones of the
  * session shown go. */
@@ -131,25 +141,32 @@ function readNow(): number {
 	return (stream.unread[0]?.n ?? (stream.received ?? 0) + 1) - 1;
 }
 
-/** Issues the receive again where the read position moved. */
+/** Issues the receive again where the read position or the state moved. */
 function reread() {
-	if (stream.received !== undefined && readNow() !== stream.read)
+	if (
+		stream.received !== undefined &&
+		(readNow() !== stream.read || stateNow() !== stream.state)
+	)
 		stream.request?.abort();
 }
 
 async function receiving() {
 	document.addEventListener("visibilitychange", reread);
+	addEventListener("focus", reread);
+	addEventListener("blur", reread);
 	let failures = 0;
 	for (;;) {
 		const request = new AbortController();
 		stream.request = request;
 		// The first receive gets every unread item.
 		if (stream.received !== undefined) stream.read = readNow();
+		stream.state = stateNow();
+		const state = stream.state;
 		try {
 			const answer = await (await client()).receive(
 				stream.received === undefined
-					? { received: 0, state: "awake" }
-					: { received: stream.received, read: stream.read, state: "awake" },
+					? { received: 0, state }
+					: { received: stream.received, read: stream.read, state },
 				request.signal,
 			);
 			failures = 0;

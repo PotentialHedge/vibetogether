@@ -25,6 +25,7 @@ import {
 import {
 	AddByName,
 	Person,
+	Presence,
 	Row,
 	Titled,
 	useActions,
@@ -442,18 +443,7 @@ function AgentRow({
 				)
 			}
 		>
-			<span
-				role="img"
-				aria-label={agent.presence}
-				className={cn(
-					"size-2 shrink-0 rounded-full",
-					agent.presence === "awake"
-						? "bg-emerald-500"
-						: agent.presence === "asleep"
-							? "bg-amber-400"
-							: "bg-muted-foreground/30",
-				)}
-			/>
+			<Presence presence={agent.presence} className="size-2" />
 			<span className={cn("min-w-0", archived && "opacity-50")}>
 				<Titled title={agent.name} detail={detail} />
 			</span>

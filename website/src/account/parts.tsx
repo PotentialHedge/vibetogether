@@ -1,11 +1,47 @@
 /** The parts the pages of an account share: a person's face, and rows. */
 
+import { Moon } from "lucide-react";
 import { type ReactNode, useEffect, useState } from "react";
 import { api, type Seen, signedOut } from "@/account/api";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
+
+/** A participant's presence, as messengers show it: awake a green dot, asleep
+ * a yellow moon, offline a gray dot; `className` sizes it. */
+export function Presence({
+	presence,
+	className,
+	title,
+}: {
+	presence: string;
+	className?: string;
+	title?: string;
+}) {
+	if (presence === "asleep")
+		return (
+			<Moon
+				role="img"
+				aria-label={presence}
+				className={cn("shrink-0 fill-amber-400 text-amber-400", className)}
+			>
+				{title && <title>{title}</title>}
+			</Moon>
+		);
+	return (
+		<span
+			role="img"
+			aria-label={presence}
+			title={title}
+			className={cn(
+				"shrink-0 rounded-full",
+				presence === "awake" ? "bg-emerald-500" : "bg-muted-foreground/40",
+				className,
+			)}
+		/>
+	);
+}
 
 export function Person({
 	name,
