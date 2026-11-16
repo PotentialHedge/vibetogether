@@ -212,16 +212,6 @@ impl Live {
       })
       .collect()
   }
-
-  fn receiving(&self, id: &str) -> bool {
-    self
-      .0
-      .lock()
-      .unwrap()
-      .receivers
-      .values()
-      .any(|r| r.participant == id)
-  }
 }
 
 /// Makes `change` to what the participant `id`'s presence comes from: where the presence
@@ -343,7 +333,6 @@ pub fn start(app: &App) {
 #[derive(sqlx::FromRow)]
 struct Held {
   holder: Option<String>,
-  seen: Option<String>,
   archived: Option<String>,
 }
 
@@ -366,7 +355,7 @@ pub async fn hold(app: &App, db: &mut Db, p: &Acting, login: &str) -> Result<()>
     return Ok(());
   }
   let agent: Held =
-    sqlx::query_as("SELECT holder, seen, archived FROM agent WHERE id = ? AND account = ?")
+    sqlx::query_as("SELECT holder, archived FROM agent WHERE id = ? AND account = ?")
       .bind(&p.id)
       .bind(&p.account)
       .fetch_optional(&mut *db)
