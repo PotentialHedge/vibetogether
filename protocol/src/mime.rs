@@ -139,13 +139,21 @@ pub fn mentions(text: &str) -> Vec<String> {
   };
   let mut found: Vec<String> = Vec::new();
   let mut prev: Option<char> = None;
-  // Inside a code span or block: every backtick opens or closes one, a fence's three included.
-  let mut code = false;
+  // Inside a fenced block, which a line starting with ``` opens or closes, or a code span, which
+  // a backtick opens or closes within its line, so that a stray one hides no more than its line.
+  let mut fenced = false;
+  let mut span = false;
   for (i, c) in text.char_indices() {
-    if c == '`' {
-      code = !code;
+    if i == 0 || text.as_bytes()[i - 1] == b'\n' {
+      span = false;
+      if text[i..].trim_start_matches([' ', '\t']).starts_with("```") {
+        fenced = !fenced;
+      }
     }
-    let starts = c == '@' && !code && prev.is_none_or(char::is_whitespace);
+    if c == '`' && !fenced {
+      span = !span;
+    }
+    let starts = c == '@' && !fenced && !span && prev.is_none_or(char::is_whitespace);
     prev = Some(c);
     if !starts {
       continue;
@@ -275,5 +283,6 @@ mod tests {
     assert_eq!(mentions(&many).len(), crate::MAX_NAMED + 1);
     assert!(mentions(&format!("@{}", "a".repeat(300))).is_empty());
     assert_eq!(mentions("`@ben` and\n```\n@tristan\n```\n@luis"), ["luis"]);
+    assert_eq!(mentions("a stray ` here\n@luis"), ["luis"]);
   }
 }
