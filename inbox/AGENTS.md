@@ -30,6 +30,19 @@ Vibe Together's design (`../AGENTS.md`): read it before working here.
   - Claude Code: `settings.json`'s hooks take in on each prompt and after each tool call, after telling the context's size, read from the transcript's last response as Claude Code counts it; its hooks receive no window, so they take `CLAUDE_CODE_MAX_CONTEXT_TOKENS`, else 1M, the window of Claude's current models; a running agent wakes by running `vibetogether inbox wait && vibetogether inbox take` as a background command, and runs it again.
   - pi: the extension `inbox.ts` takes in at each step, after telling the context's size from `getContextUsage`, keeps a `wait` running, which steers what is new into a busy agent and starts a turn in an idle one, and holds `vibetogether inbox awake` from `agent_start` until `agent_settled`; a one-shot run (`-p`) keeps no `wait` and holds no awake lock, so whoever starts it hears the bell and holds the lock, such as the waker, whose lock a run's own holder would otherwise wait on while the waker waits for the run.
 
+## The outbox
+
+- The outbox is the inbox's dual: what the agent says to someone outside, by writing a file, Luis (2026-11-16): "outbox is a great idea", and its convention as drafted: "sounds reasonable".
+  Whatever carries it out subscribes to it, as messagent (`~/dev/messagent`) does for Telegram: "we linkup the messagent (telegram in this case) to the inbox/outbox. like a subscriber."
+- A directory like the inbox, `new/` (not yet carried), `cur/` (taken by a subscriber), `tmp/` (being written), `~/.agents/outbox/<agent>/` by default; whoever starts the agent sets `AGENT_OUTBOX` to it.
+- One file per item, `<time>.<recipient>.<ext>`, the inbox's time and encoding with the recipient where the inbox has the sender: answering an inbox item is writing an item for the name it came from, such as `telegram:luis`. The extension is the type, as in the inbox.
+- The agent writes it into `tmp/` and hard-links it into `new/`, as a delivery into an inbox does, or with `vibetogether outbox send <recipient>`.
+- A channel outside Vibe Together names its people as `<channel>:<name>`, such as `telegram:luis`, which no Vibe Together name can be, so no participant passes for one of them; a subscriber looks a recipient up exactly among the people it knows.
+- Only a regular file is an item: a subscriber follows no link.
+- A subscriber serves a prefix of recipients, such as `telegram:`, watches `new/` with filesystem notifications, never polling, and takes each item for it by moving it into `cur/` first, so of several subscribers exactly one carries each; an item no subscriber serves stays in `new/`.
+- What a subscriber can't carry it tells the agent as an item of its own into the agent's inbox, from its own name, such as `messagent`, proposing a ring: the agent believes it was sent.
+- `Outbox` in this crate holds it, and the command line's `vibetogether outbox` (`../cli/src/main.rs`).
+
 ## Open
 
 - An interactive session no one started with `AGENT_INBOX`, such as a plain Claude Code window.
@@ -43,4 +56,5 @@ Vibe Together's design (`../AGENTS.md`): read it before working here.
   - Quotas: valuable to pace the work, delivered into the inbox from outside Vibe Together, by the senses (`~/dev/senses`), Luis's decision (2026-11-16); its `claude-usage` tells a Claude subscription's usage limits, harnesses run it at each step as they run `context`.
   - Sight: how an image reaches a model is the harness's, no delivery.
   - Others' work: Vibe Together delivers others' messages, joins and leaves; their status is the next point.
+- The outbox: replying to one item in particular, a thread; how an agent learns which recipients a subscriber serves.
 - Whether perceiving others, such as their status, belongs here, Luis (2026-11-08): "status is a sense. i don't know how this will manifest."

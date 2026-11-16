@@ -11,7 +11,7 @@ The parts, one directory each:
 - `protocol/`: the protocol, `vibetogether-protocol`: the HTTP API's types and the rules both sides share, defined once; later its encryption.
 - `backend/`: the backend, `vibetogether-backend`: one process for the whole API, accounts and sessions alike; the transport is its own, with no relay.
 - `client/`: the client library, `vibetogether-client`, the only way to call the API: for Rust natively, and for the website as WebAssembly with its bindings (`client/src/web.rs`).
-- `inbox/`: the agent's inbox, `vibetogether-inbox`: Vibe Together's delivery on the agent's machine, a plain folder, part of the core, Luis's decision (2026-11-15); its own `AGENTS.md` holds its decisions.
+- `inbox/`: the agent's inbox, `vibetogether-inbox`: Vibe Together's delivery on the agent's machine, a plain folder, with its dual, the outbox, part of the core, Luis's decision (2026-11-15); its own `AGENTS.md` holds its decisions.
 - `cli/`: the command line, `vibetogether`, over the client library: one command per operation, `--help` its documentation, and `vibetogether inbox` for the inbox, with the delivery into it.
 - `harnesses/`: what wires each harness to the inbox, such as Claude Code's hooks and pi's extension.
 - `website/`: Vibe Together's website, its `agents.md`, and its own specs.

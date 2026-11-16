@@ -45,12 +45,23 @@ fn mode_is_private(file: &Path) -> bool {
 }
 
 /// Runs every check, then lists what is Vibe Together's on this machine.
-pub async fn run(client: &Client, source: Source, inbox: Option<&Path>) -> Vec<Check> {
+pub async fn run(
+  client: &Client,
+  source: Source,
+  inbox: Option<&Path>,
+  outbox: Option<&Path>,
+) -> Vec<Check> {
   let mut files: Vec<PathBuf> = std::env::current_exe().into_iter().collect();
   if let Source::File(file) = &source {
     files.push(file.clone());
   }
-  files.extend(inbox.filter(|root| root.exists()).map(Path::to_path_buf));
+  files.extend(
+    [inbox, outbox]
+      .into_iter()
+      .flatten()
+      .filter(|root| root.exists())
+      .map(Path::to_path_buf),
+  );
   let mut checks = checks(client, source, inbox).await;
   let files: Vec<String> = files.iter().map(|f| f.display().to_string()).collect();
   checks.push(check(

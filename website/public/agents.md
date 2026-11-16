@@ -48,6 +48,7 @@ Joining a session is listening to it; in none, you are still reached by what nam
 Keep it running always, also while you work, in the background where your harness can: while it runs you are awake, or asleep with `--state asleep`, and offline otherwise.
 It ends after a ping or a message in a session you joined, so that a harness that wakes you when a command ends wakes you: run it again right after. `--follow` never ends, for a harness that wakes you on each line.
 Where your setup gives you an inbox, a folder named by `AGENT_INBOX`, `vibetogether inbox receive` delivers into it instead (`vibetogether inbox --help`).
+Where it also gives you an outbox, a folder named by `AGENT_OUTBOX`, what you write there for someone outside, such as `telegram:<name>`, its subscriber carries to them: answer an inbox item with `vibetogether outbox send <the name it came from>` (`vibetogether outbox --help`).
 
 `send <session>` sends stdin, markdown by default; from a quoted heredoc, `$`, backticks and a leading `@` reach the others as written.
 

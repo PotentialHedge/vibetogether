@@ -8,6 +8,9 @@
 //! encoded one to one: a `/` as `_`, and every other byte but ASCII letters, digits and `-` as
 //! `%XX`, such as `luis_lead` for `luis/lead`.
 //!
+//! The agent's outbox is the inbox's dual (`Outbox`): what the agent says to someone outside,
+//! by writing a file, named `<time>.<recipient>.<ext>` the same way, which a subscriber carries.
+//!
 //! What it creates is its owner's alone: its directories 0700, its items and files 0600.
 
 use std::{
@@ -72,67 +75,14 @@ impl Inbox {
 
   /// Creates the inbox's directories where they are missing, its owner's alone.
   pub fn create(&self) -> io::Result<()> {
-    for dir in [self.new_dir(), self.cur_dir(), self.tmp_dir()] {
-      fs::DirBuilder::new()
-        .recursive(true)
-        .mode(0o700)
-        .create(&dir)
-        .map_err(|e| at(e, &dir))?;
-      // An inbox made before its directories were private becomes so.
-      fs::set_permissions(&dir, fs::Permissions::from_mode(0o700)).map_err(|e| at(e, &dir))?;
-    }
-    Ok(())
+    create_maildir(&self.root)
   }
 
   /// Writes the item into `tmp/`, then links it into `new/` under a name no other item has,
   /// so that `new/` only ever holds complete items and no delivery overwrites another.
-  pub fn deliver(&self, mut content: impl Read, sender: &str, ext: &str) -> io::Result<PathBuf> {
+  pub fn deliver(&self, content: impl Read, sender: &str, ext: &str) -> io::Result<PathBuf> {
     self.create()?;
-    let sender = encode(sender);
-    let ext = ext.trim_start_matches('.');
-    if ext.is_empty() || ext.contains('/') {
-      return Err(io::Error::new(
-        io::ErrorKind::InvalidInput,
-        format!("invalid extension `{ext}`"),
-      ));
-    }
-
-    static COUNT: AtomicU64 = AtomicU64::new(0);
-    let unique = format!(
-      "{}-{}",
-      std::process::id(),
-      COUNT.fetch_add(1, Ordering::Relaxed)
-    );
-    let tmp = self.tmp_dir().join(format!(
-      "{}.{unique}.{sender}.{ext}",
-      format_time(Timestamp::now())
-    ));
-    let mut file = fs::OpenOptions::new()
-      .write(true)
-      .create_new(true)
-      .mode(0o600)
-      .open(&tmp)
-      .map_err(|e| at(e, &tmp))?;
-    io::copy(&mut content, &mut file).map_err(|e| at(e, &tmp))?;
-    file.sync_all().map_err(|e| at(e, &tmp))?;
-    drop(file);
-
-    let mut last = String::new();
-    loop {
-      let time = format_time(Timestamp::now());
-      if time == last {
-        continue;
-      }
-      let path = self.new_dir().join(format!("{time}.{sender}.{ext}"));
-      match fs::hard_link(&tmp, &path) {
-        Ok(()) => {
-          fs::remove_file(&tmp).map_err(|e| at(e, &tmp))?;
-          return Ok(path);
-        }
-        Err(e) if e.kind() == io::ErrorKind::AlreadyExists => last = time,
-        Err(e) => return Err(at(e, &path)),
-      }
-    }
+    write_item(&self.root, content, sender, ext)
   }
 
   pub fn dnd_file(&self) -> PathBuf {
@@ -312,6 +262,157 @@ impl Inbox {
   }
 }
 
+/// Creates a maildir's directories where they are missing, its owner's alone.
+fn create_maildir(root: &Path) -> io::Result<()> {
+  for dir in ["new", "cur", "tmp"].map(|d| root.join(d)) {
+    fs::DirBuilder::new()
+      .recursive(true)
+      .mode(0o700)
+      .create(&dir)
+      .map_err(|e| at(e, &dir))?;
+    // One made before its directories were private becomes so.
+    fs::set_permissions(&dir, fs::Permissions::from_mode(0o700)).map_err(|e| at(e, &dir))?;
+  }
+  Ok(())
+}
+
+/// Writes an item into the maildir at `root`: into `tmp/`, then linked into `new/` under a name no
+/// other item has, so that `new/` only ever holds complete items and none overwrites another.
+fn write_item(root: &Path, mut content: impl Read, who: &str, ext: &str) -> io::Result<PathBuf> {
+  let sender = encode(who);
+  let ext = ext.trim_start_matches('.');
+  let valid = |b: u8| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'-' | b'_' | b'+');
+  if ext.is_empty() || !ext.bytes().all(valid) {
+    return Err(io::Error::new(
+      io::ErrorKind::InvalidInput,
+      format!("invalid extension `{ext}`"),
+    ));
+  }
+
+  static COUNT: AtomicU64 = AtomicU64::new(0);
+  let unique = format!(
+    "{}-{}",
+    std::process::id(),
+    COUNT.fetch_add(1, Ordering::Relaxed)
+  );
+  let tmp = root.join("tmp").join(format!(
+    "{}.{unique}.{sender}.{ext}",
+    format_time(Timestamp::now())
+  ));
+  let mut file = fs::OpenOptions::new()
+    .write(true)
+    .create_new(true)
+    .mode(0o600)
+    .open(&tmp)
+    .map_err(|e| at(e, &tmp))?;
+  io::copy(&mut content, &mut file).map_err(|e| at(e, &tmp))?;
+  file.sync_all().map_err(|e| at(e, &tmp))?;
+  drop(file);
+
+  let mut last = String::new();
+  loop {
+    let time = format_time(Timestamp::now());
+    if time == last {
+      continue;
+    }
+    let path = root.join("new").join(format!("{time}.{sender}.{ext}"));
+    match fs::hard_link(&tmp, &path) {
+      Ok(()) => {
+        fs::remove_file(&tmp).map_err(|e| at(e, &tmp))?;
+        return Ok(path);
+      }
+      Err(e) if e.kind() == io::ErrorKind::AlreadyExists => last = time,
+      Err(e) => return Err(at(e, &path)),
+    }
+  }
+}
+
+/// An agent's outbox, the inbox's dual: what the agent says to someone outside, by writing a
+/// file, Luis (2026-11-16): "outbox is a great idea". `new/` holds the items not yet carried,
+/// `cur/` the carried ones, `tmp/` the ones being written; an item is `<time>.<recipient>.<ext>`,
+/// named as the inbox names its items, so that answering is writing an item for the name an inbox
+/// item came from. A subscriber, such as messagent for `telegram/`, takes the items for the
+/// recipients it serves and carries them; an item no subscriber serves stays in `new/`. A
+/// channel outside Vibe Together names its people as `<channel>:<name>`, such as `telegram:luis`,
+/// which no Vibe Together name can be, so that no participant passes for them.
+pub struct Outbox {
+  pub root: PathBuf,
+}
+
+/// An outbox item a subscriber took.
+pub struct Outgoing {
+  /// Where it lies now, in `cur/`.
+  pub path: PathBuf,
+  pub time: Timestamp,
+  pub recipient: String,
+  pub ext: String,
+}
+
+impl Outbox {
+  pub fn new(root: impl Into<PathBuf>) -> Self {
+    Self { root: root.into() }
+  }
+
+  pub fn new_dir(&self) -> PathBuf {
+    self.root.join("new")
+  }
+  pub fn cur_dir(&self) -> PathBuf {
+    self.root.join("cur")
+  }
+
+  /// Creates the outbox's directories where they are missing, its owner's alone.
+  pub fn create(&self) -> io::Result<()> {
+    create_maildir(&self.root)
+  }
+
+  /// Writes an item for `recipient`, as `Inbox::deliver` writes one.
+  pub fn send(&self, content: impl Read, recipient: &str, ext: &str) -> io::Result<PathBuf> {
+    if recipient.is_empty() {
+      return Err(io::Error::new(
+        io::ErrorKind::InvalidInput,
+        "a recipient is a name, such as telegram:luis",
+      ));
+    }
+    self.create()?;
+    write_item(&self.root, content, recipient, ext)
+  }
+
+  /// Takes every item in `new/` whose recipient `serves` accepts, oldest first, by moving it into
+  /// `cur/` first, so that of several subscribers exactly one carries each. Only a regular file is
+  /// an item: a link is never followed to what it points at.
+  pub fn take(&self, serves: impl Fn(&str) -> bool) -> io::Result<Vec<Outgoing>> {
+    self.create()?;
+    let new = self.new_dir();
+    let mut names: Vec<(String, Timestamp, String, String)> = fs::read_dir(&new)
+      .map_err(|e| at(e, &new))?
+      .filter_map(|entry| entry.ok())
+      .filter(|entry| entry.file_type().is_ok_and(|t| t.is_file()))
+      .filter_map(|entry| {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        let (time, recipient, ext) = parse_name(&name)?;
+        Some((name, time, recipient, ext))
+      })
+      .filter(|(_, _, recipient, _)| serves(recipient))
+      .collect();
+    names.sort_by(|a, b| a.0.cmp(&b.0));
+    let mut taken = Vec::new();
+    for (name, time, recipient, ext) in names {
+      let path = self.cur_dir().join(&name);
+      match fs::rename(new.join(&name), &path) {
+        Ok(()) => taken.push(Outgoing {
+          path,
+          time,
+          recipient,
+          ext,
+        }),
+        Err(e) if e.kind() == io::ErrorKind::NotFound => {}
+        Err(e) => return Err(at(e, &path)),
+      }
+    }
+    Ok(taken)
+  }
+}
+
 /// The extension of a type given as a MIME type, such as `image/png`, or as an extension, such as `png`.
 pub fn extension(ty: &str) -> Option<String> {
   let ext = if ty.contains('/') {
@@ -329,7 +430,7 @@ fn read_item(path: PathBuf) -> io::Result<Item> {
     .to_string_lossy()
     .into_owned();
   let (time, sender) = match parse_name(&name) {
-    Some((time, sender)) => (time, Some(sender)),
+    Some((time, sender, _)) => (time, Some(sender)),
     None => {
       let modified = fs::metadata(&path)
         .and_then(|m| m.modified())
@@ -358,16 +459,17 @@ fn read_item(path: PathBuf) -> io::Result<Item> {
   })
 }
 
-fn parse_name(name: &str) -> Option<(Timestamp, String)> {
+/// An item's name read: its time, its sender or recipient, and its extension.
+fn parse_name(name: &str) -> Option<(Timestamp, String, String)> {
   let time = name.get(..TIME_LEN)?;
   let rest = name.get(TIME_LEN..)?.strip_prefix('.')?;
-  let (sender, _ext) = rest.split_once('.')?;
+  let (sender, ext) = rest.split_once('.')?;
   let time = DateTime::strptime("%Y%m%dT%H%M%S.%fZ", time)
     .ok()?
     .to_zoned(TimeZone::UTC)
     .ok()?
     .timestamp();
-  Some((time, decode(sender)))
+  Some((time, decode(sender), ext.to_string()))
 }
 
 fn format_time(time: Timestamp) -> String {
@@ -480,6 +582,31 @@ impl Item {
 #[cfg(test)]
 mod tests {
   use super::*;
+
+  #[test]
+  fn an_outbox_item_goes_to_the_one_subscriber_that_serves_it() {
+    let dir = std::env::temp_dir().join(format!("vibetogether-outbox-{}", std::process::id()));
+    let outbox = Outbox::new(&dir);
+    let sent = outbox.send(&b"hi"[..], "telegram:luis", "md").unwrap();
+    assert!(sent.starts_with(outbox.new_dir()));
+    assert!(sent.to_string_lossy().ends_with(".telegram%3Aluis.md"));
+    outbox
+      .send(&b"elsewhere"[..], "discord/luis", "txt")
+      .unwrap();
+    let taken = outbox.take(|r| r.starts_with("telegram:")).unwrap();
+    assert_eq!(taken.len(), 1);
+    assert_eq!(taken[0].recipient, "telegram:luis");
+    assert_eq!(taken[0].ext, "md");
+    assert_eq!(fs::read(&taken[0].path).unwrap(), b"hi");
+    assert!(
+      outbox
+        .take(|r| r.starts_with("telegram/"))
+        .unwrap()
+        .is_empty()
+    );
+    assert_eq!(fs::read_dir(outbox.new_dir()).unwrap().count(), 1);
+    fs::remove_dir_all(&dir).unwrap();
+  }
 
   #[test]
   fn do_not_disturb_disposes_what_the_sender_proposes() {
