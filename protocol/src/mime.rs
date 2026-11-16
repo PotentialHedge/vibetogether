@@ -123,7 +123,8 @@ pub fn message_type(base: &str, ping: Option<&[String]>, fyi: &[String]) -> Stri
 
 /// The names `text` mentions, each once, in order: every `@name` at the start or after
 /// whitespace, not followed by a word character, `/` or `-`, where `name` is a login or an
-/// agent's `<login>/<agent>`, and `*` for `@everyone`.
+/// agent's `<login>/<agent>`, and `*` for `@everyone`. It stops one past `MAX_NAMED`, enough for
+/// a message that names too many to be refused, so that a long text costs no more than its scan.
 pub fn mentions(text: &str) -> Vec<String> {
   let part = |s: &str| -> usize {
     let mut end = 0;
@@ -165,6 +166,9 @@ pub fn mentions(text: &str) -> Vec<String> {
     };
     if !found.contains(&name) {
       found.push(name);
+      if found.len() > crate::MAX_NAMED {
+        break;
+      }
     }
   }
   found
@@ -258,5 +262,7 @@ mod tests {
     );
     assert_eq!(with_mentions("text/markdown", "no one"), "text/markdown");
     assert_eq!(with_mentions("image/png", "@lead"), "image/png");
+    let many: String = (0..100_000).map(|i| format!("@a{i} ")).collect();
+    assert_eq!(mentions(&many).len(), crate::MAX_NAMED + 1);
   }
 }
