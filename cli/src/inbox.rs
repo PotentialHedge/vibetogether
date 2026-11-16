@@ -23,20 +23,23 @@ use vibetogether_inbox::{Inbox, extension};
 /// The inbox's commands.
 #[derive(Subcommand)]
 pub enum Command {
-  /// Keeps the agent's inbox filled from its stream: one receive kept open always, awake while
-  /// the inbox's awake lock is held and asleep otherwise. Each item that reaches the agent is
-  /// delivered as text whose first line says where it is from; a ping or a session's message
-  /// also rings the bell, an fyi stays quiet, unless the agent's do-not-disturb settings say
-  /// otherwise, matching `from`, `reach` (`ping`, `fyi`, `session`) and `session` (its name or
-  /// id); where they quiet a mention, its receive holds do not disturb, so others see it. An item
-  /// counts as received once it is in `new/`,
-  /// and as read once it and every item before it have left `new/`. It runs until refused.
+  /// Keeps the agent's inbox filled from its stream.
+  ///
+  /// One receive is kept open always, awake while the inbox's awake lock is held and asleep
+  /// otherwise. Each item that reaches the agent is
+  /// delivered as text whose first line says where it is from. A ping or a session's message
+  /// also rings the bell, an fyi stays quiet, unless the do-not-disturb rules (see `deliver`)
+  /// say otherwise, matching `from`, `reach` (`ping`, `fyi`, `session`) and `session` (its name
+  /// or id); where they quiet a mention, the receive holds do not disturb, so others see it. An
+  /// item counts as received once it is in `new/`, and as read once it and every item before it
+  /// have left `new/`. It runs until refused.
   Receive,
-  /// Delivers one item, read from stdin, into `new/`. The agent's do-not-disturb settings, the
-  /// inbox's file `do-not-disturb`, decide whether it rings, by `from`: each line a rule, fields
-  /// to match and then `ring` or `quiet`, such as `session=hive reach=session quiet`, or `quiet`
-  /// alone for everything; the last rule that matches decides, and where none does, the sender's
-  /// proposal stands.
+  /// Delivers one item, read from stdin, into `new/`.
+  ///
+  /// The inbox's file `do-not-disturb` decides
+  /// whether it rings, by `from`: each line is a rule, fields to match and then `ring` or `quiet`,
+  /// such as `session=hive reach=session quiet`, or `quiet` alone for everything. The last rule
+  /// that matches decides; where none does, the sender's proposal stands.
   Deliver {
     /// Who sends it, such as an agent's or a person's name.
     #[arg(long, default_value = "unknown")]
@@ -50,16 +53,22 @@ pub enum Command {
   },
   /// Rings the bell: wakes the agent without delivering anything.
   Ring,
-  /// Prints every new item, oldest first, and moves it to `cur/`; nothing where nothing is new.
-  /// A harness runs it at each step and gives its output to the model: each item as
-  /// `<inbox-item from=".." time="..">` with its text, or, where it is no text, its path and type.
+  /// Prints every new item, oldest first, and moves it to `cur/`.
+  ///
+  /// Prints nothing where nothing is new. A harness runs it at each step and gives its output to
+  /// the model: each item as `<inbox-item from=".." time="..">` with its text, or, where it is
+  /// no text, its path and type.
   Take,
-  /// Blocks until the bell rings, then silences it; at once where it rang while no one waited.
-  /// It wakes the agent: run it as a background command, or from a watcher that starts the agent.
-  /// It takes nothing in: run `take` after it.
+  /// Blocks until the bell rings, then silences it.
+  ///
+  /// It returns at once where the bell rang while no one waited. It wakes the agent: run it as a
+  /// background command, or from a watcher that starts the agent. It takes nothing in: run
+  /// `take` after it.
   Wait,
-  /// The waker: answers the bell once no mind of the agent is awake, by running the command,
-  /// such as a harness's one-shot run, while items are untaken, holding the awake lock meanwhile.
+  /// Answers the bell by running a command, such as a harness's one-shot run.
+  ///
+  /// Once no mind of the agent is awake, it runs the command while items are untaken, holding
+  /// the awake lock meanwhile.
   /// A ring while a mind is awake is that mind's, and only what it leaves untaken is answered;
   /// a ring with nothing new runs nothing. It stops answering a ring after a run that failed or
   /// took nothing in. The command gets `AGENT_INBOX`. It runs until stopped.
@@ -68,14 +77,17 @@ pub enum Command {
     #[arg(trailing_var_arg = true, required = true, value_name = "COMMAND")]
     command: Vec<String>,
   },
-  /// Holds the awake lock until stdin closes: the agent is awake meanwhile, such as while a turn
-  /// runs. A harness starts it with a pipe at a turn's start and closes the pipe at its end; if
+  /// Holds the awake lock until stdin closes: the agent is awake meanwhile.
+  ///
+  /// A harness starts it with a pipe at a turn's start and closes the pipe at its end; if
   /// the harness dies, the pipe closes and the lock goes with it.
   Awake,
-  /// Tells the agent how full its context is: delivers its size against its model's window, a
-  /// quiet item from `context`, as the size crosses a tenth of the window, either way, and
-  /// nothing otherwise. A harness runs it at each step, before `take`; the tenth told last is
-  /// kept in the inbox's file `context`.
+  /// Tells the agent how full its context is.
+  ///
+  /// Each time the size crosses a tenth of the model's
+  /// window, up or down, delivers the size against the window as a quiet item from `context`,
+  /// and nothing otherwise. A harness runs it at each step, before `take`; the inbox's file
+  /// `context` keeps the tenth told last.
   Context {
     /// The tokens the context holds.
     tokens: u64,

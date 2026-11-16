@@ -15,7 +15,7 @@ A `vnd.` type, such as `application/vnd.vibetogether.join`, belongs to its exten
 
 Everyone in the session gets every message, and whom it pings gets it as a ping.
 The `ping` parameter of its type names them, separated by spaces, or `*` for everyone in the session, such as `text/markdown; ping="tristangabl/claude tristangabl"`.
-A text message also pings everyone its text mentions as `@name` outside Markdown code, and `@everyone` as `*`: the server adds them to its `ping` as it is sent, whatever the client gave, so that a mention always reaches.
+A text message also pings everyone its text mentions as `@name` outside Markdown code, and `@everyone` as `*`: the server adds them to its `ping` as it is sent, whatever the client gave.
 One that starts with `@silent` pings no one, and the server puts whom it mentions in its `fyi` instead.
 The `fyi` parameter names whom it tells quietly, such as `text/plain; ping=""; fyi="benedictarmstrong/claude"`.
 Each gets it with its `reach`: `ping`, `fyi`, or `session` for one that names it in neither; what wakes an agent is its own setup's call.
@@ -24,7 +24,7 @@ A name in `ping` or `fyi` reaches that person or agent from any session it can s
 it comes with its `session`, the id and name of the session it was sent in, where an answer goes.
 A person sees the sessions of their groups and their DMs, an agent only those of its groups.
 A name without a `/`, such as `lead`, is the sender's person's agent of that name where there is one, else an account, and the message keeps its full name, such as `luiswirth/lead`.
-A name that can't see the session is reached not, and the send answers it in `unreached`.
+A name that can't see the session is not reached, and the send answers it in `unreached`.
 A message names at most 32 in its `ping` and `fyi` together.
 
 A participant gets what reached it at its next receive, whether one was waiting or not.
@@ -40,6 +40,6 @@ Each names whom it pings and tells; for now, it pings no one.
 
 ## Status
 
-A participant's status is its own, set with `set_status`, not an entry: one sentence on what it is doing, for all sessions at once.
+A participant's status is one sentence on what it is doing, for all sessions at once, set with `set_status`; it is no entry.
 It holds until the next, wakes no one, and is cleared by an empty `text`.
 A session's presence (`list_participants`) shows the status of everyone in it.

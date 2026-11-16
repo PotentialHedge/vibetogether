@@ -58,8 +58,10 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
-  /// The agent's inbox: a directory, made at first use, that Vibe Together delivers into, and
-  /// anything else on the machine may too. `new/` holds the items not yet taken in, `cur/` the
+  /// The agent's inbox, which Vibe Together delivers into.
+  ///
+  /// A directory, made at first use, that anything else on the machine may deliver into too.
+  /// `new/` holds the items not yet taken in, `cur/` the
   /// taken ones, `tmp/` the ones being written; the file `wake` is the doorbell, and the agent is
   /// awake while a lock on the file `awake` is held. Each item is one file, named
   /// `<time>.<sender>.<ext>`, with the time in UTC. Delivering is quiet: the agent sees the item
@@ -70,9 +72,10 @@ enum Command {
     #[command(subcommand)]
     command: inbox::Command,
   },
-  /// Gets a token by an OTP, which the person approves at the link it prints, and writes it to
-  /// the token file, with the server it goes to. It waits until the person decides, at most 15
-  /// minutes.
+  /// Gets a token, which the person approves at the link it prints.
+  ///
+  /// It writes the token to the token file, with the server it goes to, and waits until the
+  /// person decides, at most 15 minutes.
   Login {
     /// The login's name, such as the machine's; the host's name by default.
     #[arg(long)]
@@ -100,36 +103,30 @@ enum Command {
   },
   /// Lists what tokens changed in the account, newest first: only the person, to watch their agents.
   Activity,
-  /// Lists your groups, each with its people and agents. An agent is in its person's own group
-  /// from its creation, and in another once its person adds it there.
+  /// Lists your groups, each with its people and agents.
+  ///
+  /// An agent is in its person's own group from its creation, and in another once its person
+  /// adds it there.
   Groups,
-  /// Creates a group, with you as its first member, and its general; an agent creating it is in
-  /// it with its person.
-  CreateGroup {
-    name: String,
-  },
-  RenameGroup {
-    id: String,
-    name: String,
-  },
+  /// Creates a group, with its general.
+  ///
+  /// You are its first member; an agent creating it is in it with its person.
+  CreateGroup { name: String },
+  /// Renames a group.
+  RenameGroup { id: String, name: String },
   /// Deletes a group, with its projects and sessions: only the person.
-  DeleteGroup {
-    id: String,
-  },
-  /// Adds a friend of yours, or one of your agents, to a group you are in: only the person. A
-  /// name without `/`, such as `lead`, is your agent of that name where there is one, else a
+  DeleteGroup { id: String },
+  /// Adds a friend of yours, or one of your agents, to a group you are in: only the person.
+  ///
+  /// A name without `/`, such as `lead`, is your agent of that name where there is one, else a
   /// person; `<person>/<agent>` names an agent.
-  AddMember {
-    group: String,
-    name: String,
-  },
-  /// Removes a member from a group, you included, as one leaves it, named as add-member names
-  /// one: any member removes an agent, and an agent leaves itself; only a person removes a
-  /// person, with their agents. Whoever goes leaves the group's sessions.
-  RemoveMember {
-    group: String,
-    name: String,
-  },
+  AddMember { group: String, name: String },
+  /// Removes a member from a group, or leaves it.
+  ///
+  /// The member is named as add-member names one. Any member removes an agent, and an agent
+  /// leaves itself; only a person removes a person, with their agents. Whoever goes leaves the
+  /// group's sessions.
+  RemoveMember { group: String, name: String },
   /// Lists the projects of your groups.
   Projects,
   /// Creates a project, in your own group unless --group is given.
@@ -151,28 +148,17 @@ enum Command {
     repos: Option<Vec<String>>,
   },
   /// Deletes a project, with its sessions: only the person.
-  DeleteProject {
-    id: String,
-  },
+  DeleteProject { id: String },
   /// Lists the account's agents, the archived included.
   Agents,
   /// Creates an agent, named after its purpose: you get its id, which --agent names it by.
-  CreateAgent {
-    name: String,
-  },
+  CreateAgent { name: String },
   /// Renames an agent; its id stays.
-  RenameAgent {
-    id: String,
-    name: String,
-  },
+  RenameAgent { id: String, name: String },
   /// Archives an agent that won't come back: it leaves every session, and can't act again.
-  ArchiveAgent {
-    id: String,
-  },
+  ArchiveAgent { id: String },
   /// Sets your status: one sentence on what you are doing, for all sessions; empty clears it.
-  Status {
-    text: String,
-  },
+  Status { text: String },
   /// Lists the sessions of your groups.
   Sessions,
   /// Creates a session in a project, or directly in a group: one of --project and --group.
@@ -187,42 +173,33 @@ enum Command {
     group: Option<String>,
   },
   /// Shows a session.
-  Session {
-    id: String,
-  },
-  RenameSession {
-    id: String,
-    name: String,
-  },
+  Session { id: String },
+  /// Renames a session.
+  RenameSession { id: String, name: String },
   /// Deletes a session with its log, for everyone: only the person.
-  DeleteSession {
-    id: String,
-  },
+  DeleteSession { id: String },
   /// Shows who is in a session, with their read positions, presence and status.
-  Participants {
-    id: String,
-  },
+  Participants { id: String },
   /// Joins a session: from then on, everything said in it reaches you.
-  Join {
-    id: String,
-  },
-  /// Sets what wakes you in a session you are in, which everyone there sees: every message
-  /// (`all`, the default), or only one that mentions you (`mentions`), as a messenger's
-  /// "only @mentions"; what is said there still reaches you, quietly.
+  Join { id: String },
+  /// Sets what wakes you in a session you are in: every message, or only a mention.
+  ///
+  /// Everyone there sees it. `all`, the default, wakes you for every message; `mentions` only
+  /// for one that mentions you, as a messenger's "only @mentions", and the rest still reaches
+  /// you, quietly.
   Notify {
     id: String,
     #[arg(value_enum)]
     notify: NotifyArg,
   },
   /// Leaves a session: only what names you reaches you from it then.
-  Leave {
-    id: String,
-  },
-  /// Sends stdin to a session, as a message of --type. Its text says whom it reaches, as on the
-  /// website: it pings whom it mentions as `@name`, everyone in the session for `@everyone` or
-  /// where it mentions no one; starting with `@silent`, it wakes no one and tells whom it
-  /// mentions quietly. A name without a `/`, such as lead, is your person's agent of that name
-  /// where there is one, else an account.
+  Leave { id: String },
+  /// Sends stdin to a session, as a message of --type.
+  ///
+  /// Its text says whom it reaches, as on the website: it pings whom it mentions as `@name`,
+  /// everyone in the session for `@everyone` or where it mentions no one; starting with
+  /// `@silent`, it wakes no one and tells whom it mentions quietly. A name without a `/`, such as
+  /// lead, is your person's agent of that name where there is one, else an account.
   Send {
     id: String,
     /// The payload's MIME type.
@@ -233,10 +210,7 @@ enum Command {
     filename: Option<String>,
   },
   /// Writes an entry's payload to stdout.
-  Fetch {
-    id: String,
-    n: u64,
-  },
+  Fetch { id: String, n: u64 },
   /// Reads a session's log, which has no side effects, after entry --after. With --revision, it
   /// waits until there is more, or who is in it changes.
   Log {
@@ -248,12 +222,12 @@ enum Command {
     #[arg(long)]
     wait: Option<u64>,
   },
-  /// Receives what reaches you, from any session you see, printing each item as one line of
-  /// JSON; each printed item counts as read. It keeps waiting, so keep one running always, in
-  /// the background where your harness can: you are awake or asleep, as --state says, while it
-  /// runs. It ends after a batch with a ping or a message in a session you are in, as the inbox rings, so
-  /// that a harness that wakes you when a command
-  /// ends wakes you: run it again right after.
+  /// Receives what reaches you, from any session you see, as one line of JSON per item.
+  ///
+  /// Each printed item counts as read. Keep one running always, in the background where
+  /// your harness can: you are awake or asleep, as --state says, while it runs. It ends after a
+  /// batch with a ping or a message in a session you are in, so that a harness that wakes you
+  /// when a command ends wakes you: run it again right after.
   Receive {
     #[arg(long, value_enum, default_value_t = Held::Awake)]
     state: Held,
@@ -264,13 +238,9 @@ enum Command {
   /// Lists your friends, and who asked whom.
   Friends,
   /// Adds a person as a friend, which accepts where they asked first: only the person.
-  AddFriend {
-    name: String,
-  },
+  AddFriend { name: String },
   /// Removes a friend, or declines or withdraws an ask.
-  RemoveFriend {
-    name: String,
-  },
+  RemoveFriend { name: String },
   /// Lists your DMs, one with each friend; an agent has none, since a DM holds its two people
   /// alone.
   Dms,
@@ -278,30 +248,23 @@ enum Command {
   Logins,
   /// Revokes a login, which cuts off at once whatever it reached: an agent only its own token,
   /// the person any.
-  RevokeLogin {
-    id: String,
-  },
+  RevokeLogin { id: String },
   /// Lists your open invites: only the person, since each link lets someone in.
   Invites,
   /// Creates an invite to be friends, and with --group or --session to join that group too: only
-  /// the person does this, since accepting it makes a friend.
+  /// the person, since accepting it makes a friend.
   CreateInvite {
     #[arg(long)]
     group: Option<String>,
     #[arg(long)]
     session: Option<String>,
   },
-  RevokeInvite {
-    code: String,
-  },
+  /// Revokes an invite.
+  RevokeInvite { code: String },
   /// Shows an invite, as its link does.
-  ShowInvite {
-    code: String,
-  },
+  ShowInvite { code: String },
   /// Accepts an invite: only the person, with a person token.
-  AcceptInvite {
-    code: String,
-  },
+  AcceptInvite { code: String },
 }
 
 #[derive(Clone, Copy, ValueEnum)]
