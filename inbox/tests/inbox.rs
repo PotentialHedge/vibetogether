@@ -279,12 +279,11 @@ fn the_oldest_untaken_is_the_first_delivered() {
 }
 
 #[test]
-fn only_one_holds_the_agent_awake() {
-  let inbox = inbox("try-awake");
-  let held = inbox.try_hold_awake().unwrap().expect("free at first");
-  assert!(inbox.awake().unwrap());
-  assert!(inbox.try_hold_awake().unwrap().is_none());
-  drop(held);
-  assert!(!inbox.awake().unwrap());
-  assert!(inbox.try_hold_awake().unwrap().is_some());
+fn a_ring_stays_until_one_answers_it() {
+  let inbox = inbox("unring");
+  inbox.ring().unwrap();
+  inbox.rung().unwrap();
+  assert!(inbox.wake_file().exists());
+  assert!(inbox.unring().unwrap());
+  assert!(!inbox.unring().unwrap());
 }

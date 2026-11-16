@@ -58,11 +58,11 @@ pub enum Command {
   /// It wakes the agent: run it as a background command, or from a watcher that starts the agent.
   /// It takes nothing in: run `take` after it.
   Wait,
-  /// The waker: each time the bell rings, while items are untaken and no mind of the agent is
-  /// awake, runs the command, such as a harness's one-shot run, holding the awake lock while it
-  /// runs. An awake mind takes in what is new at its steps, so it starts none then; a ring with
-  /// nothing new starts none either. It stops answering a ring after a run that failed or took
-  /// nothing in. The command gets `AGENT_INBOX`. It runs until stopped.
+  /// The waker: answers the bell once no mind of the agent is awake, by running the command,
+  /// such as a harness's one-shot run, while items are untaken, holding the awake lock meanwhile.
+  /// A ring while a mind is awake is that mind's, and only what it leaves untaken is answered;
+  /// a ring with nothing new runs nothing. It stops answering a ring after a run that failed or
+  /// took nothing in. The command gets `AGENT_INBOX`. It runs until stopped.
   Wake {
     /// The command and its arguments, after `--`.
     #[arg(trailing_var_arg = true, required = true, value_name = "COMMAND")]
@@ -136,21 +136,23 @@ pub async fn run(inbox: &Inbox, command: Command, client: &Client) -> Result<(),
   Ok(())
 }
 
-/// Answers the bell: while something is untaken and no mind of the agent is awake, runs
-/// `command` as the agent's turn. It stops answering a ring after a run that failed, or that took
+/// Answers the bell: once no mind of the agent is awake, takes the ring and, while something is
+/// untaken, runs `command` as the agent's turn, holding the awake lock. A ring that comes while a
+/// mind is awake is that mind's: it stays for the mind's own wait, and only what is left once
+/// the mind sleeps is answered. It stops answering a ring after a run that failed, or that took
 /// nothing in, so that a broken command doesn't run in a loop.
 fn wake(inbox: &Inbox, command: &[String]) -> io::Result<()> {
   loop {
-    inbox.wait()?;
+    inbox.rung()?;
+    let _turn = inbox.hold_awake()?;
+    if !inbox.unring()? {
+      continue;
+    }
     while let Some(oldest) = inbox.oldest_untaken()? {
-      let Some(turn) = inbox.try_hold_awake()? else {
-        break;
-      };
       let status = std::process::Command::new(&command[0])
         .args(&command[1..])
         .env("AGENT_INBOX", &inbox.root)
         .status()?;
-      drop(turn);
       if !status.success() {
         eprintln!("vibetogether: the woken command failed: {status}");
         break;

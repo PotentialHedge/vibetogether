@@ -258,23 +258,6 @@ impl Inbox {
     Ok(file)
   }
 
-  /// Takes the lock on `awake` unless another holds it: `None` while the agent is awake.
-  pub fn try_hold_awake(&self) -> io::Result<Option<fs::File>> {
-    self.create()?;
-    let path = self.awake_file();
-    let file = fs::OpenOptions::new()
-      .create(true)
-      .append(true)
-      .mode(0o600)
-      .open(&path)
-      .map_err(|e| at(e, &path))?;
-    match file.try_lock() {
-      Ok(()) => Ok(Some(file)),
-      Err(fs::TryLockError::WouldBlock) => Ok(None),
-      Err(fs::TryLockError::Error(e)) => Err(at(e, &path)),
-    }
-  }
-
   /// Whether the agent is awake: whether any open file holds the lock on `awake`, in this process or another.
   /// It tests by taking the lock for a moment, during which a `hold_awake` waits.
   pub fn awake(&self) -> io::Result<bool> {
@@ -294,23 +277,38 @@ impl Inbox {
   /// Blocks until the bell rings, then removes `wake`.
   /// Returns at once if it has rung since the last wait.
   pub fn wait(&self) -> io::Result<()> {
+    self.until(|inbox| inbox.unring())
+  }
+
+  /// Blocks until the bell has rung, leaving `wake` in place for whoever answers it.
+  pub fn rung(&self) -> io::Result<()> {
+    self.until(|inbox| Ok(inbox.wake_file().exists()))
+  }
+
+  /// Removes `wake`: whether the bell had rung, so that of concurrent answerers exactly one does.
+  pub fn unring(&self) -> io::Result<bool> {
+    let wake = self.wake_file();
+    match fs::remove_file(&wake) {
+      Ok(()) => Ok(true),
+      Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(false),
+      Err(e) => Err(at(e, &wake)),
+    }
+  }
+
+  /// Blocks until `done` holds, testing it at once and at every change in the inbox's root.
+  fn until(&self, done: impl Fn(&Self) -> io::Result<bool>) -> io::Result<()> {
     self.create()?;
     let (tx, rx) = mpsc::channel();
     let mut watcher = notify::recommended_watcher(tx).map_err(io::Error::other)?;
     watcher
       .watch(&self.root, RecursiveMode::NonRecursive)
       .map_err(io::Error::other)?;
-    let wake = self.wake_file();
-    loop {
-      match fs::remove_file(&wake) {
-        Ok(()) => return Ok(()),
-        Err(e) if e.kind() == io::ErrorKind::NotFound => {}
-        Err(e) => return Err(at(e, &wake)),
-      }
+    while !done(self)? {
       rx.recv()
         .map_err(io::Error::other)?
         .map_err(io::Error::other)?;
     }
+    Ok(())
   }
 }
 
