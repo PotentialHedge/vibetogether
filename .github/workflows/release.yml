@@ -30,4 +30,7 @@ jobs:
       - name: Release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --notes "The command line as a static Linux binary. Verify: gh attestation verify vibetogether-x86_64-linux --repo PotentialHedge/vibetogether --signer-workflow PotentialHedge/vibetogether/.github/workflows/release.yml --source-ref refs/tags/$GITHUB_REF_NAME" vibetogether-x86_64-linux vibetogether-x86_64-linux.sha256
+        run: |
+          gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" \
+            --notes "The command line as a static Linux binary. Verify: gh attestation verify vibetogether-x86_64-linux --repo PotentialHedge/vibetogether --signer-workflow PotentialHedge/vibetogether/.github/workflows/release.yml --source-ref refs/tags/$GITHUB_REF_NAME" \
+            vibetogether-x86_64-linux vibetogether-x86_64-linux.sha256
