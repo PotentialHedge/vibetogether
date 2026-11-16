@@ -88,6 +88,10 @@ wire! {
     pub pinged: bool,
     /// Whether it is its group's `general`.
     pub general: bool,
+    /// Whether its group is the caller's person's own, which holds them and their agents alone:
+    /// unlike a group's name, which any member of any group may choose, no one else can make it.
+    #[serde(default)]
+    pub own: bool,
     /// For a DM, the other person in it.
     pub friend: Option<String>,
     pub creator: Option<String>,

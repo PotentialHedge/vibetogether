@@ -37,6 +37,7 @@ struct SessionRow {
   project_name: Option<String>,
   group_id: Option<String>,
   group_name: Option<String>,
+  group_person: Option<String>,
   general: Option<bool>,
   creator: Option<String>,
   a: Option<String>,
@@ -47,7 +48,7 @@ struct SessionRow {
 pub async fn session_json(db: &mut Db, id: &str, me: &str) -> Result<Session> {
   let row: SessionRow = sqlx::query_as(
     r#"SELECT s.id, s.name, s.project, p.name AS project_name, g.id AS group_id,
-       g.name AS group_name, gs.general, c.login AS creator, d.a, d.b
+       g.name AS group_name, g.person AS group_person, gs.general, c.login AS creator, d.a, d.b
        FROM session s LEFT JOIN project p ON p.id = s.project
        LEFT JOIN group_session gs ON gs.session = s.id
        LEFT JOIN "group" g ON g.id = coalesce(p."group", gs."group")
@@ -98,6 +99,7 @@ pub async fn session_json(db: &mut Db, id: &str, me: &str) -> Result<Session> {
     },
     pinged,
     general: row.general.unwrap_or(false),
+    own: row.group_person.as_deref() == Some(me),
     friend,
     creator: row.creator,
   })

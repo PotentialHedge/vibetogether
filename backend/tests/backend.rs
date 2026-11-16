@@ -92,6 +92,60 @@ async fn send(client: &Client, session: &str, body: &str, ty: &str) -> Sent {
 }
 
 #[tokio::test]
+async fn only_a_session_of_the_persons_own_group_is_their_own_whatever_a_group_is_named() {
+  let w = world().await;
+  // Ben names a group after Luis, lets him in, and makes a session in it.
+  let lookalike = w.ben.browser.create_group("luis").await.unwrap();
+  w.ben
+    .browser
+    .add_member(&lookalike.id, "luis")
+    .await
+    .unwrap();
+  let fake = w
+    .ben
+    .browser
+    .create_session(&CreateSession {
+      name: s("voice"),
+      project: None,
+      group: Some(lookalike.id.clone()),
+    })
+    .await
+    .unwrap();
+  let own = w
+    .luis
+    .own
+    .groups()
+    .await
+    .unwrap()
+    .into_iter()
+    .find(|g| g.own)
+    .unwrap();
+  let real = w
+    .luis
+    .machine
+    .create_session(&CreateSession {
+      name: s("voice"),
+      project: None,
+      group: Some(own.id.clone()),
+    })
+    .await
+    .unwrap();
+  let mine = |sessions: Vec<Session>| -> Vec<String> {
+    sessions
+      .into_iter()
+      .filter(|x| x.own)
+      .map(|x| x.id)
+      .collect()
+  };
+  let seen = mine(w.luis.own.sessions().await.unwrap());
+  assert!(seen.contains(&real.id) && !seen.contains(&fake.id));
+  assert!(!seen.contains(&w.session.id));
+  // To his agent too, and to Ben the lookalike is his to whom it belongs: not his own.
+  assert!(mine(w.luis.machine.sessions().await.unwrap()).contains(&real.id));
+  assert!(!mine(w.ben.browser.sessions().await.unwrap()).contains(&fake.id));
+}
+
+#[tokio::test]
 async fn a_session_shows_its_project_and_only_to_its_group() {
   let w = world().await;
   assert_eq!(
