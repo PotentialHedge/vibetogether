@@ -2731,7 +2731,7 @@ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 
 [[package]]
 name = "vibetogether"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "axum",
  "clap",
@@ -2748,7 +2748,7 @@ dependencies = [
 
 [[package]]
 name = "vibetogether-backend"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "axum",
  "axum-extra",
@@ -2773,7 +2773,7 @@ dependencies = [
 
 [[package]]
 name = "vibetogether-client"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "futures-util",
  "js-sys",
@@ -2791,7 +2791,7 @@ dependencies = [
 
 [[package]]
 name = "vibetogether-inbox"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "jiff",
  "mime2ext",
@@ -2801,7 +2801,7 @@ dependencies = [
 
 [[package]]
 name = "vibetogether-protocol"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "serde",
  "serde_json",
