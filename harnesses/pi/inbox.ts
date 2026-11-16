@@ -57,6 +57,7 @@ export default function (pi: ExtensionAPI) {
 	// last step would be lost, and whoever started the run hears the bell instead.
 	let waiter: ChildProcess | undefined;
 	let stopped = false;
+	let oneShot = false;
 
 	function wait() {
 		if (stopped) return;
@@ -76,10 +77,12 @@ export default function (pi: ExtensionAPI) {
 
 	// The agent is awake from the start of a run until it has settled, retries and continuations included.
 	// The lock lives in a child that holds it until its stdin closes, so it goes when pi dies too.
+	// A one-shot run holds none: whoever started it holds the lock for it, as it hears the bell, such as
+	// the waker, which a holder of the run's own would wait on while it waits for the run.
 	let awake: ChildProcess | undefined;
 
 	pi.on("agent_start", () => {
-		if (stopped || awake) return;
+		if (stopped || awake || oneShot) return;
 		const holder = spawn("vibetogether", ["inbox", "awake"], {
 			stdio: ["pipe", "ignore", "ignore"],
 		});
@@ -106,7 +109,8 @@ export default function (pi: ExtensionAPI) {
 	}
 
 	pi.on("session_start", (_event, ctx) => {
-		if (ctx.mode !== "print" && ctx.mode !== "json") wait();
+		oneShot = ctx.mode === "print" || ctx.mode === "json";
+		if (!oneShot) wait();
 	});
 	pi.on("session_shutdown", stop);
 	process.on("exit", stop);

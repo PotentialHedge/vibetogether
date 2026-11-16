@@ -28,7 +28,7 @@ Vibe Together's design (`../AGENTS.md`): read it before working here.
     Tenths of the window, as in Hivemind, since the window is the hard limit; a soft budget is the user's policy, in their context.
 - Each harness is wired by `../harnesses/<harness>/`:
   - Claude Code: `settings.json`'s hooks take in on each prompt and after each tool call, after telling the context's size, read from the transcript's last response as Claude Code counts it; its hooks receive no window, so they take `CLAUDE_CODE_MAX_CONTEXT_TOKENS`, else 1M, the window of Claude's current models; a running agent wakes by running `vibetogether inbox wait && vibetogether inbox take` as a background command, and runs it again.
-  - pi: the extension `inbox.ts` takes in at each step, after telling the context's size from `getContextUsage`, keeps a `wait` running, which steers what is new into a busy agent and starts a turn in an idle one, and holds `vibetogether inbox awake` from `agent_start` until `agent_settled`; a one-shot run (`-p`) keeps no `wait`, so whoever starts it hears the bell, such as the waker.
+  - pi: the extension `inbox.ts` takes in at each step, after telling the context's size from `getContextUsage`, keeps a `wait` running, which steers what is new into a busy agent and starts a turn in an idle one, and holds `vibetogether inbox awake` from `agent_start` until `agent_settled`; a one-shot run (`-p`) keeps no `wait` and holds no awake lock, so whoever starts it hears the bell and holds the lock, such as the waker, whose lock a run's own holder would otherwise wait on while the waker waits for the run.
 
 ## Open
 
