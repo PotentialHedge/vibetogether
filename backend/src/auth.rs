@@ -10,7 +10,7 @@ use std::{
 use axum::{
   Json,
   extract::State,
-  http::{HeaderMap, StatusCode},
+  http::{HeaderMap, StatusCode, header},
   response::{IntoResponse, Redirect, Response},
 };
 use axum_extra::extract::{
@@ -33,7 +33,7 @@ use vibetogether_protocol::{
 
 use crate::{
   App,
-  caller::{Caller, cookie_name, kind_of},
+  caller::{Caller, cookie_name, kind_of, origin_of},
   db::{self, Db},
   error::{Refusal, Result},
   extract::{Path, Query},
@@ -139,6 +139,7 @@ pub async fn new_login(app: &App, account: &str, kind: LoginKind, name: &str) ->
     LoginKind::Browser => "browser",
     LoginKind::Agent => "agent",
     LoginKind::Person => "person",
+    LoginKind::App => "app",
   };
   let expires = (kind == LoginKind::Browser).then(|| db::from_now(SIGN_IN_DAYS * 86400));
   sqlx::query(
@@ -469,6 +470,10 @@ const OTP_LIFETIME: Duration = Duration::from_secs(15 * 60);
 /// this bounds those too.
 const MAX_OTPS: usize = 10_000;
 const MAX_OTPS_PER_ADDRESS: usize = 10;
+/// The most OTPs that wait at once asked by pages on other sites, which any page can make its
+/// visitors' browsers ask for: a share of their own, so that such pages never crowd out the
+/// command line and agents.
+const MAX_PAGE_OTPS: usize = 1_000;
 /// Letters and digits that no one misreads for another.
 const OTP_ALPHABET: &str = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 
@@ -483,6 +488,8 @@ struct Pending {
   name: String,
   requested: String,
   from: String,
+  /// The web page that asked, by its origin, where a page on another site did.
+  origin: Option<String>,
   expires: Instant,
   decision: watch::Sender<Decision>,
   /// The redeem waiting, which a newer one ends by dropping this.
@@ -524,11 +531,31 @@ pub async fn request_otp(
   app.limits.otps.allow(&headers, 10)?;
   if !is_name_part(&request.name) {
     return Err(Refusal::bad(
-      "name: lower case letters, digits and hyphens, starting with a letter or digit, such as the machine's name.",
+      "name: lower case letters, digits and hyphens, starting with a letter or digit, such as the machine's name, or an app's.",
     ));
   }
   let from = address_of(&headers);
+  // A page on another site asks from its visitor's browser, from their address, so that the
+  // OTP looks like their own: it may ask only for an app token, which the OTP page shows with
+  // the page's origin. A browser sets `Origin`, which no page forges.
+  let origin = headers
+    .get(header::ORIGIN)
+    .and_then(|v| v.to_str().ok())
+    .filter(|origin| *origin != origin_of(&app.config.url))
+    .map(str::to_string);
+  if origin.is_some() && request.kind != TokenKind::App {
+    return Err(Refusal::forbidden(
+      "A page on another site asks only for an app token.",
+    ));
+  }
   let mut otps = app.otps.lock();
+  if origin.is_some() && otps.values().filter(|otp| otp.origin.is_some()).count() >= MAX_PAGE_OTPS {
+    return Err(Refusal::busy(
+      StatusCode::SERVICE_UNAVAILABLE,
+      "Too many OTPs of pages wait at once.",
+      60,
+    ));
+  }
   if otps.len() >= MAX_OTPS {
     return Err(Refusal::busy(
       StatusCode::SERVICE_UNAVAILABLE,
@@ -553,6 +580,7 @@ pub async fn request_otp(
       name: request.name,
       requested: db::now(),
       from,
+      origin,
       expires: Instant::now() + OTP_LIFETIME,
       decision: watch::Sender::new(Decision::Waiting),
       redeem: None,
@@ -622,12 +650,18 @@ pub async fn redeem_otp(
       let kind = match otp.kind {
         TokenKind::Agent => LoginKind::Agent,
         TokenKind::Person => LoginKind::Person,
+        TokenKind::App => LoginKind::App,
       };
       let token = new_login(&app, &account, kind, &otp.name).await?;
+      let login = sqlx::query_scalar("SELECT id FROM login WHERE token = ?")
+        .bind(token_hash(&token))
+        .fetch_one(&app.db)
+        .await?;
       Ok(Json(Token {
         token,
         kind: otp.kind,
         account: person,
+        login,
       }))
     }
     _ => Err(Refusal::forbidden("The person denied this OTP.")),
@@ -654,6 +688,7 @@ pub async fn show_otp(
     kind: otp.kind,
     requested: otp.requested.clone(),
     from: otp.from.clone(),
+    origin: otp.origin.clone(),
   }))
 }
 

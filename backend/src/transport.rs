@@ -51,6 +51,8 @@ pub struct Acting {
   pub id: String,
   /// Its name now: `<account>` or `<account>/<agent>`.
   pub name: String,
+  /// The app the person acts through, by its name, which their entries name.
+  pub app: Option<String>,
 }
 
 /// The participant a request acts as: the agent an agent token names, else the person.
@@ -60,11 +62,13 @@ pub fn acting(caller: &Caller) -> Acting {
       account: caller.account.clone(),
       id: agent.id.clone(),
       name: agent.name.clone(),
+      app: None,
     },
     None => Acting {
       account: caller.account.clone(),
       id: caller.account.clone(),
       name: caller.person.clone(),
+      app: caller.app().map(str::to_string),
     },
   }
 }
@@ -408,6 +412,7 @@ struct EntryRow {
   size: i64,
   filename: Option<String>,
   text: Option<String>,
+  app: Option<String>,
 }
 
 impl From<EntryRow> for Entry {
@@ -421,6 +426,7 @@ impl From<EntryRow> for Entry {
       size: row.size as u64,
       filename: row.filename,
       text: row.text,
+      app: row.app,
     }
   }
 }
@@ -442,11 +448,11 @@ fn inline_text(ty: &str, payload: &[u8]) -> Option<String> {
 }
 
 /// Appends an entry from `sender`, by its name and its participant's id, none for Vibe
-/// Together's own: its number.
+/// Together's own, and the app it came through: its number.
 async fn append(
   db: &mut Db,
   session: &str,
-  sender: (&str, Option<&str>),
+  sender: (&str, Option<&str>, Option<&str>),
   ty: &str,
   payload: &[u8],
   filename: Option<&str>,
@@ -458,8 +464,8 @@ async fn append(
   let text = inline_text(ty, payload);
   let blob = (text.is_none() && !payload.is_empty()).then_some(payload);
   sqlx::query(
-    "INSERT INTO entry (session, n, time, sender, participant, type, size, filename, text, payload)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    "INSERT INTO entry (session, n, time, sender, participant, type, size, filename, text, payload, app)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
   )
   .bind(session)
   .bind(n)
@@ -475,6 +481,7 @@ async fn append(
   .bind(filename)
   .bind(text)
   .bind(blob)
+  .bind(sender.2)
   .execute(db)
   .await?;
   Ok(n)
@@ -672,7 +679,7 @@ async fn append_as(
   let n = append(
     &mut tx,
     session,
-    (&p.name, Some(&p.id)),
+    (&p.name, Some(&p.id), p.app.as_deref()),
     ty,
     payload.bytes,
     payload.filename,
@@ -863,6 +870,7 @@ pub async fn leave_group(app: &App, db: &mut Db, group: &str, id: &str) -> Resul
       account,
       id: id.to_string(),
       name: agent.map_or(login.clone(), |agent| format!("{login}/{agent}")),
+      app: None,
     };
     let leave = Payload {
       ty: LEAVE_TYPE,
@@ -977,7 +985,7 @@ pub async fn announce(
   let n = append(
     &mut tx,
     session,
-    (SYSTEM_NAME, None),
+    (SYSTEM_NAME, None, None),
     &ty,
     text.as_bytes(),
     None,
@@ -1046,7 +1054,7 @@ pub async fn participants_of(
 /// The entries of `session` after `after`, about one answer's worth.
 async fn entries_of(db: &mut Db, session: &str, after: u64) -> Result<Vec<Entry>> {
   let rows: Vec<EntryRow> = sqlx::query_as(
-    "SELECT n, time, sender, participant, type, size, filename, text FROM entry
+    "SELECT n, time, sender, participant, type, size, filename, text, app FROM entry
      WHERE session = ? AND n > ? ORDER BY n LIMIT 1000",
   )
   .bind(session)
@@ -1181,7 +1189,7 @@ async fn items_of(db: &mut Db, id: &str, after: u64) -> Result<Vec<Item>> {
   loop {
     let rows: Vec<ItemRow> = sqlx::query_as(
       "SELECT st.n AS item, st.reach, st.session, p.notify,
-       e.n, e.time, e.sender, e.participant, e.type, e.size, e.filename, e.text
+       e.n, e.time, e.sender, e.participant, e.type, e.size, e.filename, e.text, e.app
        FROM stream st JOIN entry e ON e.session = st.session AND e.n = st.entry
        LEFT JOIN participant p ON p.session = st.session AND p.id = st.participant
        WHERE st.participant = ? AND st.n > ? ORDER BY st.n LIMIT 1000",

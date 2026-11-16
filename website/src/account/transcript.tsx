@@ -646,6 +646,8 @@ export function Transcript({
 							const before = entries.slice(0, i).findLast(isMessage);
 							const same =
 								before?.from === entry.from &&
+								// The header says which app it came through, so a change of that too.
+								before.app === entry.app &&
 								entries[i - 1] === before &&
 								// The header says whom it pings, so a change of that starts a new one.
 								String(pings(before.type)) === String(pings(entry.type)) &&
@@ -665,6 +667,11 @@ export function Transcript({
 												{!same && (
 													<div className="mb-0.5 flex flex-wrap items-baseline gap-x-2">
 														<Name name={entry.from} />
+														{entry.app && (
+															<span className="font-mono text-[0.75em] text-muted-foreground">
+																via {entry.app}
+															</span>
+														)}
 														{pinged && (
 															<span className="font-mono text-[0.75em] text-muted-foreground">
 																→{" "}

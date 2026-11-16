@@ -48,7 +48,7 @@ pub fn cookie_name(app: &App) -> &'static str {
 }
 
 /// The origin the website is served from, which every change by the cookie comes from.
-fn origin_of(url: &str) -> &str {
+pub fn origin_of(url: &str) -> &str {
   let host = url.find("://").map_or(0, |i| i + 3);
   url[host..].find('/').map_or(url, |i| &url[..host + i])
 }
@@ -67,6 +67,7 @@ pub fn kind_of(kind: &str) -> LoginKind {
   match kind {
     "agent" => LoginKind::Agent,
     "person" => LoginKind::Person,
+    "app" => LoginKind::App,
     _ => LoginKind::Browser,
   }
 }
@@ -121,6 +122,11 @@ async fn caller_of(app: &App, parts: &Parts, unnamed: bool) -> Result<Option<Cal
   let kind = kind_of(&row.kind);
   if (kind == LoginKind::Browser) != browser {
     return Ok(None);
+  }
+  if kind == LoginKind::App && !app_may(&parts.method, parts.uri.path()) {
+    return Err(Refusal::forbidden(
+      "An app token only sends and reads in its person's sessions.",
+    ));
   }
   if let Some(expires) = &row.expires
     && *expires < db::from_now(auth::SIGN_IN_DAYS * 86400 - 86400)
@@ -185,6 +191,62 @@ async fn caller_of(app: &App, parts: &Parts, unnamed: bool) -> Result<Option<Cal
     name: row.name,
     agent,
   }))
+}
+
+/// What an app token may call: its person's sessions, to read them, take part, send and
+/// receive, the account it acts for, and revoking itself, which `auth::revoke` keeps to its own
+/// login. Nothing that lets anyone in, deletes, or reaches another login.
+fn app_may(method: &Method, path: &str) -> bool {
+  let path = path.strip_prefix("/api").unwrap_or(path);
+  let segments: Vec<&str> = path.trim_matches('/').split('/').collect();
+  let get = *method == Method::GET;
+  match segments[..] {
+    ["me" | "sessions" | "dms" | "receive"] => get,
+    ["sessions", _] => get,
+    ["sessions", _, "participants"] => {
+      matches!(*method, Method::GET | Method::POST | Method::DELETE)
+    }
+    ["sessions", _, "entries"] => *method == Method::POST,
+    ["sessions", _, "entries", _] | ["sessions", _, "log"] => get,
+    ["logins", _] => *method == Method::DELETE,
+    _ => false,
+  }
+}
+
+#[cfg(test)]
+#[test]
+fn an_app_reaches_only_its_persons_sessions() {
+  for (method, path) in [
+    (Method::GET, "/api/me"),
+    (Method::GET, "/api/sessions"),
+    (Method::GET, "/api/sessions/s_1"),
+    (Method::POST, "/api/sessions/s_1/participants"),
+    (Method::POST, "/api/sessions/s_1/entries"),
+    (Method::GET, "/api/sessions/s_1/entries/3"),
+    (Method::GET, "/api/sessions/s_1/log"),
+    (Method::GET, "/api/receive"),
+    (Method::GET, "/api/dms"),
+    (Method::DELETE, "/api/logins/l_1"),
+  ] {
+    assert!(app_may(&method, path), "{method} {path}");
+  }
+  for (method, path) in [
+    (Method::GET, "/api/overview"),
+    (Method::POST, "/api/sessions"),
+    (Method::DELETE, "/api/sessions/s_1"),
+    (Method::PATCH, "/api/sessions/s_1"),
+    (Method::PUT, "/api/sessions/s_1/notify"),
+    (Method::GET, "/api/logins"),
+    (Method::PUT, "/api/friends/ben"),
+    (Method::POST, "/api/invites"),
+    (Method::PUT, "/api/groups/g_1/members/ben"),
+    (Method::POST, "/api/agents"),
+    (Method::PUT, "/api/status"),
+    (Method::DELETE, "/api/me"),
+    (Method::GET, "/api/activity"),
+  ] {
+    assert!(!app_may(&method, path), "{method} {path}");
+  }
 }
 
 fn unauthorized() -> Refusal {
@@ -259,14 +321,20 @@ impl Caller {
     }
   }
 
-  /// Refuses an agent token: only the person does this, in the browser or with a person token.
+  /// Refuses an agent or app token: only the person does this, in the browser or with a person
+  /// token.
   pub fn as_person(&self) -> Result<()> {
     match self.kind {
-      LoginKind::Agent => Err(Refusal::forbidden(
-        "Only the person does this, in the browser or with a person token, never an agent.",
+      LoginKind::Agent | LoginKind::App => Err(Refusal::forbidden(
+        "Only the person does this, in the browser or with a person token, never an agent or an app.",
       )),
       _ => Ok(()),
     }
+  }
+
+  /// The app a request came through, by its name: an app token's.
+  pub fn app(&self) -> Option<&str> {
+    (self.kind == LoginKind::App).then_some(self.name.as_str())
   }
 
   /// Refuses `operation` by a token that did it too often this hour.

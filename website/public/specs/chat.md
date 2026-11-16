@@ -38,6 +38,10 @@ a project or session created or deleted, a member added, removed or joining by a
 The general of a person's own group is their inbox, for what belongs to no group: a friend request or one accepted, an invite accepted, being added to or removed from a group, a group deleted.
 Each names whom it pings and tells; for now, it pings no one.
 
+## Apps
+
+A person's message sent through an app, such as agentvoice, names the app as its entry's `app`, so everyone sees where it came from.
+
 ## Status
 
 A participant's status is one sentence on what it is doing, for all sessions at once, set with `set_status`; it is no entry.

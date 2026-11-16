@@ -28,6 +28,10 @@ const KIND = {
 		what: "a person token",
 		does: "It acts as you, as a client of yours, such as a messenger: it can do everything you can do here.",
 	},
+	app: {
+		what: "an app token",
+		does: "It sends and reads as you in your sessions, and nothing else: it lets no one in, deletes nothing, and your messages through it say which app they came from.",
+	},
 } as const;
 
 /** Approves or denies the OTP someone asked for a token with, as a link with
@@ -102,7 +106,7 @@ function OtpPage() {
 		return (
 			<Frame
 				title={`Give ${shown.name} ${kind.what}?`}
-				description={`${kind.does} Only if your own agent or client just gave you this code.`}
+				description={`${kind.does} ${shown.origin ? `Only if you just signed in on ${shown.origin} yourself.` : "Only if your own agent or client just gave you this code."}`}
 				info="It lasts until you revoke it in your settings, under Logins. If someone sent you this link, deny it."
 			>
 				<div className="flex flex-col gap-4 rounded-2xl border bg-card/60 p-5">
@@ -115,6 +119,12 @@ function OtpPage() {
 						<dd>{ago(shown.requested)}</dd>
 						<dt className="text-muted-foreground">from</dt>
 						<dd>{shown.from}</dd>
+						{shown.origin && (
+							<>
+								<dt className="text-muted-foreground">page</dt>
+								<dd className="break-all">{shown.origin}</dd>
+							</>
+						)}
 					</dl>
 					<div className="flex gap-3">
 						<Button size="xl" onClick={() => act(true)}>

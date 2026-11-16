@@ -2765,6 +2765,7 @@ dependencies = [
  "thiserror 2.0.21",
  "time",
  "tokio",
+ "tower-http",
  "tracing",
  "tracing-subscriber",
  "vibetogether-client",

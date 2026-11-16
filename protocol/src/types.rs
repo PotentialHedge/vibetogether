@@ -214,13 +214,15 @@ wire! {
   }
 
   /// How a login acts: as a browser's sign-in, the person; as an agent token, only for the
-  /// person's agents; as a person token, as the person.
+  /// person's agents; as a person token, as the person; as an app token, for an app, which
+  /// sends and reads in the person's sessions and nothing else.
   #[derive(Copy, Eq)]
   #[serde(rename_all = "lowercase")]
   pub enum LoginKind {
     Browser,
     Agent,
     Person,
+    App,
   }
 
   /// The kind of token an OTP makes.
@@ -230,12 +232,15 @@ wire! {
     #[default]
     Agent,
     Person,
+    /// For an app, such as agentvoice, which the OTP's name names.
+    App,
   }
 
   /// One way in to the account, revocable on its own.
   pub struct Login {
     pub id: String,
-    /// The name its OTP gave it, such as the machine's, or `a sign-in` for a browser.
+    /// The name its OTP gave it, such as the machine's or an app's, or `a sign-in` for a
+    /// browser.
     pub name: String,
     pub kind: LoginKind,
     /// Whether the request was made by it.
@@ -300,6 +305,9 @@ wire! {
     /// The payload itself, where it is text of at most 64 KB; anything else is fetched.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub text: Option<String>,
+    /// The app it came through, by name, where a person sent it with an app token.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub app: Option<String>,
   }
 
   /// A participant in a session.
@@ -487,7 +495,7 @@ wire! {
   }
 
   /// Asks for an OTP, which the person approves on the website, for a token of `kind` named
-  /// `name`, such as the machine's.
+  /// `name`, such as the machine's, or for an app the app's.
   pub struct OtpRequest {
     pub kind: TokenKind,
     pub name: String,
@@ -514,6 +522,8 @@ wire! {
     pub kind: TokenKind,
     /// The account's name, of the person who approved it.
     pub account: String,
+    /// The login it is, by its id, which it may revoke itself.
+    pub login: String,
   }
 
   /// An OTP as the person sees it before approving it: who asks, for what, when and from where.
@@ -523,6 +533,9 @@ wire! {
     pub kind: TokenKind,
     pub requested: String,
     pub from: String,
+    /// The web page that asked for it, by its origin, where a page on another site did.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub origin: Option<String>,
   }
 }
 

@@ -166,8 +166,33 @@ impl App {
       .nest("/api", api)
       .layer(middleware::from_fn(logged))
       .layer(middleware::map_response(versioned))
+      .layer(cors())
       .with_state(self.clone())
   }
+}
+
+/// Any web client on any origin, such as agentvoice's page, calls the API with a token, Luis's
+/// decision (2026-11-16): CORS for every origin, without credentials, so a browser sends no
+/// cookie with such a call and gives no page an answer made by one. The cookie stays the
+/// website's own, as `caller` checks.
+fn cors() -> tower_http::cors::CorsLayer {
+  use axum::http::header;
+  tower_http::cors::CorsLayer::new()
+    .allow_origin(tower_http::cors::Any)
+    .allow_methods([
+      Method::GET,
+      Method::POST,
+      Method::PUT,
+      Method::PATCH,
+      Method::DELETE,
+    ])
+    .allow_headers([header::AUTHORIZATION, header::CONTENT_TYPE])
+    .expose_headers([
+      header::HeaderName::from_static(VERSION_HEADER),
+      header::RETRY_AFTER,
+      header::CONTENT_DISPOSITION,
+    ])
+    .max_age(std::time::Duration::from_secs(86400))
 }
 
 /// Every write that went through wakes what waits for a change (`changes`): a write by a login,

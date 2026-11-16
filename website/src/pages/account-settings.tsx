@@ -3,6 +3,7 @@
  * app, so the app's rail stays beside them. */
 
 import {
+	AppWindow,
 	ArrowLeft,
 	Bot,
 	CircleUser,
@@ -54,6 +55,7 @@ const KIND = {
 	browser: "browser sign-in",
 	agent: "agent token",
 	person: "person token",
+	app: "app",
 } as const;
 
 const date = new Intl.DateTimeFormat(undefined, { dateStyle: "medium" });
@@ -272,7 +274,7 @@ function Settings({
 				{tab === "logins" && (
 					<Pane
 						title="Logins"
-						line="Each way in to your account: a browser you signed in on, an agent token, which acts only for your agents, or a person token, which acts as you. A token is made by an OTP you approve."
+						line="Each way in to your account: a browser you signed in on, an agent token, which acts only for your agents, a person token, which acts as you, or an app, which sends and reads as you in your sessions. A token is made by an OTP you approve."
 					>
 						<Rows empty="No logins.">
 							{logins.map((login) => (
@@ -299,6 +301,11 @@ function Settings({
 									) : login.kind === "agent" ? (
 										<Bot
 											aria-label={KIND.agent}
+											className="size-4 shrink-0 text-muted-foreground"
+										/>
+									) : login.kind === "app" ? (
+										<AppWindow
+											aria-label={KIND.app}
 											className="size-4 shrink-0 text-muted-foreground"
 										/>
 									) : (

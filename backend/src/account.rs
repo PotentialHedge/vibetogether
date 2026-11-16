@@ -459,6 +459,7 @@ pub async fn rename_agent(
       account: caller.account.clone(),
       id: row.id.clone(),
       name: format!("{}/{}", caller.person, row.name),
+      app: None,
     };
     transport::hold(&app, &mut db, &p, &caller.login).await?;
   }
@@ -500,6 +501,7 @@ pub async fn archive_agent(
       account: caller.account.clone(),
       id: row.id.clone(),
       name: format!("{}/{}", caller.person, row.name),
+      app: None,
     };
     // A token archives only an agent it holds; the person, any.
     if caller.kind == LoginKind::Agent {

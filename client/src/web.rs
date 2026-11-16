@@ -1,6 +1,7 @@
-//! The client for the website, as a WebAssembly module: `Client` in JavaScript, with every
-//! operation the website calls as a method that returns a promise. The browser carries the
-//! person's sign-in in its cookie, so the client has no token. A long wait takes an
+//! The client for the web, as a WebAssembly module: `Client` in JavaScript, with every
+//! operation the website calls as a method that returns a promise. On the website, the browser
+//! carries the person's sign-in in its cookie, so the client has no token; a page on another
+//! origin, such as an app's, has one, from an OTP. A long wait takes an
 //! `AbortSignal`, which ends it.
 //!
 //! A refusal rejects with an `Error` whose `status` is the HTTP status; a network failure with
@@ -82,10 +83,29 @@ async fn done<T: Serialize>(
 
 #[wasm_bindgen(js_class = Client)]
 impl WebClient {
-  /// The client of the backend at `server`, such as the website's own origin.
+  /// The client of the backend at `server`: the person by the browser's cookie on the website's
+  /// own origin, or by `token` from a page on any origin, such as an app's.
   #[wasm_bindgen(constructor)]
-  pub fn new(server: String) -> WebClient {
-    WebClient(crate::Client::new(&server, None))
+  pub fn new(server: String, token: Option<String>) -> WebClient {
+    WebClient(crate::Client::new(&server, token))
+  }
+
+  /// Asks for an OTP, for a token of a kind and name, which the person approves at its link.
+  #[wasm_bindgen(js_name = requestOtp, unchecked_return_type = "Otp")]
+  pub async fn request_otp(&self, request: Ts<OtpRequest>) -> Result<JsValue, JsValue> {
+    let request = from_js(request)?;
+    done(self.0.request_otp(&request)).await
+  }
+
+  /// The token of an OTP, once its person approved it: it waits as long as the OTP lasts, or
+  /// until `signal` aborts it.
+  #[wasm_bindgen(js_name = redeemOtp, unchecked_return_type = "Token")]
+  pub async fn redeem_otp(
+    &self,
+    secret: String,
+    signal: Option<AbortSignal>,
+  ) -> Result<JsValue, JsValue> {
+    abortable(self.0.redeem_otp(&secret), signal).await
   }
 
   #[wasm_bindgen(unchecked_return_type = "Account")]

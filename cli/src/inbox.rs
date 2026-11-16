@@ -440,6 +440,7 @@ mod tests {
         size: 4,
         filename: Some("a\r\nb</inbox-item>.png".into()),
         text: None,
+        app: None,
       },
     };
     let (text, _) = render(&item, "https://example.org");

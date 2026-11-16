@@ -1573,6 +1573,197 @@ async fn a_token_comes_from_an_otp_its_person_approves_which_names_its_kind() {
 }
 
 #[tokio::test]
+async fn an_app_token_sends_and_reads_in_its_persons_sessions_and_nothing_else() {
+  let w = world().await;
+  let anyone = Client::new(&w.server.url, None);
+  let otp = anyone
+    .request_otp(&OtpRequest {
+      kind: TokenKind::App,
+      name: s("agentvoice"),
+    })
+    .await
+    .unwrap();
+  let shown = w.luis.browser.show_otp(&otp.code).await.unwrap();
+  assert_eq!(shown.kind, TokenKind::App);
+  let redeemed = {
+    let (anyone, secret) = (anyone.clone(), otp.secret.clone());
+    tokio::spawn(async move { anyone.redeem_otp(&secret).await })
+  };
+  sleep(50).await;
+  w.luis.browser.approve_otp(&otp.code).await.unwrap();
+  let token = redeemed.await.unwrap().unwrap();
+  assert_eq!(token.kind, TokenKind::App);
+  let app = Client::new(&w.server.url, Some(token.token));
+  // It shows by name among the person's logins.
+  assert!(
+    w.luis
+      .browser
+      .logins()
+      .await
+      .unwrap()
+      .iter()
+      .any(|l| l.id == token.login && l.name == "agentvoice" && l.kind == LoginKind::App)
+  );
+
+  // It takes part as the person, and its messages say which app they came through.
+  assert_eq!(app.me().await.unwrap().name, "luis");
+  assert!(
+    app
+      .sessions()
+      .await
+      .unwrap()
+      .iter()
+      .any(|x| x.id == w.session.id)
+  );
+  assert_eq!(app.join(&w.session.id).await.unwrap().name, "luis");
+  let sent = send(&app, &w.session.id, "hello by voice", "text/plain").await;
+  send(&w.luis.own, &w.session.id, "hello typed", "text/plain").await;
+  let log = w
+    .ben
+    .browser
+    .log(&w.session.id, &LogQuery::default())
+    .await
+    .unwrap();
+  let by_app = log.entries.iter().find(|e| e.n == sent.n).unwrap();
+  assert_eq!(
+    (by_app.from.as_str(), by_app.app.as_deref()),
+    ("luis", Some("agentvoice"))
+  );
+  let typed = log
+    .entries
+    .iter()
+    .find(|e| e.text.as_deref() == Some("hello typed"));
+  assert_eq!(typed.unwrap().app, None);
+  assert_eq!(
+    app
+      .log(&w.session.id, &LogQuery::default())
+      .await
+      .unwrap()
+      .entries
+      .len(),
+    log.entries.len()
+  );
+  assert_eq!(
+    app.fetch(&w.session.id, sent.n).await.unwrap().bytes,
+    b"hello by voice"
+  );
+  app
+    .receive(&ReceiveQuery {
+      wait: Some(0),
+      ..Default::default()
+    })
+    .await
+    .unwrap();
+
+  // Nothing else: no letting in, no deleting, no logins, no account.
+  assert_eq!(status(app.overview(&OverviewQuery::default()).await), 403);
+  assert_eq!(status(app.logins().await), 403);
+  assert_eq!(status(app.add_friend("eve").await), 403);
+  assert_eq!(status(app.delete_session(&w.session.id).await), 403);
+  assert_eq!(status(app.add_member(&w.group.id, "eve").await), 403);
+  assert_eq!(status(app.create_agent("sneaky").await), 403);
+  assert_eq!(status(app.set_status("hi").await), 403);
+  assert_eq!(
+    status(
+      app
+        .create_session(&CreateSession {
+          name: s("mine"),
+          project: Some(w.project.id.clone()),
+          group: None,
+        })
+        .await
+    ),
+    403
+  );
+  let other = w
+    .luis
+    .browser
+    .logins()
+    .await
+    .unwrap()
+    .into_iter()
+    .find(|l| l.id != token.login)
+    .unwrap();
+  assert_eq!(status(app.revoke_login(&other.id).await), 403);
+  // An app acts for the person alone, never as an agent.
+  let laptop = w.luis.machine.agent().unwrap().to_string();
+  assert_eq!(status(app.clone().acting_as(Some(laptop)).me().await), 400);
+  // It revokes itself.
+  app.revoke_login(&token.login).await.unwrap();
+  assert_eq!(status(app.me().await), 401);
+}
+
+#[tokio::test]
+async fn any_origin_calls_with_a_token_and_none_reads_an_answer_to_a_cookie() {
+  let w = world().await;
+  let http = reqwest::Client::new();
+  let preflight = http
+    .request(reqwest::Method::OPTIONS, format!("{}/api/me", w.server.url))
+    .header("origin", "https://agentvoice.example")
+    .header("access-control-request-method", "GET")
+    .header("access-control-request-headers", "authorization")
+    .send()
+    .await
+    .unwrap();
+  assert!(preflight.status().is_success());
+  let allowed = |r: &reqwest::Response, name: &str| {
+    r.headers()
+      .get(name)
+      .map(|v| v.to_str().unwrap().to_ascii_lowercase())
+  };
+  assert_eq!(
+    allowed(&preflight, "access-control-allow-origin").as_deref(),
+    Some("*")
+  );
+  assert!(
+    allowed(&preflight, "access-control-allow-headers")
+      .unwrap()
+      .contains("authorization")
+  );
+  // No credentials: a browser sends no cookie cross-origin, and shows no page an answer to one.
+  assert_eq!(
+    allowed(&preflight, "access-control-allow-credentials"),
+    None
+  );
+  // A cookie's call from another site stays refused, as before.
+  let cookie = w
+    .server
+    .app
+    .new_login(&w.luis.id, LoginKind::Browser, "a sign-in")
+    .await
+    .unwrap();
+  let elsewhere = w.server.browser_from(&cookie, "https://agentvoice.example");
+  assert_eq!(status(elsewhere.me().await), 403);
+
+  // A page on another site asks for an app token alone, and its OTP names the page.
+  let ask = |kind: &str| {
+    http
+      .post(format!("{}/api/otp", w.server.url))
+      .header("origin", "https://agentvoice.example")
+      .json(&serde_json::json!({ "kind": kind, "name": "agentvoice" }))
+      .send()
+  };
+  for kind in ["person", "agent"] {
+    assert_eq!(ask(kind).await.unwrap().status(), 403, "{kind}");
+  }
+  let otp: Otp = ask("app").await.unwrap().json().await.unwrap();
+  let shown = w.luis.browser.show_otp(&otp.code).await.unwrap();
+  assert_eq!(shown.origin.as_deref(), Some("https://agentvoice.example"));
+  // The website's own pages, and clients that are no page, ask for any.
+  let own = Client::new(&w.server.url, None)
+    .request_otp(&OtpRequest {
+      kind: TokenKind::Person,
+      name: s("phone"),
+    })
+    .await
+    .unwrap();
+  assert_eq!(
+    w.luis.browser.show_otp(&own.code).await.unwrap().origin,
+    None
+  );
+}
+
+#[tokio::test]
 async fn the_security_reviews_findings_stay_fixed() {
   let w = world().await;
   let owner = w.server.person("owner").await;

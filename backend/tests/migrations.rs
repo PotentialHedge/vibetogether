@@ -96,3 +96,40 @@ async fn agents_become_members_of_the_groups_they_worked_in() {
   assert_eq!(agents, ["luis/lead"]);
   assert_eq!(ph.group.members, [s("ben"), s("luis")]);
 }
+
+/// Apps: the logins stay as they were, now allowed to be apps too, and entries name no app.
+#[tokio::test]
+async fn logins_and_entries_stay_as_logins_may_be_apps() {
+  let database = scratch().join("backend.db");
+  let mut db = SqliteConnection::connect(&format!("sqlite:{}?mode=rwc", database.display()))
+    .await
+    .unwrap();
+  sqlx::migrate!().run_to(3, &mut db).await.unwrap();
+  sqlx::raw_sql(
+    r#"
+    INSERT INTO account VALUES ('u_luis', 1, 'luis', 'Luis', NULL, '2026-11-01T00:00:00.000Z');
+    INSERT INTO login VALUES ('l_1', 'u_luis', 'person', 'phone', 'hash', '2026-11-01T00:00:00.000Z', NULL);
+    INSERT INTO session VALUES ('s_1', 'one', NULL, 'u_luis', '2026-11-01T00:00:00.000Z');
+    INSERT INTO entry VALUES ('s_1', 1, '2026-11-01T00:00:00Z', 'luis', 'u_luis', 'text/plain', 2, NULL, 'hi', NULL);
+    "#,
+  )
+  .execute(&mut db)
+  .await
+  .unwrap();
+  db.close().await.unwrap();
+
+  let server = server_on(database).await;
+  let mut db = server.db().await;
+  let login: (String, String) = sqlx::query_as("SELECT kind, name FROM login WHERE id = 'l_1'")
+    .fetch_one(&mut db)
+    .await
+    .unwrap();
+  assert_eq!(login, (s("person"), s("phone")));
+  let app: Option<String> = sqlx::query_scalar("SELECT app FROM entry WHERE session = 's_1'")
+    .fetch_one(&mut db)
+    .await
+    .unwrap();
+  assert_eq!(app, None);
+  let app = server.token("u_luis", LoginKind::App, "agentvoice").await;
+  assert_eq!(app.me().await.unwrap().name, "luis");
+}
