@@ -237,3 +237,50 @@ async fn login_writes_the_token_its_person_approves() {
       .any(|l| l.name == "test-box" && l.kind == LoginKind::Agent)
   );
 }
+
+#[tokio::test]
+async fn doctor_says_what_fails() {
+  let setup = setup().await;
+  let failing = |output: &std::process::Output| -> Vec<String> {
+    json(output)
+      .as_array()
+      .unwrap()
+      .iter()
+      .filter(|c| c["ok"] == false)
+      .map(|c| c["check"].as_str().unwrap().to_string())
+      .collect()
+  };
+  // No token: it stops there.
+  let none = command(&setup.home, &setup.url, None, &["doctor"])
+    .output()
+    .await
+    .unwrap();
+  assert_eq!(none.status.code(), Some(5));
+  assert_eq!(failing(&none), ["token"]);
+  // An agent with nothing receiving for it, and an inbox not made yet, which it does not make.
+  let inbox = setup.home.join("inbox");
+  let quiet = run(&setup, &["doctor", "--inbox", inbox.to_str().unwrap()], "").await;
+  assert_eq!(quiet.status.code(), Some(5));
+  assert_eq!(failing(&quiet), ["receive", "inbox"]);
+  assert!(!inbox.exists());
+  // With a receive held, it all holds.
+  let mut receive = command(
+    &setup.home,
+    &setup.url,
+    Some(&setup.token),
+    &["receive", "--follow", "--agent", &setup.agent],
+  )
+  .spawn()
+  .unwrap();
+  let mut held = None;
+  for _ in 0..50 {
+    let output = run(&setup, &["doctor"], "").await;
+    if output.status.code() == Some(0) {
+      held = Some(output);
+      break;
+    }
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+  }
+  receive.kill().await.unwrap();
+  assert!(failing(&held.expect("the receive shows")).is_empty());
+}

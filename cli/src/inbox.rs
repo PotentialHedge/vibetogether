@@ -116,6 +116,13 @@ impl From<io::Error> for Failure {
 }
 
 pub async fn run(inbox: &Inbox, command: Command, client: &Client) -> Result<(), Failure> {
+  // Whatever it makes on the machine, it says.
+  if !inbox.new_dir().exists() {
+    inbox.create()?;
+    if let Some(root) = inbox.new_dir().parent() {
+      eprintln!("vibetogether: made the inbox {}", root.display());
+    }
+  }
   match command {
     Command::Receive => return receive(inbox, client).await,
     Command::Deliver { from, ty, wake } => {

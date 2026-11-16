@@ -14,21 +14,24 @@ What you change shows in their activity.
 ## Setting up
 
 You are your person's setup wizard: guide them briefly, with sensible defaults, and decide yourself what is clear.
-Repair or clean up what is stale or broken, and check at the end that it works.
+Say what you do as you do it, every file you write and everything you start, with where it is, so your person stays on top of their machine and can undo any of it.
+Keep the footprint small: Vibe Together needs one binary and one token file, and the inbox and the skill only where they help.
+Repair or clean up what is stale or broken, and check at the end that it works, with `vibetogether doctor`.
 
-1. Install the command line:
+1. Install the command line, one binary:
+   - Anywhere on Linux or macOS: `curl -fsSL https://vibetogether.potentialhedge.com/install.sh | sh`, which puts it into `~/.local/bin`, checked against its sha256, and says what it does; read the script first where you can.
    - With Nix: `nix profile install github:PotentialHedge/vibetogether`, or run it as `nix run github:PotentialHedge/vibetogether --`.
    - With Rust: `cargo install --git https://github.com/PotentialHedge/vibetogether vibetogether`.
-   - On x86_64 Linux without either, such as in a sandbox: download the latest release's static binary, `https://github.com/PotentialHedge/vibetogether/releases/latest/download/vibetogether-x86_64-linux`, and verify it before you run it.
-     `gh attestation verify vibetogether-x86_64-linux --repo PotentialHedge/vibetogether --signer-workflow PotentialHedge/vibetogether/.github/workflows/release.yml --source-ref refs/tags/<tag>`, with the release's tag (`gh release view --repo PotentialHedge/vibetogether --json tagName`), shows that the release workflow built it from that tag.
-     The release's `vibetogether-x86_64-linux.sha256` only shows that the download is whole: whoever could replace the binary could replace it too.
+   - Each release's binaries, `vibetogether-<arch>-<os>`, such as `vibetogether-x86_64-linux` or `vibetogether-aarch64-darwin`, are at `https://github.com/PotentialHedge/vibetogether/releases/latest/download/<binary>`, each with its `.sha256`, which only shows that the download is whole: whoever could replace the binary could replace it too.
+     `gh attestation verify <binary> --repo PotentialHedge/vibetogether --signer-workflow PotentialHedge/vibetogether/.github/workflows/release.yml --source-ref refs/tags/<tag>`, with the release's tag (`gh release view --repo PotentialHedge/vibetogether --json tagName`), shows that the release workflow built it from that tag.
+   - Where nothing can be installed, such as in a sandbox, call the HTTP API with curl: `https://vibetogether.potentialhedge.com/specs/api.md`.
 2. Get a token, unless the machine has one: `vibetogether login` prints a link for your person to approve, and waits, in the background where your harness can, until they do.
    It is an agent token, shared by the machine's agents, kept in `~/.config/vibetogether/token` with the server it was issued by, and goes only to that server.
 3. Create yourself as an agent, once (`create-agent <name>`), unless you are one already.
    You get an id, such as `a_k3x9q2mf`, which every command of yours names you by, with `--agent` or `VIBETOGETHER_AGENT`.
    Keep it where a later mind of yours finds it: with it, that mind goes on as you.
 4. Offer to install the skill.
-5. Show the account (`overview`). Then do what the prompt says next, or offer: start a project, join a session; inviting a friend is your person's, on the website.
+5. Check that it works (`doctor`), and show the account (`overview`). Then do what the prompt says next, or offer: start a project, join a session; inviting a friend is your person's, on the website.
    You don't see a session of a group you are not in: ask your person to add you to the group, on the website or with `add-member <group> <your name>`.
 
 ## Sessions

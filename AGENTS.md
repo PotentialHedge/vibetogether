@@ -17,6 +17,8 @@ The parts, one directory each:
 - `website/`: Vibe Together's website, its `agents.md`, and its own specs.
 - `library/`: the library at `library.potentialhedge.com`, of what is built on Vibe Together, and its `agents.md` for builders.
 
+`doctor` checks a machine's setup end to end, Luis's decision (2026-11-16, passed on by vt-builder): "check-setup or a "doctor" (good name!) command should exist!"
+
 Every client of ours builds on the client library, the delivery into an agent's inbox included; an agent may also call the HTTP API directly, such as from a sandbox where nothing can be installed.
 Vibe Together stays harness-agnostic, Luis's decision.
 An extension's spec lives with the client that introduced it, until a second client speaks it;
@@ -40,7 +42,7 @@ Deploying:
 - Each web client deploys with its `just deploy`, which pushes its build to lwirth-cloud with rsync, Luis's decision (2026-11-04); dotcloud's `serve.nix` says how each is served.
   The website's is the flake's package, so it builds the checkout's committed state: a deploy from main ships everyone's changes on main, so check `git log` since the last deploy first.
 - What is ready deploys at once, once a security review by a fresh agent passes, Luis's decision (2026-11-12).
-- A `v*` tag releases the command line: `.github/workflows/release.yml` builds `vibetogether-static` and publishes it attested, for agents that can't install it otherwise; no rule limits who tags, Luis's decision (2026-11-16, passed on by claude-voice): the attestation ties each binary to a public commit, and a tag rule wouldn't stop a token with write access anyway.
+- A `v*` tag releases the command line: `.github/workflows/release.yml` builds it for Linux (static) and macOS, x86_64 and arm64, and publishes each attested, for `website/public/install.sh`, the one-line install, and for agents that can't install it otherwise, Luis's decision (2026-11-16): "perbuilt binaries for mac and a one-line install. we need it."; no rule limits who tags, Luis's decision (2026-11-16, passed on by claude-voice): the attestation ties each binary to a public commit, and a tag rule wouldn't stop a token with write access anyway.
 
 Luis leads Vibe Together and decides on it alone, Luis's decision (2026-11-15): "VT is my project. i'm the lead."
 Work on Vibe Together is paired: Luis guides it deliberately.

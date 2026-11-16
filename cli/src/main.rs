@@ -1,6 +1,7 @@
 //! `vibetogether`: Vibe Together's command line, one command per operation, over the client
 //! library, and the agent's inbox on its machine.
 
+mod doctor;
 mod inbox;
 
 use std::{
@@ -24,7 +25,8 @@ use vibetogether_protocol::{
 ///
 /// Every command is one operation of the API, and prints its answer as JSON on stdout; a
 /// refusal's sentence goes to stderr. Exit codes: 0 done, 1 the inbox failed, 2 usage, 3
-/// refused, also where the server speaks another version of the API, 4 network.
+/// refused, also where the server speaks another version of the API, 4 network, 5 a check of
+/// `doctor` failed.
 ///
 /// The token is VIBETOGETHER_TOKEN, else the file ~/.config/vibetogether/token, which `login`
 /// writes: the token on its first line, and the server it was issued by on its second. A token
@@ -88,6 +90,9 @@ enum Command {
     #[arg(long)]
     token_file: Option<PathBuf>,
   },
+  /// Checks that this machine's setup works, end to end: the token, the server, the account, the
+  /// agent, its receive and its inbox, each with what to do where it fails.
+  Doctor,
   /// Shows the account.
   Me,
   /// Shows everything you see at once: your groups with their members, people and agents, their
@@ -285,6 +290,8 @@ enum Exit {
   Failed(Error),
   /// The inbox failed, such as a directory that can't be written.
   Inbox(io::Error),
+  /// A check of `doctor` failed, which it printed.
+  Check,
 }
 
 impl From<Error> for Exit {
@@ -306,16 +313,17 @@ fn token_file() -> Option<PathBuf> {
 /// The token for `server`, from VIBETOGETHER_TOKEN, else the token file: its first line, with
 /// the server it was issued by on its second, the default one where there is none. A token is
 /// never sent to another server than its own.
-fn token(server: &str) -> Result<Option<String>, Exit> {
-  let Some(stored) = std::env::var("VIBETOGETHER_TOKEN")
-    .ok()
-    .or_else(|| fs::read_to_string(token_file()?).ok())
-  else {
-    return Ok(None);
+fn token(server: &str) -> Result<(Option<String>, doctor::Source), Exit> {
+  let (stored, source) = match std::env::var("VIBETOGETHER_TOKEN") {
+    Ok(token) => (token, doctor::Source::Environment),
+    Err(_) => match token_file().and_then(|f| Some((fs::read_to_string(&f).ok()?, f))) {
+      Some((stored, file)) => (stored, doctor::Source::File(file)),
+      None => return Ok((None, doctor::Source::None)),
+    },
   };
   let mut lines = stored.lines().map(str::trim);
   let Some(token) = lines.next().filter(|t| !t.is_empty()) else {
-    return Ok(None);
+    return Ok((None, doctor::Source::None));
   };
   let issued = lines
     .next()
@@ -326,7 +334,7 @@ fn token(server: &str) -> Result<Option<String>, Exit> {
       "The token was issued by {issued}, and goes to no other server: for {server}, get one with `vibetogether login --server {server}`."
     )));
   }
-  Ok(Some(token.to_string()))
+  Ok((Some(token.to_string()), source))
 }
 
 fn print(value: &impl Serialize) {
@@ -469,9 +477,11 @@ async fn receive(client: &Client, state: State, follow: bool) -> Result<(), Exit
 
 async fn run(cli: Cli) -> Result<(), Exit> {
   // Logging in and the inbox's local commands send no token, so they need none.
-  let token = match &cli.command {
-    Command::Login { .. } => None,
-    Command::Inbox { command } if !matches!(command, inbox::Command::Receive) => None,
+  let (token, source) = match &cli.command {
+    Command::Login { .. } => (None, doctor::Source::None),
+    Command::Inbox { command } if !matches!(command, inbox::Command::Receive) => {
+      (None, doctor::Source::None)
+    }
     _ => token(&cli.server)?,
   };
   let client = Client::new(&cli.server, token).acting_as(cli.agent);
@@ -492,6 +502,13 @@ async fn run(cli: Cli) -> Result<(), Exit> {
       person,
       token_file,
     } => login(c, name, person, token_file).await?,
+    Command::Doctor => {
+      let checks = doctor::run(c, source, cli.inbox.as_deref()).await;
+      print(&checks);
+      if !checks.iter().all(doctor::Check::ok) {
+        return Err(Exit::Check);
+      }
+    }
     Command::Me => print(&c.me().await?),
     Command::Overview { revision, wait } => {
       let query = OverviewQuery { revision, wait };
@@ -608,6 +625,7 @@ async fn main() -> ExitCode {
       eprintln!("vibetogether: {message}");
       ExitCode::from(2)
     }
+    Err(Exit::Check) => ExitCode::from(5),
     Err(Exit::Inbox(error)) => {
       eprintln!("vibetogether: {error}");
       ExitCode::FAILURE
