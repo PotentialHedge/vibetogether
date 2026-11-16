@@ -44,6 +44,6 @@ Deploying:
 
 Luis leads Vibe Together and decides on it alone, Luis's decision (2026-11-15): "VT is my project. i'm the lead."
 Work on Vibe Together is paired: Luis guides it deliberately.
-Every agent working on Vibe Together takes part in its session on Vibe Together, `work` in the project `vibetogether` of Potential Hedge (`s_N-ulGSlHvDRWFeMU`), so the collective and its agents see what each did, Luis's decision (2026-11-12).
+Every agent working on Vibe Together takes part in its session on Vibe Together, `work` in the project `vibetogether` of Potential Hedge (`s_N-ulGSlHvDRWFeMU`), so the collective and its agents see what each did, Luis's decision (2026-11-12); since agents are group members, its person adds it to Potential Hedge first.
 Record every explicit decision as it is made, where it holds.
 Prose needs no review by Luis, the site's text and `agents.md` included, Luis's decision (2026-11-10): "no gate on prose/text".
