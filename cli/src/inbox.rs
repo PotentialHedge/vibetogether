@@ -5,7 +5,9 @@
 use std::{
   collections::BTreeMap,
   ffi::OsString,
-  io::{self, Write},
+  fs,
+  io::{self, Read, Seek, Write},
+  os::unix::fs::OpenOptionsExt,
   pin::Pin,
   time::Duration,
 };
@@ -53,6 +55,17 @@ pub enum Command {
   /// runs. A harness starts it with a pipe at a turn's start and closes the pipe at its end; if
   /// the harness dies, the pipe closes and the lock goes with it.
   Awake,
+  /// Tells the agent how full its context is: delivers its size against its model's window, a
+  /// quiet item from `context`, as the size crosses a tenth of the window, either way, and
+  /// nothing otherwise. A harness runs it at each step, before `take`; the tenth told last is
+  /// kept in the inbox's file `context`.
+  Context {
+    /// The tokens the context holds.
+    tokens: u64,
+    /// The model's context window, in tokens.
+    #[arg(value_parser = clap::value_parser!(u64).range(1..))]
+    window: u64,
+  },
 }
 
 /// How long a receive waits for an item before it is made again.
@@ -100,8 +113,45 @@ pub async fn run(inbox: &Inbox, command: Command, client: &Client) -> Result<(),
       let _lock = inbox.hold_awake()?;
       io::copy(&mut io::stdin().lock(), &mut io::sink())?;
     }
+    Command::Context { tokens, window } => context(inbox, tokens, window)?,
   }
   Ok(())
+}
+
+/// The tenths of the window a context of `tokens` fills: the marks its size is told by.
+fn tenths(tokens: u64, window: u64) -> u64 {
+  (u128::from(tokens) * 10 / u128::from(window.max(1))).min(10) as u64
+}
+
+/// Delivers the context's size where it crossed a tenth since it was last told. The lock on the
+/// file `context` keeps concurrent steps, such as parallel tool calls, from telling it twice.
+fn context(inbox: &Inbox, tokens: u64, window: u64) -> io::Result<()> {
+  inbox.create()?;
+  let path = inbox.root.join("context");
+  let mut file = fs::OpenOptions::new()
+    .read(true)
+    .write(true)
+    .create(true)
+    .truncate(false)
+    .mode(0o600)
+    .open(&path)?;
+  file.lock()?;
+  let mut told = String::new();
+  file.read_to_string(&mut told)?;
+  let mark = tenths(tokens, window);
+  if told.trim().parse().unwrap_or(0) == mark {
+    return Ok(());
+  }
+  let text = format!(
+    "Your context holds {}k tokens, {}% of its model's window of {}k.\n",
+    tokens / 1000,
+    u128::from(tokens) * 100 / u128::from(window),
+    window / 1000,
+  );
+  inbox.deliver(text.as_bytes(), "context", "txt")?;
+  file.set_len(0)?;
+  file.seek(io::SeekFrom::Start(0))?;
+  writeln!(file, "{mark}")
 }
 
 /// The agent's positions in its stream, as the delivery knows them; `None` leaves the stored one.
@@ -313,5 +363,36 @@ mod tests {
       "{payload}"
     );
     assert_eq!(lines.next(), None);
+  }
+
+  #[test]
+  fn the_context_is_told_as_it_crosses_a_tenth_either_way() {
+    let dir = std::env::temp_dir().join(format!("vibetogether-context-{}", std::process::id()));
+    let inbox = Inbox::new(&dir);
+    let told = |tokens| {
+      context(&inbox, tokens, 1_000_000).unwrap();
+      inbox
+        .take()
+        .unwrap()
+        .into_iter()
+        .map(|item| match item.content {
+          vibetogether_inbox::Content::Text(text) => text,
+          vibetogether_inbox::Content::File { .. } => panic!("not text"),
+        })
+        .collect::<Vec<_>>()
+    };
+    assert!(told(50_000).is_empty());
+    assert_eq!(
+      told(412_000),
+      ["Your context holds 412k tokens, 41% of its model's window of 1000k.\n"]
+    );
+    assert!(told(480_000).is_empty());
+    assert_eq!(told(510_000).len(), 1);
+    assert_eq!(
+      told(30_000),
+      ["Your context holds 30k tokens, 3% of its model's window of 1000k.\n"]
+    );
+    assert!(told(30_000).is_empty());
+    fs::remove_dir_all(&dir).unwrap();
   }
 }

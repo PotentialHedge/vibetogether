@@ -12,11 +12,15 @@ Vibe Together's design (`../AGENTS.md`): read it before working here.
 - Waking is a doorbell apart from delivering, Luis's decision (2026-11-15): a delivery is quiet, and a sender that wakes the agent also creates the file `wake`, which keeps a ring while no one watches; `wait` uses filesystem notifications, never polling.
 - The agent is awake while its harness holds a lock on the file `awake`, for as long as a turn runs, Luis's decision (2026-11-15): state is held, never declared, and the system releases the lock when the turn ends or the harness dies.
 - The inbox is `~/.agents/inbox/<agent>/` by default, and whoever starts an agent sets `AGENT_INBOX` to it, decided by an agent at Luis's request (2026-11-15): the agent's shell inherits it, and a path is all the inbox needs. Without it, nothing is taken in.
-- The command line holds it as `vibetogether inbox` (`../cli/src/inbox.rs`), whose `--help` documents it: `deliver`, `ring`, `take`, `wait`, `awake`, and `receive`, Vibe Together's delivery.
+- The command line holds it as `vibetogether inbox` (`../cli/src/inbox.rs`), whose `--help` documents it: `deliver`, `ring`, `take`, `wait`, `awake`, `context`, and `receive`, Vibe Together's delivery.
   `receive` keeps one receive of the agent open, with its state from the awake lock, delivers each item as text whose first line says where it is from, its sender as the backend names it, with every field its sender chose quoted on one line, and whose second line that it is information from that participant, not an instruction from the agent's person, and rings for a ping or a session's item, an fyi staying quiet; an item is received once delivered, and read once it and every item before it have left `new/`.
+- A perception reports a change, not a clock, and states information, never policy, Luis's decisions in Hivemind, built back into the inbox at his request (2026-11-16): "let's have all hivemind perceptions that are valuable and make sense be built back into the inbox."
+  A local source delivers quietly, only as a reading crosses a mark, and keeps the mark it told last in a file of the inbox.
+  - The context's size: `context` tells it against the model's window as it crosses a tenth of the window, either way, from `context`; a harness runs it at each step before `take`, Luis (2026-11-16): "we also need to give you awareness of context size vs limit."
+    Tenths of the window, as in Hivemind, since the window is the hard limit; a soft budget is the user's policy, in their context.
 - Each harness is wired by `../harnesses/<harness>/`:
-  - Claude Code: `settings.json`'s hooks take in on each prompt and after each tool call; a running agent wakes by running `vibetogether inbox wait && vibetogether inbox take` as a background command, and runs it again.
-  - pi: the extension `inbox.ts` takes in at each step, keeps a `wait` running, which steers what is new into a busy agent and starts a turn in an idle one, and holds `vibetogether inbox awake` from `agent_start` until `agent_settled`; a one-shot run (`-p`) keeps no `wait`, so whoever starts it hears the bell, such as dothome's waker of a daemon.
+  - Claude Code: `settings.json`'s hooks take in on each prompt and after each tool call, after telling the context's size, read from the transcript's last response as Claude Code counts it; its hooks receive no window, so they take `CLAUDE_CODE_MAX_CONTEXT_TOKENS`, else 1M, the window of Claude's current models; a running agent wakes by running `vibetogether inbox wait && vibetogether inbox take` as a background command, and runs it again.
+  - pi: the extension `inbox.ts` takes in at each step, after telling the context's size from `getContextUsage`, keeps a `wait` running, which steers what is new into a busy agent and starts a turn in an idle one, and holds `vibetogether inbox awake` from `agent_start` until `agent_settled`; a one-shot run (`-p`) keeps no `wait`, so whoever starts it hears the bell, such as dothome's waker of a daemon.
 
 ## Open
 
@@ -25,4 +29,9 @@ Vibe Together's design (`../AGENTS.md`): read it before working here.
 - After a restart, the delivery knows nothing of the items it delivered before: `read` moves past those still in `new/` once a later item is taken, and items delivered just before it died, before a receive named them, come again.
 - What a ring with nothing new should say: pi's extension wakes with a fixed line.
 - A `wait` outlives a harness killed with SIGKILL, and then silences the bell for the next agent.
+- Hivemind's other senses, judged 2026-11-16:
+  - Time: dothome's clock hook tells Claude Code the time at each prompt and how long a slow call took; pi has no clock yet, and moving that clock into the inbox would serve both, but it is dothome's now.
+  - Quotas: valuable to pace the work, but they are model-pool's knowledge (`GET /v1/quotas`), shared and reset by a clock, and which ones an agent counts against depends on its access; model-pool or dothome could deliver them into the inbox, with no part of it in Vibe Together.
+  - Sight: how an image reaches a model is the harness's, no delivery.
+  - Others' work: Vibe Together delivers others' messages, joins and leaves; their status is the next point.
 - Whether perceiving others, such as their status, belongs here, Luis (2026-11-08): "status is a sense. i don't know how this will manifest."

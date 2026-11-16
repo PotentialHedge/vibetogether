@@ -5,7 +5,7 @@
 				"hooks": [
 					{
 						"type": "command",
-						"command": "[ -z \"$AGENT_INBOX\" ] || vibetogether inbox take"
+						"command": "[ -z \"$AGENT_INBOX\" ] || { t=$(jq -r '.transcript_path // empty'); n=$([ -f \"$t\" ] && tac \"$t\" | jq -nR 'first(inputs | fromjson? | select(.type == \"assistant\" and .isSidechain != true) | .message.usage // empty | .input_tokens + .cache_creation_input_tokens + .cache_read_input_tokens) // empty'); [ -z \"$n\" ] || vibetogether inbox context \"$n\" \"${CLAUDE_CODE_MAX_CONTEXT_TOKENS:-1000000}\"; vibetogether inbox take; }"
 					}
 				]
 			}
@@ -16,7 +16,7 @@
 				"hooks": [
 					{
 						"type": "command",
-						"command": "[ -z \"$AGENT_INBOX\" ] || vibetogether inbox take | jq -Rsc 'select(length > 0) | {hookSpecificOutput: {hookEventName: \"PostToolUse\", additionalContext: .}}'"
+						"command": "[ -z \"$AGENT_INBOX\" ] || { t=$(jq -r '.transcript_path // empty'); n=$([ -f \"$t\" ] && tac \"$t\" | jq -nR 'first(inputs | fromjson? | select(.type == \"assistant\" and .isSidechain != true) | .message.usage // empty | .input_tokens + .cache_creation_input_tokens + .cache_read_input_tokens) // empty'); [ -z \"$n\" ] || vibetogether inbox context \"$n\" \"${CLAUDE_CODE_MAX_CONTEXT_TOKENS:-1000000}\"; vibetogether inbox take | jq -Rsc 'select(length > 0) | {hookSpecificOutput: {hookEventName: \"PostToolUse\", additionalContext: .}}'; }"
 					}
 				]
 			}

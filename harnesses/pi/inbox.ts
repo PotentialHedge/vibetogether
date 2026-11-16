@@ -1,14 +1,31 @@
-// Takes in the agent's inbox at each step, wakes the agent when the bell rings,
-// and holds the awake lock while a run lasts.
+// Takes in the agent's inbox at each step, after telling it how full its context is,
+// wakes the agent when the bell rings, and holds the awake lock while a run lasts.
 // Does nothing unless AGENT_INBOX is set.
 
 import { type ChildProcess, spawn } from "node:child_process";
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type {
+	ExtensionAPI,
+	ExtensionContext,
+} from "@earendil-works/pi-coding-agent";
 
 const customType = "inbox";
 
 export default function (pi: ExtensionAPI) {
 	if (!process.env.AGENT_INBOX) return;
+
+	// The size is unknown right after a compaction, until the next response.
+	async function context(ctx: ExtensionContext) {
+		const usage = ctx.getContextUsage();
+		if (usage?.tokens == null) return;
+		const result = await pi.exec("vibetogether", [
+			"inbox",
+			"context",
+			String(usage.tokens),
+			String(usage.contextWindow),
+		]);
+		if (result.code !== 0)
+			throw new Error(`vibetogether inbox context: ${result.stderr}`);
+	}
 
 	async function take(): Promise<string> {
 		const result = await pi.exec("vibetogether", ["inbox", "take"]);
@@ -17,13 +34,15 @@ export default function (pi: ExtensionAPI) {
 		return result.stdout;
 	}
 
-	pi.on("before_agent_start", async () => {
+	pi.on("before_agent_start", async (_event, ctx) => {
+		await context(ctx);
 		const content = await take();
 		if (content) return { message: { customType, content, display: true } };
 	});
 
 	// While the agent streams, a steer lands before its next model call.
-	pi.on("tool_execution_end", async () => {
+	pi.on("tool_execution_end", async (_event, ctx) => {
+		await context(ctx);
 		const content = await take();
 		if (content)
 			pi.sendMessage(
