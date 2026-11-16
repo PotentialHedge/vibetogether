@@ -219,7 +219,7 @@ impl Client {
     self.get(&["me"]).await
   }
 
-  /// Everything the account sees at once; with `version`, once it differs from it, at most
+  /// Everything the account sees at once; with `revision`, once it differs from it, at most
   /// `wait` seconds.
   pub async fn overview(&self, query: &OverviewQuery) -> Result<Overview> {
     self.query(&["overview"], query).await

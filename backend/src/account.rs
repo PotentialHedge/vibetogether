@@ -13,7 +13,7 @@ use vibetogether_protocol::{
 use crate::{
   App,
   caller::{Caller, Unnamed},
-  changes::version_of,
+  changes::revision_of,
   db::{self, Db, session_for},
   error::{Refusal, Result, is_taken},
   extract::{Json as Body, Path, Query},
@@ -99,7 +99,7 @@ async fn reachable_seen_by(app: &App, db: &mut Db, who: &str) -> Result<Vec<Reac
   Ok(reachable)
 }
 
-/// Everything the caller sees at once, but its version: `who`, an agent of the person `me` or
+/// Everything the caller sees at once, but its revision: `who`, an agent of the person `me` or
 /// the person, sees its groups, and only the person their DMs.
 async fn overview_of(app: &App, db: &mut Db, who: &str, me: &str) -> Result<Overview> {
   let sessions = sessions_of(db, who, me).await?;
@@ -140,11 +140,11 @@ async fn overview_of(app: &App, db: &mut Db, who: &str, me: &str) -> Result<Over
     friends: friends_of(db, me).await?,
     agents: agents_of(app, db, who, me, false).await?,
     reachable: reachable_seen_by(app, db, who).await?,
-    version: String::new(),
+    revision: String::new(),
   })
 }
 
-/// Everything the caller sees at once; with `version`, once it differs from it.
+/// Everything the caller sees at once; with `revision`, once it differs from it.
 pub async fn overview(
   State(app): State<App>,
   caller: Caller,
@@ -157,18 +157,18 @@ pub async fn overview(
   let current = move || async move {
     let mut db = app.db.acquire().await?;
     let mut overview = overview_of(app, &mut db, who, account).await?;
-    overview.version = version_of(&overview);
+    overview.revision = revision_of(&overview);
     Ok(overview)
   };
-  let overview = match &query.version {
+  let overview = match &query.revision {
     None => current().await?,
-    Some(version) => {
+    Some(revision) => {
       app
         .changes
         .changed(
           &caller.account,
           current,
-          |o| o.version != *version,
+          |o| o.revision != *revision,
           query.wait,
         )
         .await?

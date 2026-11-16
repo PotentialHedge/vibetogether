@@ -186,13 +186,13 @@ wire! {
     /// people and agents, and a person's friends, without their agents.
     pub reachable: Vec<Reachable>,
     /// Differs wherever the rest does: pass it on to wait for the next change.
-    pub version: String,
+    pub revision: String,
   }
 
   #[derive(Default)]
   pub struct OverviewQuery {
     #[serde(skip_serializing_if = "Option::is_none", default)]
-    pub version: Option<String>,
+    pub revision: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub wait: Option<u64>,
   }
@@ -331,7 +331,7 @@ wire! {
     #[cfg_attr(feature = "tsify", tsify(type = "Record<string, Participant>"))]
     pub participants: BTreeMap<String, Participant>,
     /// Differs wherever `participants` does: pass it on to wait for the next change.
-    pub version: String,
+    pub revision: String,
   }
 
   #[derive(Default)]
@@ -339,9 +339,9 @@ wire! {
     /// Reads after this entry; from the start where left out.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub after: Option<u64>,
-    /// A log's version: waits until there is an entry after `after` or the participants differ.
+    /// A log's revision: waits until there is an entry after `after` or the participants differ.
     #[serde(skip_serializing_if = "Option::is_none", default)]
-    pub version: Option<String>,
+    pub revision: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub wait: Option<u64>,
   }

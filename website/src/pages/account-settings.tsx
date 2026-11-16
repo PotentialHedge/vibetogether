@@ -573,7 +573,7 @@ function Page() {
 		reload();
 	}, [reload]);
 	useReloadOnChange(
-		state && state !== "signed-out" ? state.version : undefined,
+		state && state !== "signed-out" ? state.revision : undefined,
 		reload,
 	);
 

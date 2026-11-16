@@ -93,7 +93,7 @@ impl WebClient {
     done(self.0.me()).await
   }
 
-  /// Everything the account sees at once; with `version`, once it differs from it.
+  /// Everything the account sees at once; with `revision`, once it differs from it.
   #[wasm_bindgen(unchecked_return_type = "Overview")]
   pub async fn overview(
     &self,
@@ -258,7 +258,7 @@ impl WebClient {
     web_sys::Blob::new_with_u8_array_sequence_and_options(&parts, &options).map(Into::into)
   }
 
-  /// Observes the session, which has no side effects; with a `version`, it waits for a change.
+  /// Observes the session, which has no side effects; with a `revision`, it waits for a change.
   #[wasm_bindgen(unchecked_return_type = "Log")]
   pub async fn log(
     &self,

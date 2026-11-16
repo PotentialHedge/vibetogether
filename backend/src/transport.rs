@@ -24,7 +24,7 @@ use vibetogether_protocol::{
 use crate::{
   App,
   caller::Caller,
-  changes::version_of,
+  changes::revision_of,
   db::{self, Db, session_for},
   error::{Refusal, Result},
 };
@@ -1066,7 +1066,7 @@ async fn entries_of(db: &mut Db, session: &str, after: u64) -> Result<Vec<Entry>
 }
 
 /// Observes a session, which has no side effects: its entries after `after`, and who is in it.
-/// With a `version` of who is in it, it waits until there is an entry after `after` or who is in
+/// With a `revision` of who is in it, it waits until there is an entry after `after` or who is in
 /// it differs, at most `wait` seconds.
 pub async fn observe(
   app: &App,
@@ -1084,15 +1084,15 @@ pub async fn observe(
     }
     let entries = entries_of(&mut db, session, after).await?;
     let participants = participants_of(app, &mut db, session).await?;
-    let version = version_of(&participants);
+    let revision = revision_of(&participants);
     Ok(vibetogether_protocol::Log {
       entries,
       participants,
-      version,
+      revision,
     })
   };
   let differs = |log: &vibetogether_protocol::Log| {
-    !log.entries.is_empty() || Some(&log.version) != query.version.as_ref()
+    !log.entries.is_empty() || Some(&log.revision) != query.revision.as_ref()
   };
   app
     .changes

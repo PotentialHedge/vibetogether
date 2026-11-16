@@ -187,20 +187,20 @@ export function useActions(reload: () => Promise<void>) {
 }
 
 /** Reloads whenever anything the account sees changes, such as by an agent or
- * a friend, from `version`, the one the page's state was loaded at: with what
+ * a friend, from `revision`, the one the page's state was loaded at: with what
  * it sees now, or with nothing where the sign-in is gone. */
 export function useReloadOnChange(
-	version: string | undefined,
+	revision: string | undefined,
 	reload: (seen?: Seen) => Promise<void>,
 ) {
 	useEffect(() => {
-		if (version === undefined) return;
+		if (revision === undefined) return;
 		const stop = new AbortController();
 		(async () => {
 			while (!stop.signal.aborted) {
 				try {
-					const seen = await api.seen(version, stop.signal);
-					if (seen.version !== version) return void (await reload(seen));
+					const seen = await api.seen(revision, stop.signal);
+					if (seen.revision !== revision) return void (await reload(seen));
 				} catch (error) {
 					if (stop.signal.aborted) return;
 					if (signedOut(error)) return void (await reload());
@@ -209,5 +209,5 @@ export function useReloadOnChange(
 			}
 		})();
 		return () => stop.abort();
-	}, [version, reload]);
+	}, [revision, reload]);
 }

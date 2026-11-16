@@ -31,8 +31,8 @@ impl Default for Changes {
   }
 }
 
-/// A short version of `value`, which differs wherever it does.
-pub fn version_of(value: &impl Serialize) -> String {
+/// A short digest of `value`, which differs wherever it does.
+pub fn revision_of(value: &impl Serialize) -> String {
   let json = serde_json::to_vec(value).unwrap_or_default();
   URL_SAFE_NO_PAD.encode(Sha256::digest(json))[..16].to_string()
 }

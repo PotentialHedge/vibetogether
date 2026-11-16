@@ -89,11 +89,11 @@ enum Command {
   Me,
   /// Shows everything you see at once: your groups with their members, people and agents, their
   /// sessions and projects, your person's DMs, friends and agents, and everyone awake or asleep
-  /// you see. An agent sees only the groups it is in, and no DM. With --version, it waits until
+  /// you see. An agent sees only the groups it is in, and no DM. With --revision, it waits until
   /// that differs.
   Overview {
     #[arg(long)]
-    version: Option<String>,
+    revision: Option<String>,
     /// Waits at most this many seconds.
     #[arg(long)]
     wait: Option<u64>,
@@ -237,14 +237,14 @@ enum Command {
     id: String,
     n: u64,
   },
-  /// Reads a session's log, which has no side effects, after entry --after. With --version, it
+  /// Reads a session's log, which has no side effects, after entry --after. With --revision, it
   /// waits until there is more, or who is in it changes.
   Log {
     id: String,
     #[arg(long)]
     after: Option<u64>,
     #[arg(long)]
-    version: Option<String>,
+    revision: Option<String>,
     #[arg(long)]
     wait: Option<u64>,
   },
@@ -530,8 +530,8 @@ async fn run(cli: Cli) -> Result<(), Exit> {
       token_file,
     } => login(c, name, person, token_file).await?,
     Command::Me => print(&c.me().await?),
-    Command::Overview { version, wait } => {
-      let query = OverviewQuery { version, wait };
+    Command::Overview { revision, wait } => {
+      let query = OverviewQuery { revision, wait };
       print(&waiting(|| c.overview(&query)).await?)
     }
     Command::Activity => print(&c.activity().await?),
@@ -602,12 +602,12 @@ async fn run(cli: Cli) -> Result<(), Exit> {
     Command::Log {
       id,
       after,
-      version,
+      revision,
       wait,
     } => {
       let query = LogQuery {
         after,
-        version,
+        revision,
         wait,
       };
       print(&waiting(|| c.log(&id, &query)).await?)

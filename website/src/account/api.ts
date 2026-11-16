@@ -51,7 +51,7 @@ export function signedOut(error: unknown): boolean {
 /** What the account sees at once, its groups' projects and sessions each as
  * one list. */
 export type Seen = {
-	version: string;
+	revision: string;
 	me: Account;
 	groups: Group[];
 	projects: Project[];
@@ -64,10 +64,10 @@ export type Seen = {
 };
 
 function seen(overview: Overview): Seen {
-	const { account, groups, dms, friends, reachable, agents, version } =
+	const { account, groups, dms, friends, reachable, agents, revision } =
 		overview;
 	return {
-		version,
+		revision,
 		me: account,
 		groups,
 		projects: groups.flatMap((group) => group.projects),
@@ -84,12 +84,12 @@ function seen(overview: Overview): Seen {
 
 const live = {
 	me: async () => (await client()).me(),
-	/** Everything the account sees; with `version`, once that differs, or
+	/** Everything the account sees; with `revision`, once that differs, or
 	 * after four minutes. */
-	seen: async (version?: string, signal?: AbortSignal) =>
+	seen: async (revision?: string, signal?: AbortSignal) =>
 		seen(
 			await (await client()).overview(
-				version === undefined ? {} : { version, wait: 240 },
+				revision === undefined ? {} : { revision, wait: 240 },
 				signal,
 			),
 		),
@@ -304,10 +304,10 @@ function mock(): Api {
 	return {
 		me: async () => me,
 		// Nothing changes on its own here.
-		seen: (version?: string, signal?: AbortSignal) =>
-			version === undefined
+		seen: (revision?: string, signal?: AbortSignal) =>
+			revision === undefined
 				? Promise.resolve({
-						version: "demo",
+						revision: "demo",
 						me,
 						groups,
 						projects,

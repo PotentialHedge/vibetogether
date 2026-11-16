@@ -363,7 +363,7 @@ async fn a_member_observes_the_log_without_joining_and_fetches_payloads() {
     status(w.eve.machine.log(s_, &LogQuery::default()).await),
     404
   );
-  // With its version, observing waits until who is in the session changes, such as a status.
+  // With its revision, observing waits until who is in the session changes, such as a status.
   let after = Some(1_000_000);
   let log = w
     .luis
@@ -378,14 +378,14 @@ async fn a_member_observes_the_log_without_joining_and_fetches_payloads() {
     .await
     .unwrap();
   let woken = {
-    let (luis, s_, version) = (w.luis.browser.clone(), s_.clone(), log.version.clone());
+    let (luis, s_, revision) = (w.luis.browser.clone(), s_.clone(), log.revision.clone());
     tokio::spawn(async move {
       luis
         .log(
           &s_,
           &LogQuery {
             after,
-            version: Some(version),
+            revision: Some(revision),
             wait: Some(5),
           },
         )
@@ -399,7 +399,7 @@ async fn a_member_observes_the_log_without_joining_and_fetches_payloads() {
     changed.participants["ben"].status.as_deref(),
     Some("Observed.")
   );
-  assert_ne!(changed.version, log.version);
+  assert_ne!(changed.revision, log.revision);
 }
 
 #[tokio::test]
@@ -544,13 +544,13 @@ async fn deleting_a_session_ends_what_waits_on_it_and_its_log() {
     })
     .await
     .unwrap();
-  let version = w
+  let revision = w
     .ben
     .browser
     .log(&doomed.id, &LogQuery::default())
     .await
     .unwrap()
-    .version;
+    .revision;
   let waiting = {
     let (ben, id) = (w.ben.browser.clone(), doomed.id.clone());
     tokio::spawn(async move {
@@ -558,7 +558,7 @@ async fn deleting_a_session_ends_what_waits_on_it_and_its_log() {
         .log(
           &id,
           &LogQuery {
-            version: Some(version),
+            revision: Some(revision),
             ..LogQuery::default()
           },
         )
@@ -677,7 +677,7 @@ async fn two_pages_that_observe_and_receive_dont_wake_each_other_forever() {
       loop {
         let query = LogQuery {
           after: Some(after),
-          version: Some(log.version.clone()),
+          revision: Some(log.revision.clone()),
           wait: None,
         };
         let Ok(next) = page2.log(&s_, &query).await else {
@@ -718,7 +718,7 @@ async fn two_pages_that_observe_and_receive_dont_wake_each_other_forever() {
 }
 
 #[tokio::test]
-async fn an_overview_with_its_version_waits_until_it_changes() {
+async fn an_overview_with_its_revision_waits_until_it_changes() {
   let w = world().await;
   let first = w
     .ben
@@ -728,25 +728,25 @@ async fn an_overview_with_its_version_waits_until_it_changes() {
     .unwrap();
   // A write that changes nothing of Ben's doesn't wake him.
   let unchanged = {
-    let (ben, version) = (w.ben.machine.clone(), first.version.clone());
+    let (ben, revision) = (w.ben.machine.clone(), first.revision.clone());
     tokio::spawn(async move {
       ben
         .overview(&OverviewQuery {
-          version: Some(version),
+          revision: Some(revision),
           wait: Some(1),
         })
         .await
     })
   };
   w.eve.browser.create_group("elsewhere").await.unwrap();
-  assert_eq!(unchanged.await.unwrap().unwrap().version, first.version);
+  assert_eq!(unchanged.await.unwrap().unwrap().revision, first.revision);
   // A change to his group by Luis's agent does.
   let woken = {
-    let (ben, version) = (w.ben.machine.clone(), first.version.clone());
+    let (ben, revision) = (w.ben.machine.clone(), first.revision.clone());
     tokio::spawn(async move {
       ben
         .overview(&OverviewQuery {
-          version: Some(version),
+          revision: Some(revision),
           wait: Some(10),
         })
         .await
@@ -763,7 +763,7 @@ async fn an_overview_with_its_version_waits_until_it_changes() {
     .await
     .unwrap();
   let next = woken.await.unwrap().unwrap();
-  assert_ne!(next.version, first.version);
+  assert_ne!(next.revision, first.revision);
   let group = next
     .groups
     .iter()
@@ -775,17 +775,17 @@ async fn an_overview_with_its_version_waits_until_it_changes() {
       .iter()
       .any(|p| p.project.name == "proofmarket")
   );
-  // An old version returns at once.
+  // An old revision returns at once.
   let again = w
     .ben
     .machine
     .overview(&OverviewQuery {
-      version: Some(first.version),
+      revision: Some(first.revision),
       wait: None,
     })
     .await
     .unwrap();
-  assert_eq!(again.version, next.version);
+  assert_eq!(again.revision, next.revision);
 }
 
 #[tokio::test]
@@ -1220,11 +1220,11 @@ async fn an_agent_is_awake_or_asleep_while_it_receives_to_its_person_and_its_gro
   assert!(!before.reachable.iter().any(|p| p.id == id(&listener)));
   // Asleep, in no session, it waits; that wakes an overview that waits.
   let woken = {
-    let (luis, version) = (w.luis.machine.clone(), before.version.clone());
+    let (luis, revision) = (w.luis.machine.clone(), before.revision.clone());
     tokio::spawn(async move {
       luis
         .overview(&OverviewQuery {
-          version: Some(version),
+          revision: Some(revision),
           wait: Some(5),
         })
         .await

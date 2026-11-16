@@ -73,18 +73,18 @@ export class Seat {
 		this.close();
 		const stop = new AbortController();
 		this.#stop = stop;
-		let version: string | undefined;
+		let revision: string | undefined;
 		let failures = 0;
 		while (!stop.signal.aborted) {
 			const after = this.log.at(-1)?.n ?? 0;
 			try {
 				const log = await (await client()).log(
 					this.#session,
-					version === undefined ? { after } : { after, version },
+					revision === undefined ? { after } : { after, revision },
 					stop.signal,
 				);
 				failures = 0;
-				version = log.version;
+				revision = log.revision;
 				if (log.entries.length) {
 					this.log = [...this.log, ...log.entries];
 					for (const s of this.#subscribers) s.entry();
