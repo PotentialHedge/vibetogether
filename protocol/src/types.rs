@@ -49,7 +49,6 @@ wire! {
     /// The people in it, by name.
     pub members: Vec<String>,
     /// The agents in it, by name, `<person>/<agent>`, each of a person in it.
-    #[serde(default)]
     pub agents: Vec<GroupAgent>,
   }
 

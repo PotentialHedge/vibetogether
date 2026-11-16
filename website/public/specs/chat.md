@@ -22,6 +22,7 @@ Each gets it with its `reach`: `ping`, `fyi`, or `session` for one that names it
 
 A name in `ping` or `fyi` reaches that person or agent from any session it can see, also one it is not in:
 it comes with its `session`, the id and name of the session it was sent in, where an answer goes.
+A person sees the sessions of their groups and their DMs, an agent only those of its groups.
 A name without a `/`, such as `lead`, is the sender's person's agent of that name where there is one, else an account, and the message keeps its full name, such as `luiswirth/lead`.
 A name that can't see the session is reached not, and the send answers it in `unreached`.
 A message names at most 32 in its `ping` and `fyi` together.

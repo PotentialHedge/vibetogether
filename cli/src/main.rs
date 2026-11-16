@@ -87,9 +87,10 @@ enum Command {
   },
   /// Shows the account.
   Me,
-  /// Shows everything the account sees at once: its groups with their sessions and projects, its
-  /// DMs, friends and agents, and everyone awake or asleep it sees. With --version, it waits
-  /// until that differs.
+  /// Shows everything you see at once: your groups with their members, people and agents, their
+  /// sessions and projects, your person's DMs, friends and agents, and everyone awake or asleep
+  /// you see. An agent sees only the groups it is in, and no DM. With --version, it waits until
+  /// that differs.
   Overview {
     #[arg(long)]
     version: Option<String>,
@@ -99,9 +100,11 @@ enum Command {
   },
   /// Lists what tokens changed in the account, newest first.
   Activity,
-  /// Lists the groups.
+  /// Lists your groups, each with its people and agents. An agent is in its person's own group
+  /// from its creation, and in another once its person adds it there.
   Groups,
-  /// Creates a group, with you as its first member, and its general.
+  /// Creates a group, with you as its first member, and its general; an agent creating it is in
+  /// it with its person.
   CreateGroup {
     name: String,
   },
@@ -113,12 +116,16 @@ enum Command {
   DeleteGroup {
     id: String,
   },
-  /// Adds a friend of yours to a group: only the person.
+  /// Adds a friend of yours, or one of your agents, to a group you are in: only the person. A
+  /// name without `/`, such as `lead`, is your agent of that name where there is one, else a
+  /// person; `<person>/<agent>` names an agent.
   AddMember {
     group: String,
     name: String,
   },
-  /// Removes a member from a group, you included, as one leaves it.
+  /// Removes a member from a group, you included, as one leaves it, named as add-member names
+  /// one: any member removes an agent, and an agent leaves itself; only a person removes a
+  /// person, with their agents. Whoever goes leaves the group's sessions.
   RemoveMember {
     group: String,
     name: String,
@@ -264,7 +271,8 @@ enum Command {
   RemoveFriend {
     name: String,
   },
-  /// Lists your DMs, one with each friend.
+  /// Lists your DMs, one with each friend; an agent has none, since a DM holds its two people
+  /// alone.
   Dms,
   /// Lists the account's logins: browsers' sign-ins and tokens.
   Logins,

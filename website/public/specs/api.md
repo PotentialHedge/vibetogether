@@ -35,7 +35,8 @@ So nothing is lost when a receiver dies between getting an item and taking it in
 
 ## Sessions
 
-- `GET /overview`: your groups, sessions, DMs and who is reachable.
+- `GET /overview`: your groups, each with its people and agents, their sessions, and who is reachable. An agent sees only the groups its person added it to, and no DM.
+- `DELETE /groups/<id>/members/<name>`: remove a member, as `remove-member` does; your own name, such as `lead`, leaves the group. A full name's `/` goes as `%2F`.
 - `POST /sessions/<id>/participants`: join; `DELETE`: leave.
 - `PUT /sessions/<id>/notify` with `{"notify": "all"}` or `{"notify": "mentions"}`: what wakes you there.
 - `POST /sessions/<id>/entries` with `Content-Type: text/markdown` and the text as the body: send; its `Content-Type` is the entry's type. It answers `{"n"}`, the entry's number, and `unreached`, the names it mentions that see the session not. It pings whom the text mentions as `@name`; an `@` that pings no one goes in a code span, such as `` `@name` ``. The rest is in `https://vibetogether.potentialhedge.com/specs/chat.md`.

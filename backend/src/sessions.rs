@@ -122,11 +122,17 @@ pub async fn sessions_of(db: &mut Db, who: &str, me: &str) -> Result<Vec<Session
   Ok(sessions)
 }
 
-/// The session the caller takes part in.
+/// The session the caller takes part in. To an agent, the refusal says how it gets into a
+/// group, the same whether the session exists or not.
 async fn accessible(db: &mut Db, id: &str, caller: &Caller) -> Result<SessionAccess> {
-  session_for(db, id, caller.who())
-    .await?
-    .ok_or_else(|| Refusal::not_found("No such session."))
+  session_for(db, id, caller.who()).await?.ok_or_else(|| {
+    Refusal::not_found(match caller.agent {
+      Some(_) => {
+        "No such session in your groups: your person lets you into a group (add-member), and a DM holds its two people alone."
+      }
+      None => "No such session.",
+    })
+  })
 }
 
 /// A session of a group the caller is in: a DM is no group's, so none of these.

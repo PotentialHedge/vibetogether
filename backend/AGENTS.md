@@ -17,6 +17,9 @@ Vibe Together's design (`../AGENTS.md`): read it before working here.
 - Signing in, approving an OTP and deleting the account are the browser's alone, and accepting an invite the person's, by the browser or a person token, Luis's decision (2026-11-15).
   Letting someone in and deleting are the person's too (`Caller::as_person`), by Luis's authorization of security fixes (2026-11-15): adding a friend, inviting into a group, adding a member to one, deleting a group, project or session, and revoking another login than the caller's own; everything else an agent token does too.
   What a token changes is recorded for its person (`activity`), and letting someone in is limited per hour.
+- A group's members are people and agents, Luis's decision (2026-11-16): `group_member.member` is a person's account id or an agent's id, with its person in `account`.
+  A request sees what its participant is a member of (`Caller::who`): an agent only its groups and no DM, the person all of theirs; others see and reach an agent only through a group they share.
+  An agent is in its person's own group from its creation, and in another only while its person is, once its person added it; whoever leaves a group leaves its sessions.
 - One account sends at most four payloads at once, each read into memory only once its sender is known (`src/limits.rs`).
 - The transport (`src/transport.rs`) is in memory beside the database: the log, the participants, each participant's stream and the waiting receives.
   Observing and receiving are two things, Luis's decision (2026-11-15): observing reads a session's log (`log`), with no side effects; receiving is a participant's own stream (`receive`), each item with its `reach`, and two positions, `received` and `read`, which move the participant's positions in its sessions.
