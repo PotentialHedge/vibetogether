@@ -35,7 +35,6 @@ const MAX_INLINE: usize = 64 * 1024;
 const MAX_ANSWER: usize = 1024 * 1024;
 /// How long an agent stays its login's after that login last acted as it, while no receive of it
 /// waits.
-const HOLD_FOR: i64 = 3600;
 /// How long a participant stays awake or asleep after its last receive ended, so that receiving
 /// again keeps it.
 const GRACE: Duration = Duration::from_secs(60);
@@ -378,16 +377,15 @@ pub async fn hold(app: &App, db: &mut Db, p: &Acting, login: &str) -> Result<()>
       "This agent is archived: it receives and sends no more.",
     ));
   }
+  // The holder keeps it until revoked, however long it is quiet: another token of the account
+  // never takes it over, Luis's decision (2026-11-16).
   let other = agent.holder.as_ref().filter(|holder| *holder != login);
-  if let Some(holder) = other {
-    let recent = agent
-      .seen
-      .is_some_and(|seen| seen > db::from_now(-HOLD_FOR));
-    if login_lasts(db, holder).await? && (recent || app.live.receiving(&p.id)) {
-      return Err(Refusal::conflict(
-        "Another login holds this agent, which is one mind at a time: it takes it once that login is revoked, or has not acted as it for an hour.",
-      ));
-    }
+  if let Some(holder) = other
+    && login_lasts(db, holder).await?
+  {
+    return Err(Refusal::conflict(
+      "Another login holds this agent, which is one mind at a time: it takes it only once that login is revoked.",
+    ));
   }
   sqlx::query("UPDATE agent SET holder = ?, seen = ? WHERE id = ?")
     .bind(login)

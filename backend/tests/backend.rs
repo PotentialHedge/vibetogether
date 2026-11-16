@@ -407,17 +407,26 @@ async fn an_agent_is_held_by_one_login_at_a_time() {
     status(server.receive(&query(None, None, Some(0))).await),
     409
   );
-  // Once its holder has not acted as it for an hour, another login of the person takes it.
+  // However long its holder is quiet, another token never takes it over; nor archives or
+  // renames it.
   sqlx::query("UPDATE agent SET seen = '2000-01-01T00:00:00.000Z' WHERE id = ?")
     .bind(id(&codex))
     .execute(&mut w.server.db().await)
     .await
     .unwrap();
+  assert_eq!(status(server.join(&w.session.id).await), 409);
+  assert_eq!(status(server.archive_agent(&id(&codex)).await), 409);
+  assert_eq!(status(server.rename_agent(&id(&codex), "taken").await), 409);
+  // Once its holder is revoked, another login of the person takes it.
+  let holder = codex
+    .logins()
+    .await
+    .unwrap()
+    .into_iter()
+    .find(|l| l.current)
+    .unwrap();
+  w.luis.browser.revoke_login(&holder.id).await.unwrap();
   assert_eq!(status(server.join(&w.session.id).await), 200);
-  assert_eq!(
-    status(codex.receive(&query(None, None, Some(0))).await),
-    409
-  );
 }
 
 #[tokio::test]

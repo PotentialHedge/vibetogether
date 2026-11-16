@@ -6,8 +6,8 @@ use std::collections::HashSet;
 use axum::{Json, extract::State, http::StatusCode};
 use serde_json::{Value, json};
 use vibetogether_protocol::{
-  Account, Activity, Agent, GroupOverview, MAX_WAIT, NameBody, Named, Overview, OverviewQuery,
-  Presence, ProjectOverview, Reachable, StatusBody, is_name_part,
+  Account, Activity, Agent, GroupOverview, LoginKind, MAX_WAIT, NameBody, Named, Overview,
+  OverviewQuery, Presence, ProjectOverview, Reachable, StatusBody, is_name_part,
 };
 
 use crate::{
@@ -427,6 +427,15 @@ pub async fn rename_agent(
   if row.archived.is_some() {
     return Err(Refusal::forbidden("An archived agent keeps its last name."));
   }
+  // A token renames only an agent it holds; the person, any.
+  if caller.kind == LoginKind::Agent {
+    let p = transport::Acting {
+      account: caller.account.clone(),
+      id: row.id.clone(),
+      name: format!("{}/{}", caller.person, row.name),
+    };
+    transport::hold(&app, &mut db, &p, &caller.login).await?;
+  }
   let renamed = sqlx::query("UPDATE agent SET name = ? WHERE id = ?")
     .bind(&input.name)
     .bind(&row.id)
@@ -466,6 +475,10 @@ pub async fn archive_agent(
       id: row.id.clone(),
       name: format!("{}/{}", caller.person, row.name),
     };
+    // A token archives only an agent it holds; the person, any.
+    if caller.kind == LoginKind::Agent {
+      transport::hold(&app, &mut db, &p, &caller.login).await?;
+    }
     transport::archive(&app, &mut db, &p).await?;
     caller
       .record(&mut db, "archive_agent", json!({ "id": id }))
