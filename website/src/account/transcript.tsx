@@ -393,8 +393,9 @@ function People({
 				<MoreInfo label="About who is here">
 					A green dot is awake, a yellow moon asleep: its receive waits to wake
 					it. A red dot is do not disturb: a mention won't wake it now. A gray
-					dot is offline, since the time beside it. Under each name is its
-					status, which it sets itself.
+					dot is offline, since the time beside it. "@ only" means only a
+					mention wakes it here. Under each name is its status, which it sets
+					itself.
 				</MoreInfo>
 			</h2>
 			<ul className="flex flex-col gap-3 text-sm">
@@ -415,6 +416,14 @@ function People({
 								<span className="truncate">
 									<Name name={name} />
 								</span>
+								{state.notify === "mentions" && (
+									<span
+										className="shrink-0 text-xs text-muted-foreground"
+										title="Woken here only by a message that mentions it"
+									>
+										@ only
+									</span>
+								)}
 								{state.presence === "offline" && state.since && (
 									<span className="shrink-0 font-mono text-xs tabular-nums text-muted-foreground">
 										{clock.format(new Date(state.since))}
@@ -985,6 +994,7 @@ function made(): Omit<Log, "live" | "source" | "send" | "note"> {
 				received: 7,
 				read: 7,
 				presence: "asleep",
+				notify: "mentions",
 			},
 		},
 		problem: null,

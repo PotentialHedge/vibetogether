@@ -364,6 +364,17 @@ impl Client {
       .await
   }
 
+  /// Sets what wakes the caller in a session it is in.
+  pub async fn notify(&self, id: &str, notify: Notify) -> Result<()> {
+    self
+      .json(
+        Method::PUT,
+        &["sessions", id, "notify"],
+        &NotifyBody { notify },
+      )
+      .await
+  }
+
   pub async fn leave(&self, id: &str) -> Result<Left> {
     self
       .bare(Method::DELETE, &["sessions", id, "participants"])

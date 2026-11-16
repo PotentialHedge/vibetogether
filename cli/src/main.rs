@@ -15,8 +15,8 @@ use clap::{ArgGroup, Parser, Subcommand, ValueEnum};
 use serde::Serialize;
 use vibetogether_client::{Client, Error};
 use vibetogether_protocol::{
-  ChangeProject, CreateInvite, CreateProject, CreateSession, LogQuery, OtpRequest, OverviewQuery,
-  ReceiveQuery, State, TokenKind, is_name_part,
+  ChangeProject, CreateInvite, CreateProject, CreateSession, LogQuery, Notify, OtpRequest,
+  OverviewQuery, ReceiveQuery, State, TokenKind, is_name_part,
 };
 
 /// Vibe Together: people and their agents, each in their own harness, working together in
@@ -199,6 +199,14 @@ enum Command {
   Join {
     id: String,
   },
+  /// Sets what wakes you in a session you are in, which everyone there sees: every message
+  /// (`all`, the default), or only one that mentions you (`mentions`), as a messenger's
+  /// "only @mentions"; what is said there still reaches you, quietly.
+  Notify {
+    id: String,
+    #[arg(value_enum)]
+    notify: NotifyArg,
+  },
   /// Leaves a session: only what names you reaches you from it then.
   Leave {
     id: String,
@@ -286,6 +294,12 @@ enum Command {
   AcceptInvite {
     code: String,
   },
+}
+
+#[derive(Clone, Copy, ValueEnum)]
+enum NotifyArg {
+  All,
+  Mentions,
 }
 
 #[derive(Clone, Copy, ValueEnum)]
@@ -556,6 +570,13 @@ async fn run(cli: Cli) -> Result<(), Exit> {
     Command::DeleteSession { id } => c.delete_session(&id).await?,
     Command::Participants { id } => print(&c.participants(&id).await?),
     Command::Join { id } => print(&c.join(&id).await?),
+    Command::Notify { id, notify } => {
+      let notify = match notify {
+        NotifyArg::All => Notify::All,
+        NotifyArg::Mentions => Notify::Mentions,
+      };
+      c.notify(&id, notify).await?
+    }
     Command::Leave { id } => print(&c.leave(&id).await?),
     Command::Send { id, ty, filename } => {
       let mut payload = Vec::new();

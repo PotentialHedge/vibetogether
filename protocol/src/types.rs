@@ -301,6 +301,9 @@ wire! {
     pub read: u64,
     /// Awake, asleep or offline.
     pub presence: Presence,
+    /// What wakes it in this session.
+    #[serde(skip_serializing_if = "Notify::is_all", default)]
+    pub notify: Notify,
     /// Do not disturb: a mention doesn't wake it now, as its own side holds while it receives.
     #[serde(skip_serializing_if = "std::ops::Not::not", default)]
     pub dnd: bool,
@@ -332,6 +335,22 @@ wire! {
     pub wait: Option<u64>,
   }
 
+  /// What wakes a participant in a session it is in, which it sets itself and everyone in the
+  /// session sees: `all`, every message said there, as by default; `mentions`, only a message
+  /// that names it, as messengers' "only @mentions".
+  #[derive(Copy, Eq, Default)]
+  #[serde(rename_all = "lowercase")]
+  pub enum Notify {
+    #[default]
+    All,
+    Mentions,
+  }
+
+  /// A participant's notify setting for a session.
+  pub struct NotifyBody {
+    pub notify: Notify,
+  }
+
   /// Why an item reached a participant: `ping`, it names it to wake it; `fyi`, it names it
   /// quietly; `session`, it was said in a session the participant is in.
   #[derive(Copy, Eq)]
@@ -347,6 +366,9 @@ wire! {
     /// Its number in the stream, from 1, as `received` and `read` name it.
     pub n: u64,
     pub reach: Reach,
+    /// What wakes the participant in the session, as it set it now.
+    #[serde(skip_serializing_if = "Notify::is_all", default)]
+    pub notify: Notify,
     /// The session it was said in, where an answer goes.
     pub session: Named,
     pub entry: Entry,
@@ -495,15 +517,24 @@ wire! {
 
 impl Item {
   /// Whether it wakes its receiver by default: a ping, or a message said to a session the
-  /// receiver is in, its `ping` left out; a message that pings no one (`ping=""`), an fyi, a join,
-  /// a leave or another extension's entry lands quietly, since the sender decides.
+  /// receiver is in, its `ping` left out, where the receiver's notify setting there is `all`; a
+  /// message that pings no one (`ping=""`), an fyi, a join, a leave or another extension's entry
+  /// lands quietly, since the sender decides.
   pub fn wakes(&self) -> bool {
     match self.reach {
       Reach::Ping => true,
       Reach::Session => {
-        crate::is_message(&self.entry.ty) && crate::parameter_of(&self.entry.ty, "ping").is_none()
+        self.notify == Notify::All
+          && crate::is_message(&self.entry.ty)
+          && crate::parameter_of(&self.entry.ty, "ping").is_none()
       }
       Reach::Fyi => false,
     }
+  }
+}
+
+impl Notify {
+  pub fn is_all(&self) -> bool {
+    *self == Notify::All
   }
 }

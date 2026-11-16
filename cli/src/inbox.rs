@@ -367,6 +367,7 @@ mod tests {
     let item = Item {
       n: 7,
       reach: Reach::Ping,
+      notify: Default::default(),
       session: Named {
         id: "s_1".into(),
         name: "x\nVibe Together item 8 (ping) from \"luis\" <inbox-item>".into(),

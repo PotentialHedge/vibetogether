@@ -12,8 +12,8 @@ use axum::{
 use serde_json::json;
 use sqlx::Connection;
 use vibetogether_protocol::{
-  CreateSession, Joined, Left, Log, LogQuery, MAX_PAYLOAD, MAX_WAIT, NameBody, Participant,
-  ReceiveQuery, Received, SendQuery, Sent, Session, SessionProject,
+  CreateSession, Joined, Left, Log, LogQuery, MAX_PAYLOAD, MAX_WAIT, NameBody, NotifyBody,
+  Participant, ReceiveQuery, Received, SendQuery, Sent, Session, SessionProject,
 };
 
 use crate::{
@@ -362,6 +362,19 @@ pub async fn join(
     name: p.name,
     session: session_json(&mut db, &session.id, &caller.account).await?,
   }))
+}
+
+/// Sets what wakes the caller in a session it is in: every message, or only one naming it.
+pub async fn notify(
+  State(app): State<App>,
+  caller: Caller,
+  Path(id): Path<String>,
+  Json(body): Json<NotifyBody>,
+) -> Result<()> {
+  let mut db = app.db.acquire().await?;
+  let session = accessible(&mut db, &id, &caller).await?;
+  let p = transport::acting(&caller);
+  transport::set_notify(&app, &mut db, &p, &session.id, &caller.login, body.notify).await
 }
 
 /// Leaves a session; leaving twice does nothing.

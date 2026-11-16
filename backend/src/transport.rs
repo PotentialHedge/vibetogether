@@ -16,7 +16,7 @@ use axum::http::StatusCode;
 use sqlx::Connection;
 use tokio::{sync::oneshot, time::Instant};
 use vibetogether_protocol::{
-  Entry, Item, JOIN_TYPE, LEAVE_TYPE, LogQuery, MAX_NAMED, MAX_PAYLOAD, Named, Participant,
+  Entry, Item, JOIN_TYPE, LEAVE_TYPE, LogQuery, MAX_NAMED, MAX_PAYLOAD, Named, Notify, Participant,
   Presence, Reach, ReceiveQuery, Received, SYSTEM_NAME, Sent, State, is_message, is_name_part,
   names_of, renamed, with_mentions,
 };
@@ -608,6 +608,40 @@ fn reach_name(reach: Reach) -> &'static str {
   }
 }
 
+fn notify_of(name: &str) -> Notify {
+  match name {
+    "mentions" => Notify::Mentions,
+    _ => Notify::All,
+  }
+}
+
+/// Sets what wakes the participant in a session it is in, which everyone there sees.
+pub async fn set_notify(
+  app: &App,
+  db: &mut Db,
+  p: &Acting,
+  session: &str,
+  login: &str,
+  notify: Notify,
+) -> Result<()> {
+  hold(app, db, p, login).await?;
+  let set =
+    sqlx::query("UPDATE participant SET notify = ? WHERE session = ? AND id = ? AND inside = 1")
+      .bind(match notify {
+        Notify::All => "all",
+        Notify::Mentions => "mentions",
+      })
+      .bind(session)
+      .bind(&p.id)
+      .execute(&mut *db)
+      .await?;
+  if set.rows_affected() == 0 {
+    return Err(Refusal::forbidden("Join the session first."));
+  }
+  app.changes.written();
+  Ok(())
+}
+
 fn reach_of(name: &str) -> Reach {
   match name {
     "ping" => Reach::Ping,
@@ -936,6 +970,7 @@ struct ParticipantRow {
   read: i64,
   since: String,
   status: Option<String>,
+  notify: String,
 }
 
 /// Who is in the session, by name, with their positions, their presence and their status.
@@ -945,8 +980,8 @@ pub async fn participants_of(
   session: &str,
 ) -> Result<BTreeMap<String, Participant>> {
   let rows: Vec<ParticipantRow> = sqlx::query_as(
-    "SELECT p.id, a.login, ag.name AS agent, p.received, p.read, p.since, st.text AS status
-     FROM participant p JOIN account a ON a.id = p.account LEFT JOIN agent ag ON ag.id = p.id
+    "SELECT p.id, a.login, ag.name AS agent, p.received, p.read, p.since, st.text AS status,
+     p.notify FROM participant p JOIN account a ON a.id = p.account LEFT JOIN agent ag ON ag.id = p.id
      LEFT JOIN status st ON st.participant = p.id WHERE p.session = ? AND p.inside = 1",
   )
   .bind(session)
@@ -969,6 +1004,7 @@ pub async fn participants_of(
           read: row.read as u64,
           dnd,
           presence,
+          notify: notify_of(&row.notify),
           status: row.status,
         };
         (name, participant)
@@ -1106,6 +1142,7 @@ struct ItemRow {
   item: i64,
   reach: String,
   session: String,
+  notify: Option<String>,
   #[sqlx(flatten)]
   entry: EntryRow,
 }
@@ -1115,9 +1152,10 @@ struct ItemRow {
 async fn items_of(db: &mut Db, account: &str, id: &str, after: u64) -> Result<Vec<Item>> {
   loop {
     let rows: Vec<ItemRow> = sqlx::query_as(
-      "SELECT st.n AS item, st.reach, st.session,
+      "SELECT st.n AS item, st.reach, st.session, p.notify,
        e.n, e.time, e.sender, e.participant, e.type, e.size, e.filename, e.text
        FROM stream st JOIN entry e ON e.session = st.session AND e.n = st.entry
+       LEFT JOIN participant p ON p.session = st.session AND p.id = st.participant
        WHERE st.participant = ? AND st.n > ? ORDER BY st.n LIMIT 1000",
     )
     .bind(id)
@@ -1151,6 +1189,7 @@ async fn items_of(db: &mut Db, account: &str, id: &str, after: u64) -> Result<Ve
       items.push(Item {
         n: row.item as u64,
         reach: reach_of(&row.reach),
+        notify: row.notify.as_deref().map_or(Notify::All, notify_of),
         session: Named {
           id: row.session,
           name,

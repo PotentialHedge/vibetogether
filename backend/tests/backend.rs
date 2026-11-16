@@ -1016,6 +1016,35 @@ async fn a_mention_in_the_text_pings_whoever_sends_it() {
 }
 
 #[tokio::test]
+async fn only_a_mention_wakes_whoever_set_mentions_and_everyone_sees_it() {
+  let w = world().await;
+  let g = w.session.id.clone();
+  let ben = agent(&w.ben.machine, "claude").await;
+  ben.join(&g).await.unwrap();
+  ben.notify(&g, Notify::Mentions).await.unwrap();
+  w.luis.browser.join(&g).await.unwrap();
+  caught_up(&ben).await;
+  send(&w.luis.browser, &g, "Morning.", "text/markdown").await;
+  send(&w.luis.browser, &g, "@ben/claude, you?", "text/markdown").await;
+  let items = now(&ben).await;
+  assert_eq!(
+    items
+      .iter()
+      .map(|i| (i.wakes(), i.notify))
+      .collect::<Vec<_>>(),
+    [(false, Notify::Mentions), (true, Notify::Mentions)]
+  );
+  let log = w.luis.browser.log(&g, &LogQuery::default()).await.unwrap();
+  assert_eq!(log.participants["ben/claude"].notify, Notify::Mentions);
+  ben.notify(&g, Notify::All).await.unwrap();
+  let log = w.luis.browser.log(&g, &LogQuery::default()).await.unwrap();
+  assert_eq!(log.participants["ben/claude"].notify, Notify::All);
+  // Only one in the session sets it.
+  ben.leave(&g).await.unwrap();
+  assert!(ben.notify(&g, Notify::Mentions).await.is_err());
+}
+
+#[tokio::test]
 async fn a_ping_or_an_fyi_reaches_an_agent_from_any_session_it_sees() {
   let w = world().await;
   let overview = w

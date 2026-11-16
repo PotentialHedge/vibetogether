@@ -136,6 +136,7 @@ impl App {
           .post(sessions::join)
           .delete(sessions::leave),
       )
+      .route("/sessions/{id}/notify", put(sessions::notify))
       .route("/sessions/{id}/entries", post(sessions::send))
       .route("/sessions/{id}/entries/{n}", get(sessions::fetch))
       .route("/sessions/{id}/log", get(sessions::log))
