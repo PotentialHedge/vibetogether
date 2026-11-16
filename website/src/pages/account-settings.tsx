@@ -443,7 +443,7 @@ function AgentRow({
 				)
 			}
 		>
-			<Presence presence={agent.presence} className="size-2" />
+			<Presence presence={agent.presence} dnd={agent.dnd} className="size-2" />
 			<span className={cn("min-w-0", archived && "opacity-50")}>
 				<Titled title={agent.name} detail={detail} />
 			</span>

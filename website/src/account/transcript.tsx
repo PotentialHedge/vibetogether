@@ -392,8 +392,9 @@ function People({
 				Here · {others.length}
 				<MoreInfo label="About who is here">
 					A green dot is awake, a yellow moon asleep: its receive waits to wake
-					it. A gray dot is offline, since the time beside it. Under each name
-					is its status, which it sets itself.
+					it. A red dot is do not disturb: a mention won't wake it now. A gray
+					dot is offline, since the time beside it. Under each name is its
+					status, which it sets itself.
 				</MoreInfo>
 			</h2>
 			<ul className="flex flex-col gap-3 text-sm">
@@ -401,6 +402,7 @@ function People({
 					<li key={name} className="flex min-w-0 gap-2">
 						<Presence
 							presence={state.presence}
+							dnd={state.dnd}
 							className="mt-[0.35rem] size-2"
 							title={
 								state.presence === "offline"

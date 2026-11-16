@@ -26,15 +26,17 @@ pub enum Command {
   /// Keeps the agent's inbox filled from its stream: one receive kept open always, awake while
   /// the inbox's awake lock is held and asleep otherwise. Each item that reaches the agent is
   /// delivered as text whose first line says where it is from; a ping or a session's message
-  /// also rings the bell, an fyi stays quiet, unless the agent's policy says otherwise, matching
-  /// `from`, `reach` (`ping`, `fyi`, `session`) and `session` (its name or id). An item counts as
-  /// received once it is in `new/`,
+  /// also rings the bell, an fyi stays quiet, unless the agent's do-not-disturb settings say
+  /// otherwise, matching `from`, `reach` (`ping`, `fyi`, `session`) and `session` (its name or
+  /// id); where they quiet a mention, its receive holds do not disturb, so others see it. An item
+  /// counts as received once it is in `new/`,
   /// and as read once it and every item before it have left `new/`. It runs until refused.
   Receive,
-  /// Delivers one item, read from stdin, into `new/`. The agent's policy, the inbox's file
-  /// `policy`, decides whether it rings, by `from`: each line a rule, fields to match and then
-  /// `ring` or `quiet`, such as `session=hive reach=session quiet`; the last rule that matches
-  /// decides, and where none does, the sender's proposal stands.
+  /// Delivers one item, read from stdin, into `new/`. The agent's do-not-disturb settings, the
+  /// inbox's file `do-not-disturb`, decide whether it rings, by `from`: each line a rule, fields
+  /// to match and then `ring` or `quiet`, such as `session=hive reach=session quiet`, or `quiet`
+  /// alone for everything; the last rule that matches decides, and where none does, the sender's
+  /// proposal stands.
   Deliver {
     /// Who sends it, such as an agent's or a person's name.
     #[arg(long, default_value = "unknown")]
@@ -178,12 +180,12 @@ type Receiving<'a> = Pin<Box<dyn Future<Output = Result<Received, Error>> + 'a>>
 async fn receive(inbox: &Inbox, client: &Client) -> Result<(), Failure> {
   inbox.create()?;
   let mut stream = Stream::default();
-  // The receive out, with the read position and state it named.
-  let mut out: Option<(Receiving, Option<u64>, State)> = None;
+  // The receive out, with the read position, state and do not disturb it named.
+  let mut out: Option<(Receiving, Option<u64>, State, bool)> = None;
   let mut next = Instant::now();
   let mut backoff: Option<Duration> = None;
   loop {
-    if let Some((mut receiving, read, held)) = out.take() {
+    if let Some((mut receiving, read, held, dnd)) = out.take() {
       tokio::select! {
         result = &mut receiving => {
           match result {
@@ -202,7 +204,7 @@ async fn receive(inbox: &Inbox, client: &Client) -> Result<(), Failure> {
             Err(error) => return Err(Failure::Refused(error)),
           }
         }
-        () = tokio::time::sleep(TICK) => out = Some((receiving, read, held)),
+        () = tokio::time::sleep(TICK) => out = Some((receiving, read, held, dnd)),
       }
     } else {
       tokio::time::sleep_until(next.max(Instant::now())).await;
@@ -213,8 +215,9 @@ async fn receive(inbox: &Inbox, client: &Client) -> Result<(), Failure> {
     } else {
       State::Asleep
     };
+    let dnd = inbox.dnd()?;
     let issue = match &out {
-      Some((_, read, held)) => (*read, *held) != (stream.read, state),
+      Some((_, read, held, held_dnd)) => (*read, *held, *held_dnd) != (stream.read, state, dnd),
       None => Instant::now() >= next,
     };
     if issue {
@@ -223,11 +226,13 @@ async fn receive(inbox: &Inbox, client: &Client) -> Result<(), Failure> {
         read: stream.read,
         wait: Some(WAIT),
         state: Some(state),
+        dnd,
       };
       out = Some((
         Box::pin(async move { client.receive(&query).await }),
         stream.read,
         state,
+        dnd,
       ));
     }
   }

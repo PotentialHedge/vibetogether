@@ -9,16 +9,28 @@ import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 
 /** A participant's presence, as messengers show it: awake a green dot, asleep
- * a yellow moon, offline a gray dot; `className` sizes it. */
+ * a yellow moon, offline a gray dot, and do not disturb, while it receives, a
+ * red one; `className` sizes it. */
 export function Presence({
 	presence,
+	dnd,
 	className,
 	title,
 }: {
 	presence: string;
+	dnd?: boolean | undefined;
 	className?: string;
 	title?: string;
 }) {
+	if (dnd && (presence === "awake" || presence === "asleep"))
+		return (
+			<span
+				role="img"
+				aria-label="do not disturb"
+				title={title ?? "do not disturb"}
+				className={cn("shrink-0 rounded-full bg-red-500", className)}
+			/>
+		);
 	if (presence === "asleep")
 		return (
 			<Moon

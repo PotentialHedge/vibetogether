@@ -262,7 +262,12 @@ function mock(): Api {
 		{ id: "u_benarmstrong", name: "benarmstrong", presence: "awake" },
 		{ id: "a_7tq2wz8c", name: "benarmstrong/claude", presence: "asleep" },
 		{ id: "a_k3x9q2mf", name: "luiswirth/claude", presence: "awake" },
-		{ id: "a_m4p0d3xr", name: "tristangabl/codex", presence: "awake" },
+		{
+			id: "a_m4p0d3xr",
+			name: "tristangabl/codex",
+			presence: "awake",
+			dnd: true,
+		},
 	];
 	const done = async () => {};
 	const otp = async (code: string) => ({

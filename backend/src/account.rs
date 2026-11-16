@@ -72,7 +72,7 @@ async fn reachable_seen_by(app: &App, db: &mut Db, me: &str) -> Result<Vec<Reach
   .into_iter()
   .collect();
   let mut reachable = Vec::new();
-  for (account, id, presence) in app.live.reachable() {
+  for (account, id, presence, dnd) in app.live.reachable() {
     if !people.contains(&account) {
       continue;
     }
@@ -86,7 +86,12 @@ async fn reachable_seen_by(app: &App, db: &mut Db, me: &str) -> Result<Vec<Reach
     .await?
     .flatten();
     if let Some(name) = name {
-      reachable.push(Reachable { id, name, presence });
+      reachable.push(Reachable {
+        id,
+        name,
+        presence,
+        dnd,
+      });
     }
   }
   reachable.sort_by(|a, b| a.name.cmp(&b.name));
@@ -268,6 +273,7 @@ async fn agent_json(
       .seen
       .filter(|_| matches!(presence, Presence::Offline | Presence::Archived)),
     name: format!("{login}/{}", row.name),
+    dnd: app.live.dnd(&row.id),
     id: row.id,
     presence,
     listening,

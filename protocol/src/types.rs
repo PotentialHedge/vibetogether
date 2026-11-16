@@ -127,6 +127,9 @@ wire! {
     /// Its full name now, as `<account>/<name>`.
     pub name: String,
     pub presence: Presence,
+    /// Do not disturb: a mention doesn't wake it now, as its own side holds while it receives.
+    #[serde(skip_serializing_if = "std::ops::Not::not", default)]
+    pub dnd: bool,
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub status: Option<String>,
     /// When it last acted, where it is offline or archived.
@@ -141,6 +144,9 @@ wire! {
     pub id: String,
     pub name: String,
     pub presence: State,
+    /// Do not disturb: a mention doesn't wake it now, as its own side holds while it receives.
+    #[serde(skip_serializing_if = "std::ops::Not::not", default)]
+    pub dnd: bool,
   }
 
   /// A group with its own sessions, its general first, and its projects with theirs.
@@ -295,6 +301,9 @@ wire! {
     pub read: u64,
     /// Awake, asleep or offline.
     pub presence: Presence,
+    /// Do not disturb: a mention doesn't wake it now, as its own side holds while it receives.
+    #[serde(skip_serializing_if = "std::ops::Not::not", default)]
+    pub dnd: bool,
     /// Where it is offline, when its last receive ended, or when it joined.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub since: Option<String>,
@@ -363,6 +372,9 @@ wire! {
     pub wait: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub state: Option<State>,
+    /// Do not disturb, held while it waits: a mention would not wake the participant.
+    #[serde(skip_serializing_if = "std::ops::Not::not", default)]
+    pub dnd: bool,
   }
 
   /// A join: the number of its entry, the name the participant takes part under, and the session.

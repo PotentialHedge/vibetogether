@@ -1160,6 +1160,7 @@ async fn an_agent_is_awake_or_asleep_while_it_receives_to_its_person_their_group
     let listener = listener.clone();
     let asleep = ReceiveQuery {
       state: Some(State::Asleep),
+      dnd: true,
       ..query(None, None, Some(30))
     };
     tokio::spawn(async move { listener.receive(&asleep).await })
@@ -1170,7 +1171,8 @@ async fn an_agent_is_awake_or_asleep_while_it_receives_to_its_person_their_group
     Some(&Reachable {
       id: id(&listener),
       name: s("ben/listener"),
-      presence: State::Asleep
+      presence: State::Asleep,
+      dnd: true,
     })
   );
   // Ben sees it among his agents; a stranger sees nothing of it.

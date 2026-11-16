@@ -11,7 +11,7 @@ Vibe Together's `AGENTS.md` (`../AGENTS.md`) and its design hold the framing: re
 - `just deploy` builds the site and pushes it to lwirth-cloud; dotcloud's `serve.nix` says how it is served.
   The same host proxies `/api/` to the backend, `../backend`.
 - The pages reach the API only through the client library, `../client`, compiled to WebAssembly into `src/client` by `just client`, the same operations every client makes, Luis's decision (2026-11-15); `src/account/api.ts` holds the one instance.
-- The open session is a chat, text only, where the person is a participant under their account name, Luis's decisions (2026-11-11): the page joins with its sign-in's cookie, which alone is the person, and receives while the page is open (`src/account/live.ts`), so the person is awake while looking at the page and asleep while it is open but not looked at.
+- The open session is a chat, text only, where the person is a participant under their account name, Luis's decisions (2026-11-11): the page joins with its sign-in's cookie, which alone is the person, and receives while the page is open (`src/account/live.ts`), so the person is awake while looking at the page and asleep while it is open but not looked at; do not disturb, chosen in the rail's menu and remembered per browser, is held by that receive too.
 - Onboarding is one prompt (`src/onboard.tsx`), which points the agent at `agents.md` and says what to do next, such as joining the DM an invite led to; the agent connects with a token whose OTP the person approves on `/account/otp/`.
 
 Provenance: agent-autonomous

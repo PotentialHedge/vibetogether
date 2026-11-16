@@ -2,6 +2,7 @@
  * open group's projects, their sessions and its members in the sidebar. */
 
 import {
+	BellOff,
 	Ellipsis,
 	LogOut,
 	Monitor,
@@ -22,6 +23,7 @@ import {
 	type Reachable,
 	type Session,
 } from "@/account/api";
+import { doNotDisturb, setDoNotDisturb } from "@/account/live";
 import { Person, Presence } from "@/account/parts";
 import { Button } from "@/components/ui/button";
 import {
@@ -35,6 +37,7 @@ import {
 } from "@/components/ui/dialog";
 import {
 	DropdownMenu,
+	DropdownMenuCheckboxItem,
 	DropdownMenuContent,
 	DropdownMenuGroup,
 	DropdownMenuItem,
@@ -354,6 +357,7 @@ export function Rail({
 }) {
 	const [adding, setAdding] = useState(false);
 	const [theme, setTheme] = useTheme();
+	const [dnd, setDnd] = useState(doNotDisturb);
 	const sorted = [...groups].sort((a, b) => Number(b.own) - Number(a.own));
 	return (
 		<nav
@@ -471,6 +475,17 @@ export function Rail({
 						<Settings />
 						Settings
 					</DropdownMenuItem>
+					<DropdownMenuSeparator />
+					<DropdownMenuCheckboxItem
+						checked={dnd}
+						onCheckedChange={(on) => {
+							setDoNotDisturb(on);
+							setDnd(on);
+						}}
+					>
+						<BellOff />
+						Do not disturb
+					</DropdownMenuCheckboxItem>
 					<DropdownMenuSeparator />
 					<DropdownMenuRadioGroup
 						value={theme}
@@ -770,7 +785,11 @@ function Members({
 									className="flex h-6 items-center gap-2 pr-2 pl-9 text-xs text-muted-foreground"
 									title={`${agent.name} is ${agent.presence}`}
 								>
-									<Presence presence={agent.presence} className="size-2" />
+									<Presence
+										presence={agent.presence}
+										dnd={agent.dnd}
+										className="size-2"
+									/>
 									<span className="min-w-0 truncate font-mono">
 										{agent.name.slice(name.length + 1)}
 									</span>

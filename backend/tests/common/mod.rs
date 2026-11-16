@@ -165,6 +165,7 @@ pub fn query(received: Option<u64>, read: Option<u64>, wait: Option<u64>) -> Rec
     read,
     wait,
     state: None,
+    dnd: false,
   }
 }
 

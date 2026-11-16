@@ -462,6 +462,7 @@ async fn receive(client: &Client, state: State, follow: bool) -> Result<(), Exit
       read: last,
       wait: Some(wait),
       state: Some(state),
+      dnd: false,
     };
     let answer = waiting(|| client.receive(&query)).await?;
     let mut out = io::stdout().lock();

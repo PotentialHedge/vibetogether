@@ -134,24 +134,25 @@ impl Inbox {
     }
   }
 
-  pub fn policy_file(&self) -> PathBuf {
-    self.root.join("policy")
+  pub fn dnd_file(&self) -> PathBuf {
+    self.root.join("do-not-disturb")
   }
 
-  /// Whether an item rings the bell: its sender proposes, as `proposed`, and the agent's policy,
-  /// the file `policy`, disposes. Each of its lines is a rule, fields to match and then `ring` or
-  /// `quiet`, such as `session=hive reach=session quiet`; a field matches where the item has it
-  /// with that value, the last rule that matches decides, and where none does, the proposal
-  /// stands. `#` starts a comment. A line that is no rule is an error, so no rule is lost unseen.
+  /// Whether an item rings the bell: its sender proposes, as `proposed`, and the agent's
+  /// do-not-disturb settings, the file `do-not-disturb`, dispose. Each of its lines is a rule,
+  /// fields to match and then `ring` or `quiet`, such as `session=hive reach=session quiet`, or
+  /// `quiet` alone for everything; a field matches where the item has it with that value, the
+  /// last rule that matches decides, and where none does, the proposal stands. `#` starts a
+  /// comment. A line that is no rule is an error, so no rule is lost unseen.
   pub fn rings(&self, fields: &[(&str, &str)], proposed: bool) -> io::Result<bool> {
-    let path = self.policy_file();
-    let policy = match fs::read_to_string(&path) {
-      Ok(policy) => policy,
+    let path = self.dnd_file();
+    let rules = match fs::read_to_string(&path) {
+      Ok(rules) => rules,
       Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(proposed),
       Err(e) => return Err(at(e, &path)),
     };
     let mut rings = proposed;
-    for (n, line) in policy.lines().enumerate() {
+    for (n, line) in rules.lines().enumerate() {
       let line = line.split('#').next().unwrap_or_default();
       let mut words: Vec<_> = line.split_whitespace().collect();
       let Some(verdict) = words.pop() else {
@@ -180,6 +181,12 @@ impl Inbox {
       }
     }
     Ok(rings)
+  }
+
+  /// Whether the agent is not to be disturbed, as others see it: whether a mention, from anyone
+  /// in any session, would stay quiet.
+  pub fn dnd(&self) -> io::Result<bool> {
+    Ok(!self.rings(&[("reach", "ping")], true)?)
   }
 
   pub fn ring(&self) -> io::Result<()> {
@@ -445,24 +452,28 @@ mod tests {
   use super::*;
 
   #[test]
-  fn the_policy_disposes_what_the_sender_proposes() {
-    let dir = std::env::temp_dir().join(format!("vibetogether-policy-{}", std::process::id()));
+  fn do_not_disturb_disposes_what_the_sender_proposes() {
+    let dir = std::env::temp_dir().join(format!("vibetogether-dnd-{}", std::process::id()));
     let inbox = Inbox::new(&dir);
     inbox.create().unwrap();
     let hive = [("from", "luis"), ("reach", "session"), ("session", "hive")];
     let ping = [("from", "luis"), ("reach", "ping"), ("session", "hive")];
     assert!(inbox.rings(&hive, true).unwrap());
     fs::write(
-      inbox.policy_file(),
+      inbox.dnd_file(),
       "# listen in the hive\nsession=hive reach=session quiet\n\nfrom=context ring # loud\n",
     )
     .unwrap();
     assert!(!inbox.rings(&hive, true).unwrap());
     assert!(inbox.rings(&ping, true).unwrap());
     assert!(inbox.rings(&[("from", "context")], false).unwrap());
-    fs::write(inbox.policy_file(), "session=hive quiet\nfrom=luis ring\n").unwrap();
+    fs::write(inbox.dnd_file(), "session=hive quiet\nfrom=luis ring\n").unwrap();
     assert!(inbox.rings(&hive, false).unwrap());
-    fs::write(inbox.policy_file(), "session=hive loud\n").unwrap();
+    assert!(!inbox.dnd().unwrap());
+    fs::write(inbox.dnd_file(), "quiet\nfrom=luis ring\n").unwrap();
+    assert!(inbox.dnd().unwrap());
+    assert!(inbox.rings(&hive, false).unwrap());
+    fs::write(inbox.dnd_file(), "session=hive loud\n").unwrap();
     assert!(inbox.rings(&hive, true).is_err());
     fs::remove_dir_all(&dir).unwrap();
   }

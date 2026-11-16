@@ -121,6 +121,8 @@ const stream = {
 	shown: null as string | null,
 	/** The state the waiting receive holds. */
 	state: "awake" as "awake" | "asleep",
+	/** Whether the waiting receive holds do not disturb. */
+	dnd: false,
 	/** The receive waiting, which a change of `read` or the state issues again. */
 	request: null as AbortController | null,
 };
@@ -141,11 +143,39 @@ function readNow(): number {
 	return (stream.unread[0]?.n ?? (stream.received ?? 0) + 1) - 1;
 }
 
-/** Issues the receive again where the read position or the state moved. */
+/** Do not disturb, as the person chose it, remembered per browser: the
+ * page's receive holds it, so others see that a mention won't reach them now,
+ * Luis's decision (2026-11-16). */
+const dndKey = "do-not-disturb";
+let dndChosen = (() => {
+	try {
+		return localStorage.getItem(dndKey) === "on";
+	} catch {
+		return false;
+	}
+})();
+
+export function doNotDisturb(): boolean {
+	return dndChosen;
+}
+
+export function setDoNotDisturb(on: boolean) {
+	try {
+		if (on) localStorage.setItem(dndKey, "on");
+		else localStorage.removeItem(dndKey);
+	} catch {}
+	dndChosen = on;
+	reread();
+}
+
+/** Issues the receive again where the read position, the state or do not
+ * disturb moved. */
 function reread() {
 	if (
 		stream.received !== undefined &&
-		(readNow() !== stream.read || stateNow() !== stream.state)
+		(readNow() !== stream.read ||
+			stateNow() !== stream.state ||
+			dndChosen !== stream.dnd)
 	)
 		stream.request?.abort();
 }
@@ -161,12 +191,13 @@ async function receiving() {
 		// The first receive gets every unread item.
 		if (stream.received !== undefined) stream.read = readNow();
 		stream.state = stateNow();
-		const state = stream.state;
+		stream.dnd = dndChosen;
+		const { state, dnd } = stream;
 		try {
 			const answer = await (await client()).receive(
 				stream.received === undefined
-					? { received: 0, state }
-					: { received: stream.received, read: stream.read, state },
+					? { received: 0, state, dnd }
+					: { received: stream.received, read: stream.read, state, dnd },
 				request.signal,
 			);
 			failures = 0;

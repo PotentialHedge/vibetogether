@@ -113,12 +113,20 @@ struct Inner {
   announced: HashMap<String, (Instant, u32)>,
 }
 
-/// A receive waiting on its participant's stream, with the state it holds.
+/// What a receive holds while it waits: its participant's state, and whether it is not to be
+/// disturbed.
+#[derive(Clone, Copy, PartialEq)]
+struct Holds {
+  state: State,
+  dnd: bool,
+}
+
+/// A receive waiting on its participant's stream, with what it holds.
 struct Receiver {
   account: String,
   participant: String,
   login: String,
-  state: State,
+  held: Holds,
   /// Ends it: with nothing, it answers what there is; with a refusal, it refuses.
   end: oneshot::Sender<Option<Refusal>>,
 }
@@ -127,7 +135,7 @@ struct Receiver {
 struct Heard {
   account: String,
   at: Instant,
-  state: State,
+  held: Holds,
 }
 
 impl Inner {
@@ -137,21 +145,38 @@ impl Inner {
     let mut held = None;
     for r in self.receivers.values().filter(|r| r.participant == id) {
       if held != Some(State::Awake) {
-        held = Some(r.state);
+        held = Some(r.held.state);
       }
     }
-    let held = held.or_else(|| {
-      self
-        .heard
-        .get(id)
-        .filter(|h| h.at.elapsed() < GRACE)
-        .map(|h| h.state)
-    });
+    let held = held.or_else(|| self.lately(id).map(|h| h.state));
     match held {
       Some(State::Awake) => Presence::Awake,
       Some(State::Asleep) => Presence::Asleep,
       None => Presence::Offline,
     }
+  }
+
+  /// Whether a participant is not to be disturbed: where any of its receives waiting holds it, or
+  /// the one its last held where it ended moments ago.
+  fn dnd(&self, id: &str) -> bool {
+    let mut waiting = self
+      .receivers
+      .values()
+      .filter(|r| r.participant == id)
+      .peekable();
+    if waiting.peek().is_some() {
+      return waiting.any(|r| r.held.dnd);
+    }
+    self.lately(id).is_some_and(|h| h.dnd)
+  }
+
+  /// What the participant's last receive held, where it ended moments ago.
+  fn lately(&self, id: &str) -> Option<Holds> {
+    self
+      .heard
+      .get(id)
+      .filter(|h| h.at.elapsed() < GRACE)
+      .map(|h| h.held)
   }
 }
 
@@ -160,8 +185,13 @@ impl Live {
     self.0.lock().unwrap().presence(id)
   }
 
-  /// Every participant awake or asleep now: its account, its id and its state.
-  pub fn reachable(&self) -> Vec<(String, String, State)> {
+  pub fn dnd(&self, id: &str) -> bool {
+    self.0.lock().unwrap().dnd(id)
+  }
+
+  /// Every participant awake or asleep now: its account, its id, its state and whether it is not
+  /// to be disturbed.
+  pub fn reachable(&self) -> Vec<(String, String, State, bool)> {
     let inner = self.0.lock().unwrap();
     let mut ids: HashMap<&str, &str> = inner
       .heard
@@ -179,7 +209,7 @@ impl Live {
           Presence::Asleep => State::Asleep,
           _ => return None,
         };
-        Some((account.to_string(), id.to_string(), state))
+        Some((account.to_string(), id.to_string(), state, inner.dnd(id)))
       })
       .collect()
   }
@@ -200,9 +230,9 @@ impl Live {
 fn change<T>(app: &App, id: &str, change: impl FnOnce(&mut Inner) -> T) -> T {
   let (was, result, is) = {
     let mut inner = app.live.0.lock().unwrap();
-    let was = inner.presence(id);
+    let was = (inner.presence(id), inner.dnd(id));
     let result = change(&mut inner);
-    (was, result, inner.presence(id))
+    (was, result, (inner.presence(id), inner.dnd(id)))
   };
   if was != is {
     app.changes.written();
@@ -210,15 +240,15 @@ fn change<T>(app: &App, id: &str, change: impl FnOnce(&mut Inner) -> T) -> T {
   result
 }
 
-/// Notes that a receive of the participant started or ended, holding `state`: it stays awake or
+/// Notes that a receive of the participant started or ended, holding `held`: it stays awake or
 /// asleep moments longer, so that receiving again keeps it, and goes offline after.
-fn heard(app: &App, inner: &mut Inner, account: &str, id: &str, state: State) {
+fn heard(app: &App, inner: &mut Inner, account: &str, id: &str, held: Holds) {
   inner.heard.insert(
     id.to_string(),
     Heard {
       account: account.to_string(),
       at: Instant::now(),
-      state,
+      held,
     },
   );
   let (app, id) = (app.clone(), id.to_string());
@@ -238,13 +268,13 @@ fn heard(app: &App, inner: &mut Inner, account: &str, id: &str, state: State) {
 
 /// Ends the receives `which` picks, each with the refusal `why` gives it, or with what there is.
 fn end(app: &App, which: impl Fn(&Receiver) -> bool, why: impl Fn() -> Option<Refusal>) {
-  let ended: Vec<(String, String, State)> = {
+  let ended: Vec<(String, String, Holds)> = {
     let inner = app.live.0.lock().unwrap();
     inner
       .receivers
       .values()
       .filter(|r| which(r))
-      .map(|r| (r.account.clone(), r.participant.clone(), r.state))
+      .map(|r| (r.account.clone(), r.participant.clone(), r.held))
       .collect()
   };
   let mut ended = ended;
@@ -927,6 +957,7 @@ pub async fn participants_of(
       .into_iter()
       .map(|row| {
         let presence = app.live.presence(&row.id);
+        let dnd = app.live.dnd(&row.id);
         let name = match row.agent {
           Some(agent) => format!("{}/{agent}", row.login),
           None => row.login,
@@ -936,6 +967,7 @@ pub async fn participants_of(
           id: row.id,
           received: row.received as u64,
           read: row.read as u64,
+          dnd,
           presence,
           status: row.status,
         };
@@ -1139,15 +1171,15 @@ struct Waiting {
   app: App,
   key: u64,
   p: Acting,
-  state: State,
+  held: Holds,
 }
 
 impl Drop for Waiting {
   fn drop(&mut self) {
-    let Waiting { app, key, p, state } = self;
+    let Waiting { app, key, p, held } = self;
     change(app, &p.id, |inner| {
       if inner.receivers.remove(key).is_some() {
-        heard(app, inner, &p.account, &p.id, *state);
+        heard(app, inner, &p.account, &p.id, *held);
       }
     });
     // When its last receive ended, which its sessions show while it is offline.
@@ -1175,10 +1207,13 @@ impl Drop for Waiting {
 
 /// A participant receives its stream: the items after `received`, as given or as stored. Naming
 /// `received` and `read` stores them first (`acknowledge`). It returns as soon as there is an
-/// item, or after `wait` seconds, and holds the participant's `state` meanwhile. An agent has one
+/// item, or after `wait` seconds, and holds the participant's `state` and `dnd` meanwhile. An agent has one
 /// receive at a time: a newer one ends the one before with 409; a person has one per page.
 pub async fn receive(app: &App, p: &Acting, login: &str, query: ReceiveQuery) -> Result<Received> {
-  let state = query.state.unwrap_or_default();
+  let held = Holds {
+    state: query.state.unwrap_or_default(),
+    dnd: query.dnd,
+  };
   let (received, read) = {
     let mut db = app.db.acquire().await?;
     hold(app, &mut db, p, login).await?;
@@ -1197,7 +1232,7 @@ pub async fn receive(app: &App, p: &Acting, login: &str, query: ReceiveQuery) ->
   };
   let after = query.received.unwrap_or(received).min(received);
   change(app, &p.id, |inner| {
-    heard(app, inner, &p.account, &p.id, state)
+    heard(app, inner, &p.account, &p.id, held)
   });
   let answer = async || {
     let mut db = app.db.acquire().await?;
@@ -1234,7 +1269,7 @@ pub async fn receive(app: &App, p: &Acting, login: &str, query: ReceiveQuery) ->
         account: p.account.clone(),
         participant: p.id.clone(),
         login: login.to_string(),
-        state,
+        held,
         end: tx,
       },
     );
@@ -1244,7 +1279,7 @@ pub async fn receive(app: &App, p: &Acting, login: &str, query: ReceiveQuery) ->
     app: app.clone(),
     key,
     p: p.clone(),
-    state,
+    held,
   };
   let timeout = async {
     match query.wait {
