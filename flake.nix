@@ -50,7 +50,7 @@
       common = {
         inherit src;
         pname = "vibetogether";
-        version = "0.1.0";
+        inherit ((lib.importTOML ./Cargo.toml).workspace.package) version;
         strictDeps = true;
         # The tests run in `just ci`, against a backend on loopback.
         doCheck = false;
@@ -127,7 +127,7 @@
         # The website, as it is served: its pages with the client's bindings.
         website = pkgs.stdenvNoCC.mkDerivation (finalAttrs: {
           pname = "vibetogether-website";
-          version = "0.1.0";
+          inherit ((lib.importTOML ./Cargo.toml).workspace.package) version;
           src = lib.fileset.toSource {
             root = ./.;
             fileset = lib.fileset.difference (lib.fileset.unions [
