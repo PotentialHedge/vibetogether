@@ -160,8 +160,12 @@ pub async fn remove(
   Ok(StatusCode::NO_CONTENT)
 }
 
-/// The caller's DMs, one session with each friend.
+/// The caller's DMs, one session with each friend; an agent sees none, since a DM holds its two
+/// people alone.
 pub async fn dms(State(app): State<App>, caller: Caller) -> Result<Json<Vec<Session>>> {
+  if caller.agent.is_some() {
+    return Ok(Json(Vec::new()));
+  }
   let mut db = app.db.acquire().await?;
   Ok(Json(dms_of(&mut db, &caller.account).await?))
 }

@@ -58,22 +58,23 @@ pub async fn me(State(app): State<App>, caller: Caller) -> Result<Json<Account>>
   Ok(Json(account_json(&mut db, &caller.account).await?))
 }
 
-/// The participants awake or asleep that `me` sees: themselves and their agents, and the members
-/// of their groups and their friends, with theirs.
-async fn reachable_seen_by(app: &App, db: &mut Db, me: &str) -> Result<Vec<Reachable>> {
-  let people: HashSet<String> = sqlx::query_scalar(
-    r#"SELECT b.account FROM group_member a JOIN group_member b ON b."group" = a."group" WHERE a.account = ?1
+/// The participants awake or asleep that `who`, a person or an agent, sees: itself, the members
+/// of its groups, people and agents, and a person's friends, without their agents, since an
+/// agent shows only through a group.
+async fn reachable_seen_by(app: &App, db: &mut Db, who: &str) -> Result<Vec<Reachable>> {
+  let seen: HashSet<String> = sqlx::query_scalar(
+    r#"SELECT b.member FROM group_member a JOIN group_member b ON b."group" = a."group" WHERE a.member = ?1
        UNION SELECT f."to" FROM friend f JOIN friend r ON r."from" = f."to" AND r."to" = f."from" WHERE f."from" = ?1
        UNION SELECT ?1"#,
   )
-  .bind(me)
+  .bind(who)
   .fetch_all(&mut *db)
   .await?
   .into_iter()
   .collect();
   let mut reachable = Vec::new();
   for (account, id, presence, dnd) in app.live.reachable() {
-    if !people.contains(&account) {
+    if !seen.contains(&id) {
       continue;
     }
     let name: Option<String> = sqlx::query_scalar(
@@ -98,11 +99,12 @@ async fn reachable_seen_by(app: &App, db: &mut Db, me: &str) -> Result<Vec<Reach
   Ok(reachable)
 }
 
-/// Everything `me` sees at once, but its version.
-async fn overview_of(app: &App, db: &mut Db, me: &str) -> Result<Overview> {
-  let sessions = sessions_of(db, me).await?;
+/// Everything the caller sees at once, but its version: `who`, an agent of the person `me` or
+/// the person, sees its groups, and only the person their DMs.
+async fn overview_of(app: &App, db: &mut Db, who: &str, me: &str) -> Result<Overview> {
+  let sessions = sessions_of(db, who, me).await?;
   let mut projects = Vec::new();
-  for project in projects_of(db, me).await? {
+  for project in projects_of(db, who).await? {
     let project = project_json(db, &project).await?;
     let sessions = sessions
       .iter()
@@ -112,8 +114,8 @@ async fn overview_of(app: &App, db: &mut Db, me: &str) -> Result<Overview> {
     projects.push(ProjectOverview { project, sessions });
   }
   let mut groups = Vec::new();
-  for group in groups_of(db, me).await? {
-    let group = group_json(db, &group).await?;
+  for group in groups_of(db, who).await? {
+    let group = group_json(app, db, &group).await?;
     groups.push(GroupOverview {
       sessions: sessions
         .iter()
@@ -131,15 +133,18 @@ async fn overview_of(app: &App, db: &mut Db, me: &str) -> Result<Overview> {
   Ok(Overview {
     account: account_json(db, me).await?,
     groups,
-    dms: dms_of(db, me).await?,
+    dms: match who == me {
+      true => dms_of(db, me).await?,
+      false => Vec::new(),
+    },
     friends: friends_of(db, me).await?,
     agents: agents_of(app, db, me, false).await?,
-    reachable: reachable_seen_by(app, db, me).await?,
+    reachable: reachable_seen_by(app, db, who).await?,
     version: String::new(),
   })
 }
 
-/// Everything the account sees at once; with `version`, once it differs from it.
+/// Everything the caller sees at once; with `version`, once it differs from it.
 pub async fn overview(
   State(app): State<App>,
   caller: Caller,
@@ -148,10 +153,10 @@ pub async fn overview(
   if query.wait.is_some_and(|wait| wait > MAX_WAIT) {
     return Err(Refusal::bad(format!("wait: at most {MAX_WAIT} seconds.")));
   }
-  let (app, account) = (&app, &caller.account);
+  let (app, who, account) = (&app, caller.who(), &caller.account);
   let current = move || async move {
     let mut db = app.db.acquire().await?;
-    let mut overview = overview_of(app, &mut db, account).await?;
+    let mut overview = overview_of(app, &mut db, who, account).await?;
     overview.version = version_of(&overview);
     Ok(overview)
   };
@@ -240,13 +245,7 @@ struct AgentRow {
   archived: Option<String>,
 }
 
-async fn agent_json(
-  app: &App,
-  db: &mut Db,
-  account: &str,
-  login: &str,
-  row: AgentRow,
-) -> Result<Agent> {
+async fn agent_json(app: &App, db: &mut Db, login: &str, row: AgentRow) -> Result<Agent> {
   let presence = if row.archived.is_some() {
     Presence::Archived
   } else {
@@ -260,7 +259,7 @@ async fn agent_json(
   .await?;
   let mut listening = Vec::new();
   for id in sessions {
-    if let Some(session) = session_for(db, &id, account).await? {
+    if let Some(session) = session_for(db, &id, &row.id).await? {
       listening.push(Named {
         id,
         name: session.name,
@@ -297,7 +296,7 @@ async fn agents_of(app: &App, db: &mut Db, account: &str, archived: bool) -> Res
   .await?;
   let mut agents = Vec::new();
   for row in rows {
-    agents.push(agent_json(app, db, account, &login, row).await?);
+    agents.push(agent_json(app, db, &login, row).await?);
   }
   agents.sort_by_key(|a| !matches!(a.presence, Presence::Awake | Presence::Asleep));
   Ok(agents)
@@ -390,6 +389,14 @@ pub async fn create_agent(
     Err(e) if is_taken(&e) => return Err(taken(&input.name)),
     other => other?,
   };
+  // An agent is in its person's own group from its creation, and in another once they add it.
+  sqlx::query(
+    r#"INSERT INTO group_member ("group", member, account) SELECT id, ?, person FROM "group" WHERE person = ?"#,
+  )
+  .bind(&id)
+  .bind(&caller.account)
+  .execute(&mut *db)
+  .await?;
   let creator = Caller {
     agent: caller.agent.clone().or_else(|| {
       holder.map(|_| Named {
@@ -405,7 +412,7 @@ pub async fn create_agent(
   let row = agent_of(&mut db, &id, &caller.account).await?;
   Ok((
     StatusCode::CREATED,
-    Json(agent_json(&app, &mut db, &caller.account, &caller.person, row).await?),
+    Json(agent_json(&app, &mut db, &caller.person, row).await?),
   ))
 }
 
@@ -457,9 +464,7 @@ pub async fn rename_agent(
     name: input.name,
     ..row
   };
-  Ok(Json(
-    agent_json(&app, &mut db, &caller.account, &caller.person, row).await?,
-  ))
+  Ok(Json(agent_json(&app, &mut db, &caller.person, row).await?))
 }
 
 /// Archives an agent that won't come back. It can't be undone.

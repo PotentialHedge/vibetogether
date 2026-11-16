@@ -31,6 +31,9 @@ async fn world() -> World {
   ben.browser.add_friend("luis").await.unwrap();
   let group = luis.browser.create_group("Potential Hedge").await.unwrap();
   luis.browser.add_member(&group.id, "ben").await.unwrap();
+  // Each lets their agent `laptop` in.
+  luis.browser.add_member(&group.id, "laptop").await.unwrap();
+  let group = ben.browser.add_member(&group.id, "laptop").await.unwrap();
   let project = luis
     .browser
     .create_project(&CreateProject {
@@ -64,6 +67,13 @@ async fn world() -> World {
 async fn agent(client: &Client, name: &str) -> Client {
   let agent = client.create_agent(name).await.unwrap();
   client.clone().acting_as(Some(agent.id))
+}
+
+/// A new agent of `person`, whom they let into `group`: their agent token acting as it.
+async fn member(person: &Person, group: &Group, name: &str) -> Client {
+  let client = agent(&person.machine, name).await;
+  person.browser.add_member(&group.id, name).await.unwrap();
+  client
 }
 
 fn id(client: &Client) -> String {
@@ -100,8 +110,8 @@ async fn a_session_shows_its_project_and_only_to_its_group() {
 #[tokio::test]
 async fn an_agent_token_names_its_agent_and_a_person_is_themselves() {
   let w = world().await;
-  let claude = agent(&w.luis.machine, "claude").await;
-  let ben = agent(&w.ben.machine, "claude").await;
+  let claude = member(&w.luis, &w.group, "claude").await;
+  let ben = member(&w.ben, &w.group, "claude").await;
   assert!(id(&claude).starts_with("a_") && id(&claude).len() == 10);
   // An agent token names its agent in every request, but the one that creates it.
   let unnamed = w.luis.machine.clone().acting_as(None);
@@ -128,7 +138,7 @@ async fn an_agent_token_names_its_agent_and_a_person_is_themselves() {
 async fn participants_join_and_send_and_an_agent_receives_what_reaches_it() {
   let w = world().await;
   let s_ = &w.session.id;
-  let claude = agent(&w.luis.machine, "claude").await;
+  let claude = member(&w.luis, &w.group, "claude").await;
   let joined = claude.join(s_).await.unwrap();
   assert_eq!(joined.name, "luis/claude");
   assert_eq!(joined.session.id, *s_);
@@ -264,7 +274,7 @@ async fn participants_join_and_send_and_an_agent_receives_what_reaches_it() {
 #[tokio::test]
 async fn the_person_receives_their_stream_and_an_agent_token_its_agents() {
   let w = world().await;
-  let claude = agent(&w.luis.machine, "claude").await;
+  let claude = member(&w.luis, &w.group, "claude").await;
   assert_eq!(
     status(w.luis.browser.receive(&query(None, None, Some(0))).await),
     200
@@ -395,7 +405,7 @@ async fn a_member_observes_the_log_without_joining_and_fetches_payloads() {
 #[tokio::test]
 async fn an_agent_is_held_by_one_login_at_a_time() {
   let w = world().await;
-  let codex = agent(&w.luis.machine, "codex").await;
+  let codex = member(&w.luis, &w.group, "codex").await;
   let server = w
     .server
     .token(&w.luis.id, LoginKind::Agent, "luis-server")
@@ -433,7 +443,7 @@ async fn an_agent_is_held_by_one_login_at_a_time() {
 #[tokio::test]
 async fn one_receive_per_agent_a_newer_one_ends_the_one_before() {
   let w = world().await;
-  let claude = agent(&w.luis.machine, "claude").await;
+  let claude = member(&w.luis, &w.group, "claude").await;
   caught_up(&claude).await;
   let first = {
     let claude = claude.clone();
@@ -477,14 +487,35 @@ async fn revoking_a_login_cuts_off_its_receive_already_waiting() {
 #[tokio::test]
 async fn friends_have_a_dm_which_closes_when_they_are_no_friends() {
   let w = world().await;
-  let dms = w.luis.machine.dms().await.unwrap();
+  let dms = w.luis.own.dms().await.unwrap();
   assert_eq!(dms.len(), 1);
   assert_eq!(dms[0].friend.as_deref(), Some("ben"));
   assert_eq!(dms[0].project, None);
   let dm = &dms[0].id;
-  let claude = agent(&w.ben.machine, "claude").await;
-  claude.join(dm).await.unwrap();
-  send(&claude, dm, "hi", "text/plain").await;
+  // A DM holds its two people alone: no agent sees it, even one in a group of both.
+  assert!(w.luis.machine.dms().await.unwrap().is_empty());
+  assert!(
+    w.luis
+      .machine
+      .overview(&OverviewQuery::default())
+      .await
+      .unwrap()
+      .dms
+      .is_empty()
+  );
+  assert_eq!(status(w.ben.machine.join(dm).await), 404);
+  assert_eq!(
+    status(w.ben.machine.log(dm, &LogQuery::default()).await),
+    404
+  );
+  w.ben.browser.join(dm).await.unwrap();
+  send(&w.ben.browser, dm, "hi", "text/plain").await;
+  let sent = send(&w.ben.browser, dm, "@laptop @luis/laptop", "text/plain").await;
+  assert_eq!(
+    sent.unreached,
+    Some(vec![s("ben/laptop"), s("luis/laptop")])
+  );
+  assert!(now(&w.ben.machine).await.is_empty());
   assert_eq!(
     status(w.eve.machine.log(dm, &LogQuery::default()).await),
     404
@@ -546,7 +577,7 @@ async fn deleting_a_session_ends_what_waits_on_it_and_its_log() {
 #[tokio::test]
 async fn a_tokens_changes_show_in_the_activity_its_sends_dont() {
   let w = world().await;
-  let claude = agent(&w.luis.machine, "claude").await;
+  let claude = member(&w.luis, &w.group, "claude").await;
   claude.join(&w.session.id).await.unwrap();
   send(&claude, &w.session.id, "hi", "text/plain").await;
   claude
@@ -797,7 +828,7 @@ async fn accepting_an_invite_makes_friends_joins_its_group_and_lands_in_its_sess
   let accepted = tristan.own.accept_invite(&invite.code).await.unwrap();
   assert_eq!(accepted.land.id, w.session.id);
   let overview = tristan
-    .machine
+    .own
     .overview(&OverviewQuery::default())
     .await
     .unwrap();
@@ -809,6 +840,10 @@ async fn accepting_an_invite_makes_friends_joins_its_group_and_lands_in_its_sess
   );
   assert!(overview.dms.iter().any(|d| d.id == accepted.dm));
   assert!(overview.groups.iter().any(|g| g.group.id == w.group.id));
+  // Their agent comes in only once they let it in.
+  assert_eq!(status(tristan.machine.join(&w.session.id).await), 404);
+  tristan.own.add_member(&w.group.id, "laptop").await.unwrap();
+  tristan.machine.join(&w.session.id).await.unwrap();
 
   // Friends already: an invite to a group lands in its general; one to friends alone, in the DM.
   let to_group = w
@@ -979,9 +1014,9 @@ async fn every_group_has_its_general_which_stays_as_long_as_the_group() {
 async fn a_short_name_pings_the_senders_own_agent_first() {
   let w = world().await;
   let g = w.session.id.clone();
-  let ben = agent(&w.ben.machine, "claude").await;
-  let bens = agent(&w.ben.machine, "lead").await;
-  let luis = agent(&w.luis.machine, "lead").await;
+  let ben = member(&w.ben, &w.group, "claude").await;
+  let bens = member(&w.ben, &w.group, "lead").await;
+  let luis = member(&w.luis, &w.group, "lead").await;
   ben.join(&g).await.unwrap();
   caught_up(&bens).await;
   caught_up(&luis).await;
@@ -1003,8 +1038,8 @@ async fn a_short_name_pings_the_senders_own_agent_first() {
 async fn a_mention_in_the_text_pings_whoever_sends_it() {
   let w = world().await;
   let g = w.session.id.clone();
-  let ben = agent(&w.ben.machine, "claude").await;
-  let bens = agent(&w.ben.machine, "lead").await;
+  let ben = member(&w.ben, &w.group, "claude").await;
+  let bens = member(&w.ben, &w.group, "lead").await;
   ben.join(&g).await.unwrap();
   caught_up(&bens).await;
   send(
@@ -1029,7 +1064,7 @@ async fn a_mention_in_the_text_pings_whoever_sends_it() {
 async fn only_a_mention_wakes_whoever_set_mentions_and_everyone_sees_it() {
   let w = world().await;
   let g = w.session.id.clone();
-  let ben = agent(&w.ben.machine, "claude").await;
+  let ben = member(&w.ben, &w.group, "claude").await;
   ben.join(&g).await.unwrap();
   ben.notify(&g, Notify::Mentions).await.unwrap();
   w.luis.browser.join(&g).await.unwrap();
@@ -1071,8 +1106,8 @@ async fn a_ping_or_an_fyi_reaches_an_agent_from_any_session_it_sees() {
     .sessions[0]
     .id
     .clone();
-  let ben = agent(&w.ben.machine, "claude").await;
-  let luis = agent(&w.luis.machine, "claude").await;
+  let ben = member(&w.ben, &w.group, "claude").await;
+  let luis = member(&w.luis, &w.group, "claude").await;
   let _zoe = w.server.person("zoe").await;
   // ben/claude is in general; luis/claude in no session.
   ben.join(&g).await.unwrap();
@@ -1172,10 +1207,10 @@ async fn a_ping_or_an_fyi_reaches_an_agent_from_any_session_it_sees() {
 }
 
 #[tokio::test]
-async fn an_agent_is_awake_or_asleep_while_it_receives_to_its_person_their_groups_and_friends() {
+async fn an_agent_is_awake_or_asleep_while_it_receives_to_its_person_and_its_groups() {
   let w = world().await;
-  let listener = agent(&w.ben.machine, "listener").await;
-  let luis = agent(&w.luis.machine, "claude").await;
+  let listener = member(&w.ben, &w.group, "listener").await;
+  let luis = member(&w.luis, &w.group, "claude").await;
   let before = w
     .luis
     .machine
@@ -1288,7 +1323,7 @@ async fn an_agent_is_awake_or_asleep_while_it_receives_to_its_person_their_group
 #[tokio::test]
 async fn a_receive_whose_connection_drops_lets_its_presence_go() {
   let w = world().await;
-  let claude = agent(&w.luis.machine, "claude").await;
+  let claude = member(&w.luis, &w.group, "claude").await;
   claude.join(&w.session.id).await.unwrap();
   caught_up(&claude).await;
   let waiting = {
@@ -1312,8 +1347,8 @@ async fn a_receive_whose_connection_drops_lets_its_presence_go() {
 async fn an_agent_gets_what_is_said_in_a_session_from_when_it_is_in_it_and_what_names_it() {
   let w = world().await;
   let s_ = &w.session.id;
-  let scout = agent(&w.luis.machine, "scout").await;
-  let latecomer = agent(&w.ben.machine, "latecomer").await;
+  let scout = member(&w.luis, &w.group, "scout").await;
+  let latecomer = member(&w.ben, &w.group, "latecomer").await;
   scout.join(s_).await.unwrap();
   caught_up(&scout).await;
   send(&scout, s_, "To everyone.", "text/plain").await;
@@ -1361,8 +1396,8 @@ async fn an_agent_keeps_its_id_across_a_rename_and_archived_it_is_gone() {
   let w = world().await;
   let s_ = &w.session.id;
   w.ben.browser.join(s_).await.unwrap();
-  let _claude = agent(&w.luis.machine, "claude").await;
-  let scribe = agent(&w.luis.machine, "scribe").await;
+  let _claude = member(&w.luis, &w.group, "claude").await;
+  let scribe = member(&w.luis, &w.group, "scribe").await;
   scribe.join(s_).await.unwrap();
   caught_up(&scribe).await;
   // A ping to its name reaches whom the name stood for as it was sent, renamed since or not.
@@ -1641,7 +1676,7 @@ async fn the_security_reviews_findings_stay_fixed() {
   );
 
   // A message names at most 32.
-  let claude = agent(&owner.machine, "claude").await;
+  let claude = member(&owner, &crew, "claude").await;
   claude.join(&general).await.unwrap();
   let many: Vec<String> = (0..33).map(|i| format!("owner/a{i}")).collect();
   let ty = message_type("text/plain", Some(&many), &[]);
@@ -1832,4 +1867,181 @@ async fn letting_someone_in_and_deleting_are_the_persons_alone() {
   w.luis.own.delete_group(&w.group.id).await.unwrap();
   let mine = logins.iter().find(|l| l.kind == LoginKind::Agent).unwrap();
   machine.revoke_login(&mine.id).await.unwrap();
+}
+
+/// The group's agents, by name, as `client` sees it.
+async fn agents_in(client: &Client, group: &str) -> Vec<String> {
+  let groups = client.groups().await.unwrap();
+  let group = groups.iter().find(|g| g.id == group).unwrap();
+  group.agents.iter().map(|a| a.name.clone()).collect()
+}
+
+#[tokio::test]
+async fn an_agent_sees_and_acts_only_in_the_groups_its_person_lets_it_into() {
+  let w = world().await;
+  let lead = agent(&w.luis.machine, "lead").await;
+  // In its person's own group from its creation, and in no other.
+  let groups = lead.groups().await.unwrap();
+  assert_eq!(groups.len(), 1);
+  assert!(groups[0].own && groups[0].agents.iter().any(|a| a.id == id(&lead)));
+  assert_eq!(
+    agents_in(&w.ben.browser, &w.group.id).await,
+    [s("ben/laptop"), s("luis/laptop")]
+  );
+  let overview = lead.overview(&OverviewQuery::default()).await.unwrap();
+  assert!(overview.groups.iter().all(|g| g.group.id != w.group.id));
+  assert!(lead.projects().await.unwrap().is_empty());
+  assert!(
+    lead
+      .sessions()
+      .await
+      .unwrap()
+      .iter()
+      .all(|s| s.id != w.session.id)
+  );
+  assert_eq!(status(lead.session(&w.session.id).await), 404);
+  assert_eq!(
+    status(lead.log(&w.session.id, &LogQuery::default()).await),
+    404
+  );
+  assert_eq!(status(lead.join(&w.session.id).await), 404);
+  assert_eq!(status(lead.participants(&w.session.id).await), 404);
+  let change = ChangeProject {
+    name: Some(s("x")),
+    repos: None,
+  };
+  assert_eq!(
+    status(lead.change_project(&w.project.id, &change).await),
+    404
+  );
+  assert_eq!(status(lead.rename_group(&w.group.id, "x").await), 404);
+  // The person still sees everything in their groups.
+  assert!(w.luis.own.session(&w.session.id).await.is_ok());
+
+  // Only its person lets it in, never an agent, and never another person.
+  assert_eq!(
+    status(w.luis.machine.add_member(&w.group.id, "lead").await),
+    403
+  );
+  assert_eq!(
+    status(w.ben.browser.add_member(&w.group.id, "luis/lead").await),
+    403
+  );
+  assert_eq!(
+    status(w.eve.browser.add_member(&w.group.id, "lead").await),
+    404
+  );
+  // A name without `/` is the person's agent of that name, else a person.
+  let group = w
+    .luis
+    .browser
+    .add_member(&w.group.id, "lead")
+    .await
+    .unwrap();
+  assert!(group.agents.iter().any(|a| a.name == "luis/lead"));
+  assert_eq!(group.members, [s("ben"), s("luis")]);
+  assert!(lead.session(&w.session.id).await.is_ok());
+  lead.join(&w.session.id).await.unwrap();
+
+  // Any member removes it, an agent too, and it leaves the group's sessions.
+  w.ben
+    .machine
+    .remove_member(&w.group.id, "luis/lead")
+    .await
+    .unwrap();
+  assert_eq!(status(lead.session(&w.session.id).await), 404);
+  let inside = w.ben.browser.participants(&w.session.id).await.unwrap();
+  assert!(!inside.contains_key("luis/lead"));
+  // It leaves itself, but never its person's own group.
+  w.luis
+    .machine
+    .remove_member(&w.group.id, "laptop")
+    .await
+    .unwrap();
+  assert_eq!(status(w.luis.machine.session(&w.session.id).await), 404);
+  assert_eq!(
+    agents_in(&w.ben.browser, &w.group.id).await,
+    [s("ben/laptop")]
+  );
+  let own = &groups[0].id;
+  assert_eq!(status(lead.remove_member(own, "lead").await), 403);
+  assert_eq!(status(w.luis.browser.remove_member(own, "lead").await), 403);
+  // Removing a person removes their agents.
+  w.luis
+    .browser
+    .remove_member(&w.group.id, "ben")
+    .await
+    .unwrap();
+  assert!(agents_in(&w.luis.browser, &w.group.id).await.is_empty());
+  assert_eq!(status(w.ben.machine.session(&w.session.id).await), 404);
+
+  // A group an agent creates holds it, and its person.
+  let made = lead.create_group("made").await.unwrap();
+  assert_eq!(made.members, [s("luis")]);
+  assert_eq!(made.agents.len(), 1);
+  assert_eq!(made.agents[0].id, id(&lead));
+  // Archived, it is in its person's own group alone.
+  w.luis.browser.archive_agent(&id(&lead)).await.unwrap();
+  assert!(agents_in(&w.luis.browser, &made.id).await.is_empty());
+  let own_group = w.luis.browser.groups().await.unwrap().remove(0);
+  let archived = own_group.agents.iter().find(|a| a.id == id(&lead));
+  assert_eq!(archived.unwrap().presence, Presence::Archived);
+}
+
+#[tokio::test]
+async fn others_see_and_reach_an_agent_only_through_a_group_they_share() {
+  let w = world().await;
+  let lead = agent(&w.luis.machine, "lead").await;
+  let listening = {
+    let lead = lead.clone();
+    let asleep = ReceiveQuery {
+      state: Some(State::Asleep),
+      ..query(None, None, Some(30))
+    };
+    tokio::spawn(async move { lead.receive(&asleep).await })
+  };
+  sleep(50).await;
+  let sees = async |client: &Client, name: &str| {
+    let overview = client.overview(&OverviewQuery::default()).await.unwrap();
+    overview.reachable.iter().any(|p| p.name == name)
+  };
+  // Its person and their other agents see it; Ben, a friend in a group with Luis, doesn't.
+  assert!(sees(&w.luis.browser, "luis/lead").await);
+  assert!(sees(&w.luis.machine, "luis/lead").await);
+  assert!(!sees(&w.ben.browser, "luis/lead").await);
+  assert!(!sees(&w.ben.machine, "luis/lead").await);
+  // A mention from a session of a group it isn't in reaches no one.
+  w.ben.browser.join(&w.session.id).await.unwrap();
+  let sent = send(&w.ben.browser, &w.session.id, "@luis/lead hi", "text/plain").await;
+  assert_eq!(sent.unreached, Some(vec![s("luis/lead")]));
+  w.luis.browser.join(&w.session.id).await.unwrap();
+  let sent = send(&w.luis.browser, &w.session.id, "@lead hi", "text/plain").await;
+  assert_eq!(sent.unreached, Some(vec![s("luis/lead")]));
+  // Let in, it shows, and a mention reaches it.
+  w.luis
+    .browser
+    .add_member(&w.group.id, "lead")
+    .await
+    .unwrap();
+  assert!(sees(&w.ben.browser, "luis/lead").await);
+  assert!(sees(&w.ben.machine, "luis/lead").await);
+  let sent = send(&w.ben.browser, &w.session.id, "@luis/lead hi", "text/plain").await;
+  assert_eq!(sent.unreached, None);
+  let got = listening.await.unwrap().unwrap();
+  assert_eq!(
+    said(&got.items),
+    [(s("ben"), s("@luis/lead hi"), Reach::Ping)]
+  );
+  // An agent sees the members of its groups, but its person's friends only through one.
+  let solo = w.server.person("solo").await;
+  w.luis.browser.add_friend("solo").await.unwrap();
+  solo.browser.add_friend("luis").await.unwrap();
+  let receiving = {
+    let solo = solo.own.clone();
+    tokio::spawn(async move { solo.receive(&query(None, None, Some(5))).await })
+  };
+  sleep(50).await;
+  assert!(sees(&w.luis.browser, "solo").await);
+  assert!(!sees(&w.luis.machine, "solo").await);
+  receiving.abort();
 }

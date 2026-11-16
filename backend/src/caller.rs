@@ -243,6 +243,12 @@ impl Caller {
       .map_or(&self.person, |agent| &agent.name)
   }
 
+  /// The participant acting, by its id: the agent an agent token names, else the person by
+  /// their account's id. It decides what the request sees: an agent sees only its groups.
+  pub fn who(&self) -> &str {
+    self.agent.as_ref().map_or(&self.account, |agent| &agent.id)
+  }
+
   /// Refuses a token: only the person does this, signed in in the browser.
   pub fn in_browser(&self) -> Result<()> {
     match self.kind {

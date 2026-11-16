@@ -337,19 +337,19 @@ pub async fn accept(
   {
     if db::count(
       &mut tx,
-      r#"SELECT count(*) FROM group_member WHERE "group" = ?"#,
+      r#"SELECT count(*) FROM group_member WHERE "group" = ? AND member = account"#,
       &[&t.group],
     )
     .await?
       >= MAX_MEMBERS
     {
       return Err(Refusal::forbidden(format!(
-        "The group is full: it has at most {MAX_MEMBERS} members."
+        "The group is full: it has at most {MAX_MEMBERS} people."
       )));
     }
     let besides = db::count(
       &mut tx,
-      r#"SELECT count(*) FROM group_member m JOIN "group" g ON g.id = m."group" WHERE m.account = ? AND g.person IS NULL"#,
+      r#"SELECT count(*) FROM group_member m JOIN "group" g ON g.id = m."group" WHERE m.member = ? AND g.person IS NULL"#,
       &[me],
     )
     .await?;
@@ -371,12 +371,15 @@ pub async fn accept(
   let dm = dm_of(&mut tx, &row.inviter, me).await?;
   let joined = match &target {
     Some(t) => {
-      sqlx::query(r#"INSERT OR IGNORE INTO group_member ("group", account) VALUES (?, ?)"#)
-        .bind(&t.group)
-        .bind(me)
-        .execute(&mut *tx)
-        .await?
-        .rows_affected()
+      sqlx::query(
+        r#"INSERT OR IGNORE INTO group_member ("group", member, account) VALUES (?, ?, ?)"#,
+      )
+      .bind(&t.group)
+      .bind(me)
+      .bind(me)
+      .execute(&mut *tx)
+      .await?
+      .rows_affected()
         > 0
     }
     None => false,

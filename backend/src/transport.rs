@@ -535,7 +535,7 @@ async fn deliver(
         unreached.push(name.clone());
         continue;
       };
-      if session_for(db, session, &account).await?.is_none() {
+      if session_for(db, session, &id).await?.is_none() {
         unreached.push(name.clone());
         continue;
       }
@@ -547,6 +547,9 @@ async fn deliver(
     }
     if named.iter().any(|n| n == "*") {
       for (id, account) in inside.iter().filter(|(id, _)| Some(id.as_str()) != sender) {
+        if session_for(db, session, id).await?.is_none() {
+          continue;
+        }
         match reached.iter_mut().find(|(r, _, _)| r == id) {
           Some(existing) => existing.2 = Reach::Ping,
           None => reached.push((id.clone(), account.clone(), Reach::Ping)),
@@ -557,7 +560,7 @@ async fn deliver(
   for (id, account) in &inside {
     if Some(id.as_str()) != sender
       && !reached.iter().any(|(r, _, _)| r == id)
-      && session_for(db, session, account).await?.is_some()
+      && session_for(db, session, id).await?.is_some()
     {
       reached.push((id.clone(), account.clone(), Reach::Session));
     }
@@ -841,8 +844,38 @@ pub fn too_large() -> Refusal {
   )
 }
 
-/// Archives the agent, which said it won't come back: it leaves every session it is in, receives
-/// and sends no more, its stream goes, and its name is free for another.
+/// Has the participant `id` leave every session of `group` it is in, once it is no longer in the
+/// group.
+pub async fn leave_group(app: &App, db: &mut Db, group: &str, id: &str) -> Result<()> {
+  let inside: Vec<(String, String, String, Option<String>)> = sqlx::query_as(
+    r#"SELECT pa.session, pa.account, a.login, ag.name FROM participant pa
+       JOIN account a ON a.id = pa.account LEFT JOIN agent ag ON ag.id = pa.id
+       JOIN session s ON s.id = pa.session LEFT JOIN project p ON p.id = s.project
+       LEFT JOIN group_session gs ON gs.session = s.id
+       WHERE pa.id = ? AND pa.inside = 1 AND coalesce(p."group", gs."group") = ?"#,
+  )
+  .bind(id)
+  .bind(group)
+  .fetch_all(&mut *db)
+  .await?;
+  for (session, account, login, agent) in inside {
+    let p = Acting {
+      account,
+      id: id.to_string(),
+      name: agent.map_or(login.clone(), |agent| format!("{login}/{agent}")),
+    };
+    let leave = Payload {
+      ty: LEAVE_TYPE,
+      ..MARK
+    };
+    append_as(app, db, &p, &session, leave, Some(LEFT)).await?;
+  }
+  Ok(())
+}
+
+/// Archives the agent, which said it won't come back: it leaves every session it is in, and every
+/// group but its person's own, receives and sends no more, its stream goes, and its name is free
+/// for another.
 pub async fn archive(app: &App, db: &mut Db, p: &Acting) -> Result<()> {
   let sessions: Vec<String> =
     sqlx::query_scalar("SELECT session FROM participant WHERE id = ? AND inside = 1")
@@ -878,6 +911,13 @@ pub async fn archive(app: &App, db: &mut Db, p: &Acting) -> Result<()> {
     .bind(&p.id)
     .execute(&mut *tx)
     .await?;
+  sqlx::query(
+    r#"DELETE FROM group_member WHERE member = ?
+       AND "group" NOT IN (SELECT id FROM "group" WHERE person = group_member.account)"#,
+  )
+  .bind(&p.id)
+  .execute(&mut *tx)
+  .await?;
   tx.commit().await?;
   end(
     app,
@@ -1038,9 +1078,7 @@ pub async fn observe(
   let current = move || async move {
     let mut db = app.db.acquire().await?;
     if !login_lasts(&mut db, &caller.login).await?
-      || session_for(&mut db, session, &caller.account)
-        .await?
-        .is_none()
+      || session_for(&mut db, session, caller.who()).await?.is_none()
     {
       return Err(Refusal::not_found("No such session."));
     }
@@ -1137,9 +1175,9 @@ struct ItemRow {
   entry: EntryRow,
 }
 
-/// The participant's items after `after`, about one answer's worth: those of a session its
-/// person sees no longer go.
-async fn items_of(db: &mut Db, account: &str, id: &str, after: u64) -> Result<Vec<Item>> {
+/// The participant's items after `after`, about one answer's worth: those of a session it
+/// sees no longer go.
+async fn items_of(db: &mut Db, id: &str, after: u64) -> Result<Vec<Item>> {
   loop {
     let rows: Vec<ItemRow> = sqlx::query_as(
       "SELECT st.n AS item, st.reach, st.session, p.notify,
@@ -1158,9 +1196,7 @@ async fn items_of(db: &mut Db, account: &str, id: &str, after: u64) -> Result<Ve
     let mut dropped = false;
     for row in rows {
       if !sees.contains_key(&row.session) {
-        let name = session_for(db, &row.session, account)
-          .await?
-          .map(|s| s.name);
+        let name = session_for(db, &row.session, id).await?.map(|s| s.name);
         sees.insert(row.session.clone(), name);
       }
       let Some(name) = sees[&row.session].clone() else {
@@ -1265,7 +1301,7 @@ pub async fn receive(app: &App, p: &Acting, login: &str, query: ReceiveQuery) ->
   });
   let answer = async || {
     let mut db = app.db.acquire().await?;
-    let items = items_of(&mut db, &p.account, &p.id, after).await?;
+    let items = items_of(&mut db, &p.id, after).await?;
     Ok::<_, Refusal>(Received {
       items,
       received,

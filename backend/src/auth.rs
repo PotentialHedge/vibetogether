@@ -109,8 +109,9 @@ pub async fn account_of(
     .bind(&now)
     .execute(&mut *db)
     .await?;
-  sqlx::query(r#"INSERT INTO group_member ("group", account) VALUES (?, ?)"#)
+  sqlx::query(r#"INSERT INTO group_member ("group", member, account) VALUES (?, ?, ?)"#)
     .bind(&group)
+    .bind(&id)
     .bind(&id)
     .execute(&mut *db)
     .await?;

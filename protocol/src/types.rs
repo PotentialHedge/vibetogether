@@ -38,15 +38,27 @@ wire! {
     pub name: String,
   }
 
-  /// People, such as Potential Hedge. Everyone also has a group of their own, which holds them
-  /// alone.
+  /// People and agents, such as Potential Hedge. Everyone also has a group of their own, which
+  /// holds them and their agents alone. An agent is in its person's own group from its creation,
+  /// and in another once its person adds it there.
   pub struct Group {
     pub id: String,
     pub name: String,
     /// Whether it is the caller's own group.
     pub own: bool,
-    /// Everyone in it, by name.
+    /// The people in it, by name.
     pub members: Vec<String>,
+    /// The agents in it, by name, `<person>/<agent>`, each of a person in it.
+    #[serde(default)]
+    pub agents: Vec<GroupAgent>,
+  }
+
+  /// An agent in a group, as the group's members see it.
+  pub struct GroupAgent {
+    pub id: String,
+    /// Its full name now, as `<account>/<name>`.
+    pub name: String,
+    pub presence: Presence,
   }
 
   /// A group's project, which holds sessions and points at GitHub repositories.
@@ -163,7 +175,7 @@ wire! {
     pub sessions: Vec<Session>,
   }
 
-  /// Everything the account sees at once.
+  /// Everything the caller sees at once: an agent sees only its groups, and no DM.
   pub struct Overview {
     pub account: Account,
     pub groups: Vec<GroupOverview>,
@@ -171,8 +183,8 @@ wire! {
     pub friends: Vec<Friend>,
     /// The account's agents that are not archived.
     pub agents: Vec<Agent>,
-    /// The participants awake or asleep the caller sees: itself and its agents, and its group
-    /// members' and its friends'.
+    /// The participants awake or asleep the caller sees: itself, the members of its groups,
+    /// people and agents, and a person's friends, without their agents.
     pub reachable: Vec<Reachable>,
     /// Differs wherever the rest does: pass it on to wait for the next change.
     pub version: String,

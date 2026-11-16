@@ -103,15 +103,16 @@ pub async fn session_json(db: &mut Db, id: &str, me: &str) -> Result<Session> {
   })
 }
 
-/// The sessions of `me`'s groups, each group's general first, then oldest first.
-pub async fn sessions_of(db: &mut Db, me: &str) -> Result<Vec<Session>> {
+/// The sessions of the groups `who`, a person or an agent, is in, as its person `me` sees them,
+/// each group's general first, then oldest first.
+pub async fn sessions_of(db: &mut Db, who: &str, me: &str) -> Result<Vec<Session>> {
   let ids: Vec<String> = sqlx::query_scalar(
     r#"SELECT s.id FROM session s LEFT JOIN project p ON p.id = s.project
        LEFT JOIN group_session gs ON gs.session = s.id
        JOIN group_member m ON m."group" = coalesce(p."group", gs."group")
-       WHERE m.account = ? ORDER BY coalesce(gs.general, 0) DESC, s.created"#,
+       WHERE m.member = ? ORDER BY coalesce(gs.general, 0) DESC, s.created"#,
   )
-  .bind(me)
+  .bind(who)
   .fetch_all(&mut *db)
   .await?;
   let mut sessions = Vec::new();
@@ -123,7 +124,7 @@ pub async fn sessions_of(db: &mut Db, me: &str) -> Result<Vec<Session>> {
 
 /// The session the caller takes part in.
 async fn accessible(db: &mut Db, id: &str, caller: &Caller) -> Result<SessionAccess> {
-  session_for(db, id, &caller.account)
+  session_for(db, id, caller.who())
     .await?
     .ok_or_else(|| Refusal::not_found("No such session."))
 }
@@ -162,7 +163,9 @@ fn checked_wait(wait: Option<u64>) -> Result<()> {
 /// `dms`.
 pub async fn list(State(app): State<App>, caller: Caller) -> Result<Json<Vec<Session>>> {
   let mut db = app.db.acquire().await?;
-  Ok(Json(sessions_of(&mut db, &caller.account).await?))
+  Ok(Json(
+    sessions_of(&mut db, caller.who(), &caller.account).await?,
+  ))
 }
 
 /// Creates a session in a project, or in a group, in no project, for the members of the group
@@ -182,12 +185,14 @@ pub async fn create(
         .fetch_optional(&mut *db)
         .await?;
       match group {
-        Some(group) if is_member(&mut db, &group, me).await? => (group, Some(project.clone())),
+        Some(group) if is_member(&mut db, &group, caller.who()).await? => {
+          (group, Some(project.clone()))
+        }
         _ => return Err(Refusal::not_found("No such project.")),
       }
     }
     (None, Some(group)) => {
-      if !is_member(&mut db, group, me).await? {
+      if !is_member(&mut db, group, caller.who()).await? {
         return Err(Refusal::not_found("No such group."));
       }
       (group.clone(), None)

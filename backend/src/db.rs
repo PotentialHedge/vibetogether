@@ -85,15 +85,17 @@ pub async fn count(db: &mut Db, sql: &'static str, args: &[&str]) -> Result<i64>
   Ok(query.fetch_one(db).await?)
 }
 
-/// The most groups a person is in besides their own, and the most members of a group.
+/// The most groups a person is in besides their own, and the most people in a group; its agents
+/// count not.
 pub const MAX_GROUPS: i64 = 20;
 pub const MAX_MEMBERS: i64 = 50;
 
-pub async fn is_member(db: &mut Db, group: &str, account: &str) -> Result<bool> {
+/// Whether `member`, a person by their account's id or an agent by its id, is in the group.
+pub async fn is_member(db: &mut Db, group: &str, member: &str) -> Result<bool> {
   Ok(
-    sqlx::query(r#"SELECT 1 FROM group_member WHERE "group" = ? AND account = ?"#)
+    sqlx::query(r#"SELECT 1 FROM group_member WHERE "group" = ? AND member = ?"#)
       .bind(group)
-      .bind(account)
+      .bind(member)
       .fetch_optional(db)
       .await?
       .is_some(),
@@ -187,9 +189,9 @@ pub struct SessionAccess {
   pub b: Option<String>,
 }
 
-/// The session, where `account` takes part in it: a member of its group, or one of its DM's two
-/// friends.
-pub async fn session_for(db: &mut Db, id: &str, account: &str) -> Result<Option<SessionAccess>> {
+/// The session, where `who` takes part in it, a person by their account's id or an agent by its
+/// id: a member of its group, or one of its DM's two friends, which no agent is.
+pub async fn session_for(db: &mut Db, id: &str, who: &str) -> Result<Option<SessionAccess>> {
   let session: Option<SessionAccess> = sqlx::query_as(
     r#"SELECT s.id, s.name, s.project, coalesce(p."group", gs."group") AS "group",
        coalesce(gs.general, 0) AS general, d.a, d.b FROM session s
@@ -203,8 +205,8 @@ pub async fn session_for(db: &mut Db, id: &str, account: &str) -> Result<Option<
     return Ok(None);
   };
   let sees = match (&session.group, &session.a, &session.b) {
-    (Some(group), _, _) => is_member(db, group, account).await?,
-    (None, Some(a), Some(b)) => (a == account || b == account) && are_friends(db, a, b).await?,
+    (Some(group), _, _) => is_member(db, group, who).await?,
+    (None, Some(a), Some(b)) => (a == who || b == who) && are_friends(db, a, b).await?,
     _ => false,
   };
   Ok(sees.then_some(session))
