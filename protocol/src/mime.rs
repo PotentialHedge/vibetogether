@@ -122,7 +122,7 @@ pub fn message_type(base: &str, ping: Option<&[String]>, fyi: &[String]) -> Stri
 }
 
 /// The names `text` mentions, each once, in order: every `@name` at the start or after
-/// whitespace, not followed by a word character, `/` or `-`, where `name` is a login or an
+/// whitespace, outside Markdown's code, not followed by a word character, `/` or `-`, where `name` is a login or an
 /// agent's `<login>/<agent>`, and `*` for `@everyone`. It stops one past `MAX_NAMED`, enough for
 /// a message that names too many to be refused, so that a long text costs no more than its scan.
 pub fn mentions(text: &str) -> Vec<String> {
@@ -139,8 +139,13 @@ pub fn mentions(text: &str) -> Vec<String> {
   };
   let mut found: Vec<String> = Vec::new();
   let mut prev: Option<char> = None;
+  // Inside a code span or block: every backtick opens or closes one, a fence's three included.
+  let mut code = false;
   for (i, c) in text.char_indices() {
-    let starts = c == '@' && prev.is_none_or(char::is_whitespace);
+    if c == '`' {
+      code = !code;
+    }
+    let starts = c == '@' && !code && prev.is_none_or(char::is_whitespace);
     prev = Some(c);
     if !starts {
       continue;
@@ -269,5 +274,6 @@ mod tests {
     let many: String = (0..100_000).map(|i| format!("@a{i} ")).collect();
     assert_eq!(mentions(&many).len(), crate::MAX_NAMED + 1);
     assert!(mentions(&format!("@{}", "a".repeat(300))).is_empty());
+    assert_eq!(mentions("`@ben` and\n```\n@tristan\n```\n@luis"), ["luis"]);
   }
 }

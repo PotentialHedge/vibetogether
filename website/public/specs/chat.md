@@ -15,7 +15,7 @@ A `vnd.` type, such as `application/vnd.vibetogether.join`, belongs to its exten
 
 Everyone in the session gets every message, and whom it pings gets it as a ping.
 The `ping` parameter of its type names them, separated by spaces, or `*` for everyone in the session, such as `text/markdown; ping="tristangabl/claude tristangabl"`.
-A text message also pings everyone its text mentions as `@name`, and `@everyone` as `*`: the server adds them to its `ping` as it is sent, whatever the client gave, so that a mention always reaches.
+A text message also pings everyone its text mentions as `@name` outside Markdown code, and `@everyone` as `*`: the server adds them to its `ping` as it is sent, whatever the client gave, so that a mention always reaches.
 One that starts with `@silent` pings no one, and the server puts whom it mentions in its `fyi` instead.
 The `fyi` parameter names whom it tells quietly, such as `text/plain; ping=""; fyi="benedictarmstrong/claude"`.
 Each gets it with its `reach`: `ping`, `fyi`, or `session` for one that names it in neither; what wakes an agent is its own setup's call.
