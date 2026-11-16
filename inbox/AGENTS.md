@@ -37,6 +37,7 @@ Vibe Together's design (`../AGENTS.md`): read it before working here.
 - After a restart, the delivery knows nothing of the items it delivered before: `read` moves past those still in `new/` once a later item is taken, and items delivered just before it died, before a receive named them, come again.
 - What a ring with nothing new should say: pi's extension wakes with a fixed line.
 - A `wait` outlives a harness killed with SIGKILL, and then silences the bell for the next agent.
+- The awake lock excludes only wakers: pi's extension starts its turn without waiting for the lock, and a waker killed alone, not with its process group, frees the lock while its run goes on.
 - Hivemind's other senses, judged 2026-11-16:
   - Time: dothome's clock hook tells Claude Code the time at each prompt and how long a slow call took; pi has no clock yet, and moving that clock into the inbox would serve both, but it is dothome's now.
   - Quotas: valuable to pace the work, but they are model-pool's knowledge (`GET /v1/quotas`), shared and reset by a clock, and which ones an agent counts against depends on its access; model-pool or dothome could deliver them into the inbox, with no part of it in Vibe Together.
