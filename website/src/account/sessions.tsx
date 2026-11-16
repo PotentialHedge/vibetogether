@@ -21,7 +21,6 @@ import {
 	demo,
 	type Friend,
 	type Group,
-	type GroupAgent,
 	type Project,
 	type Reachable,
 	type Session,
@@ -761,8 +760,9 @@ const onHover = {
 		"[@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover/agent:opacity-100 [@media(hover:hover)]:focus-visible:opacity-100",
 };
 
-/** A person's agents in the group, under them: the awake or asleep ones, and
- * the offline and archived ones collapsed. Any member removes one. */
+/** A person's agents in the group, under them: only the awake or asleep
+ * ones, since an offline agent can't be reached; the person's own offline
+ * agents show on their agents page. Any member removes one. */
 function MemberAgents({
 	person,
 	group,
@@ -774,56 +774,39 @@ function MemberAgents({
 	reachable: Reachable[];
 	act: Act;
 }) {
-	const [open, setOpen] = useState(false);
-	const theirs = group.agents.filter((agent) =>
-		agent.name.startsWith(`${person}/`),
-	);
-	const live = (agent: GroupAgent) =>
-		agent.presence === "awake" || agent.presence === "asleep";
-	const hidden = theirs.filter((agent) => !live(agent)).length;
-	return (
-		<>
-			{theirs
-				.filter((agent) => open || live(agent))
-				.map((agent) => (
-					<div
-						key={agent.id}
-						className="group/agent flex h-6 items-center gap-2 pr-2 pl-9 text-xs text-muted-foreground"
-						title={`${agent.name} is ${agent.presence}`}
+	return group.agents
+		.filter(
+			(agent) =>
+				agent.name.startsWith(`${person}/`) &&
+				(agent.presence === "awake" || agent.presence === "asleep"),
+		)
+		.map((agent) => (
+			<div
+				key={agent.id}
+				className="group/agent flex h-6 items-center gap-2 pr-2 pl-9 text-xs text-muted-foreground"
+				title={`${agent.name} is ${agent.presence}`}
+			>
+				<Presence
+					presence={agent.presence}
+					dnd={reachable.find((r) => r.id === agent.id)?.dnd}
+					className="size-2"
+				/>
+				<span className="min-w-0 flex-1 truncate font-mono">
+					{agent.name.slice(person.length + 1)}
+				</span>
+				{!group.own && (
+					<Button
+						variant="ghost"
+						size="icon-xs"
+						aria-label={`Remove ${agent.name}`}
+						className={cn("size-5", onHover.agent)}
+						onClick={act(() => api.removeMember(group.id, agent.name))}
 					>
-						<Presence
-							presence={agent.presence}
-							dnd={reachable.find((r) => r.id === agent.id)?.dnd}
-							className="size-2"
-						/>
-						<span className="min-w-0 flex-1 truncate font-mono">
-							{agent.name.slice(person.length + 1)}
-						</span>
-						{!group.own && (
-							<Button
-								variant="ghost"
-								size="icon-xs"
-								aria-label={`Remove ${agent.name}`}
-								className={cn("size-5", onHover.agent)}
-								onClick={act(() => api.removeMember(group.id, agent.name))}
-							>
-								<X />
-							</Button>
-						)}
-					</div>
-				))}
-			{hidden > 0 && (
-				<button
-					type="button"
-					className="flex h-6 items-center pr-2 pl-9 text-left text-xs text-muted-foreground/70 hover:text-muted-foreground"
-					aria-expanded={open}
-					onClick={() => setOpen(!open)}
-				>
-					{open ? "hide offline" : `${hidden} offline`}
-				</button>
-			)}
-		</>
-	);
+						<X />
+					</Button>
+				)}
+			</div>
+		));
 }
 
 /** The group's people, all equal, each with their agents in it, and one
