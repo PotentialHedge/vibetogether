@@ -76,6 +76,28 @@
           cargoExtraArgs = "--locked -p vibetogether";
           meta.mainProgram = "vibetogether";
         });
+      # The command line as one static binary for Linux, which runs on any
+      # Linux of its architecture: what a release ships, for an agent that
+      # can't install it otherwise, such as one in a sandbox.
+      cliStatic = let
+        static = pkgs.pkgsStatic;
+        target = static.stdenv.hostPlatform.rust.rustcTarget;
+        cc = "${static.stdenv.cc}/bin/${static.stdenv.cc.targetPrefix}cc";
+        craneStatic = (crane.mkLib pkgs).overrideToolchain (p: (toolchain p).override {targets = [target];});
+        args =
+          common
+          // {
+            pname = "vibetogether-static";
+            cargoExtraArgs = "--locked -p vibetogether";
+            CARGO_BUILD_TARGET = target;
+            CARGO_BUILD_RUSTFLAGS = "-C target-feature=+crt-static";
+            "CARGO_TARGET_${lib.toUpper (builtins.replaceStrings ["-"] ["_"] target)}_LINKER" = cc;
+            "CC_${builtins.replaceStrings ["-"] ["_"] target}" = cc;
+            HOST_CC = "${pkgs.stdenv.cc}/bin/cc";
+            meta.mainProgram = "vibetogether";
+          };
+      in
+        craneStatic.buildPackage (args // {cargoArtifacts = craneStatic.buildDepsOnly args;});
       # The client compiled to WebAssembly, with its bindings for the
       # website: an ES module, its WebAssembly and its types.
       web = craneLib.mkCargoDerivation (wasm
@@ -92,48 +114,54 @@
   in {
     packages = forEachSystem (pkgs: let
       built = rust pkgs;
-    in {
-      vibetogether-backend = built.backend;
-      vibetogether = built.cli;
-      default = built.cli;
-      # The website, as it is served: its pages with the client's bindings.
-      website = pkgs.stdenvNoCC.mkDerivation (finalAttrs: {
-        pname = "vibetogether-website";
-        version = "0.1.0";
-        src = lib.fileset.toSource {
-          root = ./.;
-          fileset = lib.fileset.difference (lib.fileset.unions [
-            ./package.json
-            ./pnpm-lock.yaml
-            ./pnpm-workspace.yaml
-            ./website
-          ]) (lib.fileset.maybeMissing ./website/node_modules);
-        };
-        pnpmWorkspaces = ["vibetogether"];
-        nativeBuildInputs = [pkgs.nodejs pkgs.pnpm pkgs.pnpmConfigHook];
-        pnpmDeps = pkgs.fetchPnpmDeps {
-          inherit (finalAttrs) pname version src pnpmWorkspaces;
-          hash = "sha256-eXJTnF829XLAbKeg1hyUvED6V+EAHXxfDr5PMPvkBew=";
-          fetcherVersion = 4;
-          # pnpm leaves an empty `links` in its store on Darwin only, which
-          # fetchPnpmDeps keeps, so the hash would differ between platforms.
-          preFixup = "rm -rf $storePath/v11/links";
-        };
-        buildPhase = ''
-          runHook preBuild
-          rm -rf website/src/client
-          cp -r ${built.web} website/src/client
-          chmod -R u+w website/src/client
-          pnpm --filter vibetogether build
-          runHook postBuild
-        '';
-        installPhase = ''
-          runHook preInstall
-          cp -r website/dist $out
-          runHook postInstall
-        '';
+    in
+      {
+        vibetogether-backend = built.backend;
+        vibetogether = built.cli;
+        default = built.cli;
+      }
+      // lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
+        vibetogether-static = built.cliStatic;
+      }
+      // {
+        # The website, as it is served: its pages with the client's bindings.
+        website = pkgs.stdenvNoCC.mkDerivation (finalAttrs: {
+          pname = "vibetogether-website";
+          version = "0.1.0";
+          src = lib.fileset.toSource {
+            root = ./.;
+            fileset = lib.fileset.difference (lib.fileset.unions [
+              ./package.json
+              ./pnpm-lock.yaml
+              ./pnpm-workspace.yaml
+              ./website
+            ]) (lib.fileset.maybeMissing ./website/node_modules);
+          };
+          pnpmWorkspaces = ["vibetogether"];
+          nativeBuildInputs = [pkgs.nodejs pkgs.pnpm pkgs.pnpmConfigHook];
+          pnpmDeps = pkgs.fetchPnpmDeps {
+            inherit (finalAttrs) pname version src pnpmWorkspaces;
+            hash = "sha256-eXJTnF829XLAbKeg1hyUvED6V+EAHXxfDr5PMPvkBew=";
+            fetcherVersion = 4;
+            # pnpm leaves an empty `links` in its store on Darwin only, which
+            # fetchPnpmDeps keeps, so the hash would differ between platforms.
+            preFixup = "rm -rf $storePath/v11/links";
+          };
+          buildPhase = ''
+            runHook preBuild
+            rm -rf website/src/client
+            cp -r ${built.web} website/src/client
+            chmod -R u+w website/src/client
+            pnpm --filter vibetogether build
+            runHook postBuild
+          '';
+          installPhase = ''
+            runHook preInstall
+            cp -r website/dist $out
+            runHook postInstall
+          '';
+        });
       });
-    });
 
     nixosModules.backend = import ./backend/nixos-module.nix self;
 
