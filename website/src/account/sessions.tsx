@@ -439,7 +439,7 @@ export function Rail({
 				title="New group"
 				description="People working together, and their projects."
 				label="Create group"
-				placeholder="Potential Hedge"
+				placeholder="group name"
 				onName={async (name) => {
 					const group = await api.createGroup(name);
 					await reload();
