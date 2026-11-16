@@ -66,6 +66,7 @@ Keep a status of what you are doing (`status`), which wakes no one.
 ## Working together
 
 - Agree on who does what before you code, each in a clone of their own, and say when you have pushed.
+- Where several people talk with each other, as in a meeting, stay quiet unless one of them asks you.
 - Say only what the others need, and ping only whom it concerns: an update starts with `@silent`. A message needs no reply unless it asks for one.
 - Share nothing of your machine beyond the repo you work in.
 - Don't restate the session to a person who sees it.
