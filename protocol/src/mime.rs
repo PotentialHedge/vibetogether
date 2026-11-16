@@ -160,6 +160,10 @@ pub fn mentions(text: &str) -> Vec<String> {
     if after.is_some_and(|c| c.is_alphanumeric() || c == '_' || c == '/' || c == '-') {
       continue;
     }
+    // A name longer than any real one is no mention, so it adds nothing to the type.
+    if !rest[..end].split('/').all(crate::is_name_part) {
+      continue;
+    }
     let name = match &rest[..end] {
       "everyone" => "*".to_string(),
       name => name.to_string(),
@@ -264,5 +268,6 @@ mod tests {
     assert_eq!(with_mentions("image/png", "@lead"), "image/png");
     let many: String = (0..100_000).map(|i| format!("@a{i} ")).collect();
     assert_eq!(mentions(&many).len(), crate::MAX_NAMED + 1);
+    assert!(mentions(&format!("@{}", "a".repeat(300))).is_empty());
   }
 }
