@@ -28,7 +28,8 @@ import {
 } from "@/account/api";
 import { doNotDisturb, setDoNotDisturb } from "@/account/live";
 import { Person, Presence } from "@/account/parts";
-import { Button, buttonVariants } from "@/components/ui/button";
+import { Picker } from "@/account/picker";
+import { Button } from "@/components/ui/button";
 import {
 	Dialog,
 	DialogClose,
@@ -338,6 +339,8 @@ export function Rail({
 	open,
 	onOpen,
 	onDm,
+	onAgents,
+	agentsOpen = false,
 	act,
 	reload,
 	settings = false,
@@ -353,6 +356,10 @@ export function Rail({
 	open: string | undefined;
 	onOpen: (group: string) => void;
 	onDm: (dm: string) => void;
+	/** Opens the person's agents. */
+	onAgents: () => void;
+	/** Whether the agents are open. */
+	agentsOpen?: boolean;
 	act: Act;
 	reload: () => Promise<void>;
 	/** Whether the settings are open, which the person's face marks. */
@@ -364,7 +371,7 @@ export function Rail({
 	const sorted = [...groups].sort((a, b) => Number(b.own) - Number(a.own));
 	return (
 		<nav
-			aria-label="DMs and groups"
+			aria-label="DMs, agents and groups"
 			className="flex w-16 shrink-0 flex-col items-center gap-2 overflow-y-auto border-r bg-card/40 py-3"
 		>
 			{/* The way out of the app, to the site's front page. */}
@@ -401,6 +408,19 @@ export function Rail({
 				</button>
 			))}
 			{dms.length > 0 && <span className="h-px w-8 shrink-0 bg-border" />}
+			<button
+				type="button"
+				title="Your agents"
+				aria-label="Your agents"
+				aria-current={agentsOpen}
+				onClick={onAgents}
+				className={cn(
+					"flex size-10 shrink-0 items-center justify-center rounded-xl bg-muted/60 text-muted-foreground ring-offset-2 ring-offset-background transition-shadow hover:ring-2 hover:ring-ring/40",
+					agentsOpen && "text-foreground ring-2 ring-ring",
+				)}
+			>
+				<Bot className="size-5" />
+			</button>
 			{sorted.map((group) => [
 				<button
 					key={group.id}
@@ -806,8 +826,8 @@ function MemberAgents({
 	);
 }
 
-/** The group's people, all equal, each with their agents in it, and adding a
- * friend to it; the person's own agents are added in settings, in one place. */
+/** The group's people, all equal, each with their agents in it, and one
+ * picker of the person's friends and own agents, to add or remove them. */
 function Members({
 	me,
 	group,
@@ -825,10 +845,6 @@ function Members({
 	agents: Agent[];
 	act: Act;
 }) {
-	const addable = friends.filter(
-		(friend) =>
-			friend.state === "friends" && !group.members.includes(friend.name),
-	);
 	const people = group.members;
 	const face = (name: string) =>
 		name === me.name
@@ -866,54 +882,57 @@ function Members({
 					</li>
 				))}
 			</ul>
-			{!group.own && agents.length > 0 && (
-				<a
-					className={cn(
-						buttonVariants({ variant: "ghost", size: "sm" }),
-						"justify-start text-muted-foreground",
-					)}
-					href={page(`account/settings/?tab=agents${demo ? "#demo" : ""}`)}
-				>
-					<Bot />
-					your agents' groups
-				</a>
-			)}
 			{!group.own && (
-				<DropdownMenu>
-					<DropdownMenuTrigger
-						render={
-							<Button
-								variant="ghost"
-								size="sm"
-								className="justify-start text-muted-foreground"
-							/>
-						}
-					>
-						<Plus />
-						add a friend
-					</DropdownMenuTrigger>
-					<DropdownMenuContent side="top" align="start" className="w-56">
-						{addable.length === 0 ? (
-							<DropdownMenuItem
-								render={
-									<a href={page(`account/settings/${demo ? "#demo" : ""}`)} />
-								}
+				<Picker
+					side="top"
+					title="Who is in this group: its members see and reach each other, and an agent sees and acts in it. Of agents, you add only your own."
+					empty={
+						<>
+							No friend or agent yet. Add a friend in{" "}
+							<a
+								className="underline underline-offset-4"
+								href={page(`account/settings/${demo ? "#demo" : ""}`)}
 							>
-								No friend to add yet. Add one in settings.
-							</DropdownMenuItem>
-						) : (
-							addable.map((friend) => (
-								<DropdownMenuItem
-									key={friend.name}
-									onClick={act(() => api.addMember(group.id, friend.name))}
-								>
-									<Person {...friend} size="sm" />
-									<span className="font-mono">{friend.name}</span>
-								</DropdownMenuItem>
-							))
-						)}
-					</DropdownMenuContent>
-				</DropdownMenu>
+								settings
+							</a>
+							.
+						</>
+					}
+					choices={[
+						...friends
+							.filter((friend) => friend.state === "friends")
+							.map((friend) => ({
+								id: friend.name,
+								name: friend.name,
+								face: <Person {...friend} size="sm" />,
+								ticked: group.members.includes(friend.name),
+							})),
+						...agents.map((agent) => ({
+							id: agent.name,
+							name: agent.name.slice(me.name.length + 1),
+							face: <Bot className="size-4 text-muted-foreground" />,
+							detail: "your agent",
+							ticked: group.agents.some((member) => member.id === agent.id),
+						})),
+					]}
+					onPick={(choice) =>
+						act(() =>
+							choice.ticked
+								? api.removeMember(group.id, choice.id)
+								: api.addMember(group.id, choice.id),
+						)()
+					}
+					trigger={
+						<Button
+							variant="ghost"
+							size="sm"
+							className="justify-start text-muted-foreground"
+						>
+							<Plus />
+							add
+						</Button>
+					}
+				/>
 			)}
 		</div>
 	);

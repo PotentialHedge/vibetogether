@@ -5,6 +5,7 @@
 
 import { ArrowLeft, MessagesSquare, X } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
+import { Agents, Back } from "@/account/agents";
 import { api, demo, type Group, type Seen, signedOut } from "@/account/api";
 import { showSession } from "@/account/live";
 import { useActions, useReloadOnChange } from "@/account/parts";
@@ -32,6 +33,7 @@ const load = () => api.seen();
  * again: a session, a DM by its friend's name, or a group with none of its
  * sessions open. */
 type Place = {
+	agents?: boolean;
 	group?: string | undefined;
 	session?: string | undefined;
 	dm?: string | undefined;
@@ -40,6 +42,7 @@ type Place = {
 function placeOfAddress(): Place {
 	const query = new URLSearchParams(location.search);
 	return {
+		agents: query.has("agents"),
 		group: query.get("group") ?? undefined,
 		session: query.get("session") ?? undefined,
 		dm: query.get("dm") ?? undefined,
@@ -48,10 +51,11 @@ function placeOfAddress(): Place {
 
 function go(place: Place) {
 	const query = new URLSearchParams();
-	if (place.session) query.set("session", place.session);
+	if (place.agents) query.set("agents", "");
+	else if (place.session) query.set("session", place.session);
 	else if (place.dm) query.set("dm", place.dm);
 	else if (place.group) query.set("group", place.group);
-	const search = query.size ? `?${query}` : "";
+	const search = query.size ? `?${query}`.replace(/=$/, "") : "";
 	history.pushState(null, "", `${location.pathname}${search}${location.hash}`);
 }
 
@@ -72,7 +76,7 @@ function App({ state, reload }: { state: State; reload: () => Promise<void> }) {
 	const [deletingSession, setDeletingSession] = useState(false);
 	const [place, setPlace] = useState<Place>(() => {
 		const place = placeOfAddress();
-		if (place.session || place.dm || place.group) return place;
+		if (place.agents || place.session || place.dm || place.group) return place;
 		const last = localStorage.getItem(LAST);
 		if (last?.startsWith("dm:")) return { dm: last.slice(3) };
 		return last && sessions.some((session) => session.id === last)
@@ -80,12 +84,14 @@ function App({ state, reload }: { state: State; reload: () => Promise<void> }) {
 			: {};
 	});
 	// On a phone: whether the navigation is shown, rather than the session.
-	const [navigating, setNavigating] = useState(!place.session && !place.dm);
+	const [navigating, setNavigating] = useState(
+		!place.agents && !place.session && !place.dm,
+	);
 	useEffect(() => {
 		const back = () => {
 			const place = placeOfAddress();
 			setPlace(place);
-			setNavigating(!place.session && !place.dm);
+			setNavigating(!place.agents && !place.session && !place.dm);
 		};
 		addEventListener("popstate", back);
 		return () => removeEventListener("popstate", back);
@@ -96,17 +102,20 @@ function App({ state, reload }: { state: State; reload: () => Promise<void> }) {
 		const friend = friends.find((friend) => friend.name === dm.friend);
 		return friend ? [{ dm, friend }] : [];
 	});
-	const dm = dmsOfFriends.find(({ friend }) => friend.name === place.dm);
+	const dm = place.agents
+		? undefined
+		: dmsOfFriends.find(({ friend }) => friend.name === place.dm);
 	const session = dm
 		? undefined
 		: sessions.find((session) => session.id === place.session);
-	const group = dm
-		? undefined
-		: (groups.find(
-				(group) => group.id === (session?.group?.id ?? place.group),
-			) ??
-			groups.find((group) => group.own) ??
-			groups[0]);
+	const group =
+		dm || place.agents
+			? undefined
+			: (groups.find(
+					(group) => group.id === (session?.group?.id ?? place.group),
+				) ??
+				groups.find((group) => group.own) ??
+				groups[0]);
 	useEffect(() => {
 		if (session) localStorage.setItem(LAST, session.id);
 	}, [session]);
@@ -123,7 +132,7 @@ function App({ state, reload }: { state: State; reload: () => Promise<void> }) {
 	const open = (next: Place) => {
 		go(next);
 		setPlace(next);
-		setNavigating(!next.session && !next.dm);
+		setNavigating(!next.agents && !next.session && !next.dm);
 	};
 
 	return (
@@ -148,6 +157,8 @@ function App({ state, reload }: { state: State; reload: () => Promise<void> }) {
 					groups={groups}
 					open={dm?.dm.id ?? group?.id}
 					onOpen={(id) => open({ group: id })}
+					onAgents={() => open({ agents: true })}
+					agentsOpen={place.agents === true}
 					onDm={(id) =>
 						open({
 							dm: dmsOfFriends.find(({ dm }) => dm.id === id)?.friend.name,
@@ -180,7 +191,15 @@ function App({ state, reload }: { state: State; reload: () => Promise<void> }) {
 					navigating ? "hidden md:flex" : "flex",
 				)}
 			>
-				{dm ? (
+				{place.agents ? (
+					<Agents
+						live={agents}
+						groups={groups}
+						act={act}
+						reload={reload}
+						back={<Back onClick={() => setNavigating(true)} />}
+					/>
+				) : dm ? (
 					<Transcript
 						key={dm.dm.id}
 						as={me.name}

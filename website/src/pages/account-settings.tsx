@@ -5,22 +5,18 @@
 import {
 	ArrowLeft,
 	Bot,
-	Check,
 	CircleUser,
 	History,
 	KeyRound,
 	LogOut,
 	Monitor,
-	Plus,
 	Users,
 } from "lucide-react";
 import { type ReactNode, useCallback, useEffect, useState } from "react";
 import {
 	type Activity,
-	type Agent,
 	api,
 	demo,
-	type Group,
 	type Login,
 	type Seen,
 	signedOut,
@@ -28,7 +24,6 @@ import {
 import {
 	AddByName,
 	Person,
-	Presence,
 	Row,
 	Titled,
 	useActions,
@@ -37,25 +32,21 @@ import {
 import { type DmOfFriend, Rail } from "@/account/sessions";
 import { SignIn } from "@/account/sign-in";
 import { Button } from "@/components/ui/button";
-import { Toggle } from "@/components/ui/toggle";
 import { cn } from "@/lib/utils";
 import { page, render, Site } from "@/site";
 
 type State = Seen & {
 	logins: Login[];
 	activity: Activity[];
-	/** The account's agents, the archived included. */
-	agents: Agent[];
 };
 
 async function load(given?: Seen): Promise<State> {
-	const [seen, logins, activity, agents] = await Promise.all([
+	const [seen, logins, activity] = await Promise.all([
 		given ?? api.seen(),
 		api.logins(),
 		api.activity(),
-		api.agents(),
 	]);
-	return { ...seen, logins, activity, agents };
+	return { ...seen, logins, activity };
 }
 
 /** What each kind of login is, in plain words. */
@@ -86,7 +77,6 @@ const app = (query = "") => page(`account/${query}${demo ? "#demo" : ""}`);
 /** The settings' tabs, one thing each, kept in the address as `?tab=`. */
 const TABS = [
 	{ id: "friends", label: "Friends", icon: Users },
-	{ id: "agents", label: "Agents", icon: Bot },
 	{ id: "logins", label: "Logins", icon: KeyRound },
 	{ id: "activity", label: "Activity", icon: History },
 	{ id: "account", label: "Account", icon: CircleUser },
@@ -153,7 +143,7 @@ function Settings({
 	state: State;
 	reload: () => Promise<void>;
 }) {
-	const { me, friends, logins, activity, agents, groups } = state;
+	const { me, friends, logins, activity } = state;
 	const { problem, act } = useActions(reload);
 	const [tab, setTab] = useState<Tab>(tabOfAddress);
 	useEffect(() => {
@@ -329,39 +319,6 @@ function Settings({
 					</Pane>
 				)}
 
-				{tab === "agents" && (
-					<Pane
-						title="Agents"
-						line="Your agents, each named by its id, which stays when it is renamed. Each is in your own group, and in the groups ticked under it: their members see and reach it, and it sees and acts in them. Only you add an agent to a group."
-						action={
-							<AddByName
-								placeholder="agent name"
-								label="Create"
-								onAdd={async (name) => {
-									await api.createAgent(name);
-									await reload();
-								}}
-							/>
-						}
-					>
-						<Rows empty="No agents yet: an agent creates itself, or you create it here and give it its id.">
-							{agents.flatMap((agent) => [
-								<AgentRow key={agent.id} agent={agent} act={act} />,
-								...(agent.presence === "archived"
-									? []
-									: [
-											<AgentGroups
-												key={`${agent.id} groups`}
-												agent={agent}
-												groups={groups.filter((group) => !group.own)}
-												act={act}
-											/>,
-										]),
-							])}
-						</Rows>
-					</Pane>
-				)}
-
 				{tab === "activity" && (
 					<Pane title="Activity" line="What your agents changed, newest first.">
 						<Rows empty="Nothing yet.">
@@ -382,139 +339,6 @@ function Settings({
 				{tab === "account" && <AccountPane />}
 			</main>
 		</div>
-	);
-}
-
-/** One agent: its name, id, presence and status, renamed in place, and
- * archived after a second click, since that can't be undone. */
-function AgentRow({
-	agent,
-	act,
-}: {
-	agent: Agent;
-	act: (action: () => Promise<unknown>) => () => Promise<void>;
-}) {
-	const [renaming, setRenaming] = useState(false);
-	const [archiving, setArchiving] = useState(false);
-	const archived = agent.presence === "archived";
-	const reachable = agent.presence === "awake" || agent.presence === "asleep";
-	const detail = [
-		agent.id,
-		archived
-			? "archived"
-			: reachable
-				? agent.presence
-				: `last seen ${agent.seen ? when.format(new Date(agent.seen)) : "never"}`,
-		!archived &&
-			agent.listening.length > 0 &&
-			`in ${agent.listening.map((s) => s.name).join(", ")}`,
-		agent.status,
-	]
-		.filter(Boolean)
-		.join(" · ");
-	return (
-		<Row
-			actions={
-				archived ? undefined : renaming ? (
-					<AddByName
-						placeholder={agent.name.split("/")[1] ?? ""}
-						label="Rename"
-						onAdd={async (name) => {
-							await act(() => api.renameAgent(agent.id, name))();
-							setRenaming(false);
-						}}
-					/>
-				) : archiving ? (
-					<>
-						<Button
-							variant="destructive"
-							size="sm"
-							onClick={act(() => api.archiveAgent(agent.id))}
-						>
-							Archive for good
-						</Button>
-						<Button
-							variant="ghost"
-							size="sm"
-							onClick={() => setArchiving(false)}
-						>
-							Cancel
-						</Button>
-					</>
-				) : (
-					<>
-						<Button variant="ghost" size="sm" onClick={() => setRenaming(true)}>
-							Rename
-						</Button>
-						<Button
-							variant="ghost"
-							size="sm"
-							onClick={() => setArchiving(true)}
-						>
-							Archive
-						</Button>
-					</>
-				)
-			}
-		>
-			<Presence presence={agent.presence} dnd={agent.dnd} className="size-2" />
-			<span className={cn("min-w-0", archived && "opacity-50")}>
-				<Titled title={agent.name} detail={detail} />
-			</span>
-		</Row>
-	);
-}
-
-/** The groups an agent is in, besides its person's own, each ticked or not,
- * to add it there or remove it in one click. */
-function AgentGroups({
-	agent,
-	groups,
-	act,
-}: {
-	agent: Agent;
-	groups: Group[];
-	act: (action: () => Promise<unknown>) => () => Promise<void>;
-}) {
-	return (
-		<Row inset>
-			{groups.length === 0 ? (
-				<span className="text-xs text-muted-foreground">
-					No other group yet: one you make or join shows here.
-				</span>
-			) : (
-				<fieldset
-					className="flex flex-wrap items-center gap-1.5"
-					aria-label={`Groups of ${agent.name}`}
-				>
-					{groups.map((group) => {
-						const member = group.agents.some((a) => a.id === agent.id);
-						return (
-							<Toggle
-								key={group.id}
-								variant="outline"
-								size="sm"
-								pressed={member}
-								onPressedChange={act(() =>
-									member
-										? api.removeMember(group.id, agent.name)
-										: api.addMember(group.id, agent.name),
-								)}
-								className={cn(
-									"font-mono",
-									member
-										? "border-primary bg-primary text-primary-foreground hover:bg-primary/80 hover:text-primary-foreground aria-pressed:bg-primary"
-										: "text-muted-foreground",
-								)}
-							>
-								{member ? <Check /> : <Plus />}
-								{group.name}
-							</Toggle>
-						);
-					})}
-				</fieldset>
-			)}
-		</Row>
 	);
 }
 
@@ -607,6 +431,9 @@ function InApp({
 					open={undefined}
 					onOpen={(id) => {
 						location.href = app(`?group=${encodeURIComponent(id)}`);
+					}}
+					onAgents={() => {
+						location.href = app("?agents");
 					}}
 					onDm={(id) => {
 						const friend = dmsOfFriends.find(({ dm }) => dm.id === id)?.friend;

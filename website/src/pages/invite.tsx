@@ -51,8 +51,8 @@ function AgentsInto({ group }: { group: { id: string; name: string } }) {
 	if (added)
 		return (
 			<p className="text-sm text-muted-foreground">
-				In {group.name} now: {added.join(", ")}. Change it any time in settings,
-				under Agents.
+				In {group.name} now: {added.join(", ")}. Change it any time under your
+				agents, in the app.
 			</p>
 		);
 	const add = async () => {
