@@ -26,10 +26,15 @@ pub enum Command {
   /// Keeps the agent's inbox filled from its stream: one receive kept open always, awake while
   /// the inbox's awake lock is held and asleep otherwise. Each item that reaches the agent is
   /// delivered as text whose first line says where it is from; a ping or a session's message
-  /// also rings the bell, an fyi stays quiet. An item counts as received once it is in `new/`,
+  /// also rings the bell, an fyi stays quiet, unless the agent's policy says otherwise, matching
+  /// `from`, `reach` (`ping`, `fyi`, `session`) and `session` (its name or id). An item counts as
+  /// received once it is in `new/`,
   /// and as read once it and every item before it have left `new/`. It runs until refused.
   Receive,
-  /// Delivers one item, read from stdin, into `new/`.
+  /// Delivers one item, read from stdin, into `new/`. The agent's policy, the inbox's file
+  /// `policy`, decides whether it rings, by `from`: each line a rule, fields to match and then
+  /// `ring` or `quiet`, such as `session=hive reach=session quiet`; the last rule that matches
+  /// decides, and where none does, the sender's proposal stands.
   Deliver {
     /// Who sends it, such as an agent's or a person's name.
     #[arg(long, default_value = "unknown")]
@@ -37,7 +42,7 @@ pub enum Command {
     /// Its type, as a MIME type (`image/png`) or an extension (`png`).
     #[arg(long = "type", default_value = "txt")]
     ty: String,
-    /// Also rings the bell, to wake the agent.
+    /// Proposes to ring the bell, to wake the agent.
     #[arg(long)]
     wake: bool,
   },
@@ -94,7 +99,7 @@ pub async fn run(inbox: &Inbox, command: Command, client: &Client) -> Result<(),
         io::Error::new(io::ErrorKind::InvalidInput, format!("unknown type `{ty}`"))
       })?;
       inbox.deliver(io::stdin().lock(), &from, &ext)?;
-      if wake {
+      if inbox.rings(&[("from", &from)], wake)? {
         inbox.ring()?;
       }
     }
@@ -149,6 +154,9 @@ fn context(inbox: &Inbox, tokens: u64, window: u64) -> io::Result<()> {
     window / 1000,
   );
   inbox.deliver(text.as_bytes(), "context", "txt")?;
+  if inbox.rings(&[("from", "context")], false)? {
+    inbox.ring()?;
+  }
   file.set_len(0)?;
   file.seek(io::SeekFrom::Start(0))?;
   writeln!(file, "{mark}")
@@ -231,7 +239,15 @@ fn accept(inbox: &Inbox, client: &Client, stream: &mut Stream, answer: Received)
   for item in &answer.items {
     let (content, ext) = render(item, client.server());
     let path = inbox.deliver(content.as_bytes(), &item.entry.from, &ext)?;
-    ring |= item.wakes();
+    ring |= inbox.rings(
+      &[
+        ("from", &item.entry.from),
+        ("reach", reach_name(item.reach)),
+        ("session", &item.session.name),
+        ("session", &item.session.id),
+      ],
+      item.wakes(),
+    )?;
     stream
       .pending
       .insert(item.n, path.file_name().unwrap_or_default().to_owned());

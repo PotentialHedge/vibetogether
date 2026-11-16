@@ -134,6 +134,54 @@ impl Inbox {
     }
   }
 
+  pub fn policy_file(&self) -> PathBuf {
+    self.root.join("policy")
+  }
+
+  /// Whether an item rings the bell: its sender proposes, as `proposed`, and the agent's policy,
+  /// the file `policy`, disposes. Each of its lines is a rule, fields to match and then `ring` or
+  /// `quiet`, such as `session=hive reach=session quiet`; a field matches where the item has it
+  /// with that value, the last rule that matches decides, and where none does, the proposal
+  /// stands. `#` starts a comment. A line that is no rule is an error, so no rule is lost unseen.
+  pub fn rings(&self, fields: &[(&str, &str)], proposed: bool) -> io::Result<bool> {
+    let path = self.policy_file();
+    let policy = match fs::read_to_string(&path) {
+      Ok(policy) => policy,
+      Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(proposed),
+      Err(e) => return Err(at(e, &path)),
+    };
+    let mut rings = proposed;
+    for (n, line) in policy.lines().enumerate() {
+      let line = line.split('#').next().unwrap_or_default();
+      let mut words: Vec<_> = line.split_whitespace().collect();
+      let Some(verdict) = words.pop() else {
+        continue;
+      };
+      let invalid = |what: &str| {
+        io::Error::new(
+          io::ErrorKind::InvalidData,
+          format!("{}:{}: {what}", path.display(), n + 1),
+        )
+      };
+      let verdict = match verdict {
+        "ring" => true,
+        "quiet" => false,
+        _ => return Err(invalid("a rule ends in `ring` or `quiet`")),
+      };
+      let mut matches = true;
+      for word in words {
+        let (key, value) = word
+          .split_once('=')
+          .ok_or_else(|| invalid("a field is `<name>=<value>`"))?;
+        matches &= fields.iter().any(|&(k, v)| k == key && v == value);
+      }
+      if matches {
+        rings = verdict;
+      }
+    }
+    Ok(rings)
+  }
+
   pub fn ring(&self) -> io::Result<()> {
     self.create()?;
     let wake = self.wake_file();
@@ -389,5 +437,33 @@ impl Item {
         )
       }
     }
+  }
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  #[test]
+  fn the_policy_disposes_what_the_sender_proposes() {
+    let dir = std::env::temp_dir().join(format!("vibetogether-policy-{}", std::process::id()));
+    let inbox = Inbox::new(&dir);
+    inbox.create().unwrap();
+    let hive = [("from", "luis"), ("reach", "session"), ("session", "hive")];
+    let ping = [("from", "luis"), ("reach", "ping"), ("session", "hive")];
+    assert!(inbox.rings(&hive, true).unwrap());
+    fs::write(
+      inbox.policy_file(),
+      "# listen in the hive\nsession=hive reach=session quiet\n\nfrom=context ring # loud\n",
+    )
+    .unwrap();
+    assert!(!inbox.rings(&hive, true).unwrap());
+    assert!(inbox.rings(&ping, true).unwrap());
+    assert!(inbox.rings(&[("from", "context")], false).unwrap());
+    fs::write(inbox.policy_file(), "session=hive quiet\nfrom=luis ring\n").unwrap();
+    assert!(inbox.rings(&hive, false).unwrap());
+    fs::write(inbox.policy_file(), "session=hive loud\n").unwrap();
+    assert!(inbox.rings(&hive, true).is_err());
+    fs::remove_dir_all(&dir).unwrap();
   }
 }
