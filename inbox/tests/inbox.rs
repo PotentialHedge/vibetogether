@@ -263,3 +263,28 @@ fn the_inbox_is_its_owners_alone() {
   assert_eq!(mode(&path), 0o600);
   assert_eq!(mode(&inbox.wake_file()), 0o600);
 }
+
+#[test]
+fn the_oldest_untaken_is_the_first_delivered() {
+  let inbox = inbox("oldest");
+  assert_eq!(inbox.oldest_untaken().unwrap(), None);
+  let first = inbox.deliver(&b"a"[..], "x", "txt").unwrap();
+  inbox.deliver(&b"b"[..], "x", "txt").unwrap();
+  assert_eq!(
+    inbox.oldest_untaken().unwrap().as_deref(),
+    first.file_name()
+  );
+  inbox.take().unwrap();
+  assert_eq!(inbox.oldest_untaken().unwrap(), None);
+}
+
+#[test]
+fn only_one_holds_the_agent_awake() {
+  let inbox = inbox("try-awake");
+  let held = inbox.try_hold_awake().unwrap().expect("free at first");
+  assert!(inbox.awake().unwrap());
+  assert!(inbox.try_hold_awake().unwrap().is_none());
+  drop(held);
+  assert!(!inbox.awake().unwrap());
+  assert!(inbox.try_hold_awake().unwrap().is_some());
+}

@@ -58,6 +58,16 @@ pub enum Command {
   /// It wakes the agent: run it as a background command, or from a watcher that starts the agent.
   /// It takes nothing in: run `take` after it.
   Wait,
+  /// The waker: each time the bell rings, while items are untaken and no mind of the agent is
+  /// awake, runs the command, such as a harness's one-shot run, holding the awake lock while it
+  /// runs. An awake mind takes in what is new at its steps, so it starts none then; a ring with
+  /// nothing new starts none either. It stops answering a ring after a run that failed or took
+  /// nothing in. The command gets `AGENT_INBOX`. It runs until stopped.
+  Wake {
+    /// The command and its arguments, after `--`.
+    #[arg(trailing_var_arg = true, required = true, value_name = "COMMAND")]
+    command: Vec<String>,
+  },
   /// Holds the awake lock until stdin closes: the agent is awake meanwhile, such as while a turn
   /// runs. A harness starts it with a pipe at a turn's start and closes the pipe at its end; if
   /// the harness dies, the pipe closes and the lock goes with it.
@@ -121,8 +131,36 @@ pub async fn run(inbox: &Inbox, command: Command, client: &Client) -> Result<(),
       io::copy(&mut io::stdin().lock(), &mut io::sink())?;
     }
     Command::Context { tokens, window } => context(inbox, tokens, window)?,
+    Command::Wake { command } => wake(inbox, &command)?,
   }
   Ok(())
+}
+
+/// Answers the bell: while something is untaken and no mind of the agent is awake, runs
+/// `command` as the agent's turn. It stops answering a ring after a run that failed, or that took
+/// nothing in, so that a broken command doesn't run in a loop.
+fn wake(inbox: &Inbox, command: &[String]) -> io::Result<()> {
+  loop {
+    inbox.wait()?;
+    while let Some(oldest) = inbox.oldest_untaken()? {
+      let Some(turn) = inbox.try_hold_awake()? else {
+        break;
+      };
+      let status = std::process::Command::new(&command[0])
+        .args(&command[1..])
+        .env("AGENT_INBOX", &inbox.root)
+        .status()?;
+      drop(turn);
+      if !status.success() {
+        eprintln!("vibetogether: the woken command failed: {status}");
+        break;
+      }
+      if inbox.new_dir().join(&oldest).exists() {
+        eprintln!("vibetogether: the woken command took nothing in");
+        break;
+      }
+    }
+  }
 }
 
 /// The tenths of the window a context of `tokens` fills: the marks its size is told by.

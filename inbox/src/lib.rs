@@ -11,6 +11,7 @@
 //! What it creates is its owner's alone: its directories 0700, its items and files 0600.
 
 use std::{
+  ffi::OsString,
   fs, io,
   io::{Read, Write},
   os::unix::fs::{DirBuilderExt, OpenOptionsExt, PermissionsExt},
@@ -227,6 +228,20 @@ impl Inbox {
     Ok(items)
   }
 
+  /// The oldest item in `new/`, not yet taken in, by its name.
+  pub fn oldest_untaken(&self) -> io::Result<Option<OsString>> {
+    self.create()?;
+    let new = self.new_dir();
+    let mut oldest: Option<OsString> = None;
+    for entry in fs::read_dir(&new).map_err(|e| at(e, &new))? {
+      let name = entry.map_err(|e| at(e, &new))?.file_name();
+      if !name.to_string_lossy().starts_with('.') && oldest.as_ref().is_none_or(|o| name < *o) {
+        oldest = Some(name);
+      }
+    }
+    Ok(oldest)
+  }
+
   /// Takes the exclusive lock on `awake`, waiting while another holds it:
   /// the agent is awake until the returned file is dropped or the process ends,
   /// and then the system releases the lock, so it never goes stale.
@@ -241,6 +256,23 @@ impl Inbox {
       .map_err(|e| at(e, &path))?;
     file.lock().map_err(|e| at(e, &path))?;
     Ok(file)
+  }
+
+  /// Takes the lock on `awake` unless another holds it: `None` while the agent is awake.
+  pub fn try_hold_awake(&self) -> io::Result<Option<fs::File>> {
+    self.create()?;
+    let path = self.awake_file();
+    let file = fs::OpenOptions::new()
+      .create(true)
+      .append(true)
+      .mode(0o600)
+      .open(&path)
+      .map_err(|e| at(e, &path))?;
+    match file.try_lock() {
+      Ok(()) => Ok(Some(file)),
+      Err(fs::TryLockError::WouldBlock) => Ok(None),
+      Err(fs::TryLockError::Error(e)) => Err(at(e, &path)),
+    }
   }
 
   /// Whether the agent is awake: whether any open file holds the lock on `awake`, in this process or another.
