@@ -336,7 +336,7 @@ struct Held {
   archived: Option<String>,
 }
 
-async fn login_lasts(db: &mut Db, login: &str) -> Result<bool> {
+pub async fn login_lasts(db: &mut Db, login: &str) -> Result<bool> {
   Ok(
     sqlx::query("SELECT 1 FROM login WHERE id = ? AND (expires IS NULL OR expires > ?)")
       .bind(login)
@@ -367,21 +367,24 @@ pub async fn hold(app: &App, db: &mut Db, p: &Acting, login: &str) -> Result<()>
     ));
   }
   // The holder keeps it until revoked, however long it is quiet: another token of the account
-  // never takes it over, Luis's decision (2026-11-16).
+  // never takes it over, Luis's decision (2026-11-16). One statement, so two logins racing for
+  // a free agent can't both take it.
   let other = agent.holder.as_ref().filter(|holder| *holder != login);
-  if let Some(holder) = other
-    && login_lasts(db, holder).await?
-  {
+  let now = db::now();
+  let taken = sqlx::query(
+    "UPDATE agent SET holder = ?1, seen = ?2 WHERE id = ?3 AND (holder IS NULL OR holder = ?1
+     OR NOT EXISTS (SELECT 1 FROM login WHERE id = agent.holder AND (expires IS NULL OR expires > ?2)))",
+  )
+  .bind(login)
+  .bind(&now)
+  .bind(&p.id)
+  .execute(&mut *db)
+  .await?;
+  if taken.rows_affected() == 0 {
     return Err(Refusal::conflict(
       "Another login holds this agent, which is one mind at a time: it takes it only once that login is revoked.",
     ));
   }
-  sqlx::query("UPDATE agent SET holder = ?, seen = ? WHERE id = ?")
-    .bind(login)
-    .bind(db::now())
-    .bind(&p.id)
-    .execute(db)
-    .await?;
   if other.is_some() {
     end(
       app,

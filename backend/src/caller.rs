@@ -137,15 +137,23 @@ async fn caller_of(app: &App, parts: &Parts, unnamed: bool) -> Result<Option<Cal
     .agent;
   let agent = match (kind, named) {
     (LoginKind::Agent, Some(id)) => {
-      let name: Option<String> =
-        sqlx::query_scalar("SELECT name FROM agent WHERE id = ? AND account = ?")
+      let found: Option<(String, Option<String>)> =
+        sqlx::query_as("SELECT name, holder FROM agent WHERE id = ? AND account = ?")
           .bind(&id)
           .bind(&row.account)
           .fetch_optional(&mut *db)
           .await?;
-      let name = name.ok_or_else(|| {
+      let (name, holder) = found.ok_or_else(|| {
         Refusal::not_found("No such agent of this account: create_agent creates one.")
       })?;
+      // No call acts as an agent another token holds, so none writes under its name.
+      if let Some(holder) = holder.filter(|holder| *holder != row.id)
+        && crate::transport::login_lasts(&mut db, &holder).await?
+      {
+        return Err(Refusal::conflict(
+          "Another login holds this agent, which is one mind at a time: it takes it only once that login is revoked.",
+        ));
+      }
       Some(Named {
         id,
         name: format!("{}/{name}", row.person),

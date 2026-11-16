@@ -369,7 +369,8 @@ pub async fn create_agent(
     )));
   }
   let now = db::now();
-  let holder = (caller.kind != vibetogether_protocol::LoginKind::Browser).then_some(&caller.login);
+  // Held by the token that made it, where an agent token did; else free for the first to act as it.
+  let holder = (caller.kind == LoginKind::Agent).then_some(&caller.login);
   let mut id = new_agent_id();
   while db::count(&mut db, "SELECT count(*) FROM agent WHERE id = ?", &[&id]).await? > 0 {
     id = new_agent_id();

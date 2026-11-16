@@ -416,6 +416,7 @@ async fn an_agent_is_held_by_one_login_at_a_time() {
     .unwrap();
   assert_eq!(status(server.join(&w.session.id).await), 409);
   assert_eq!(status(server.archive_agent(&id(&codex)).await), 409);
+  assert_eq!(status(server.me().await), 409);
   assert_eq!(status(server.rename_agent(&id(&codex), "taken").await), 409);
   // Once its holder is revoked, another login of the person takes it.
   let holder = codex
