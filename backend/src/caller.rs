@@ -137,15 +137,20 @@ async fn caller_of(app: &App, parts: &Parts, unnamed: bool) -> Result<Option<Cal
     .agent;
   let agent = match (kind, named) {
     (LoginKind::Agent, Some(id)) => {
-      let found: Option<(String, Option<String>)> =
-        sqlx::query_as("SELECT name, holder FROM agent WHERE id = ? AND account = ?")
+      let found: Option<(String, Option<String>, Option<String>)> =
+        sqlx::query_as("SELECT name, holder, archived FROM agent WHERE id = ? AND account = ?")
           .bind(&id)
           .bind(&row.account)
           .fetch_optional(&mut *db)
           .await?;
-      let (name, holder) = found.ok_or_else(|| {
+      let (name, holder, archived) = found.ok_or_else(|| {
         Refusal::not_found("No such agent of this account: create_agent creates one.")
       })?;
+      if archived.is_some() {
+        return Err(Refusal::forbidden(
+          "This agent is archived: it acts no more.",
+        ));
+      }
       // No call acts as an agent another token holds, so none writes under its name.
       if let Some(holder) = holder.filter(|holder| *holder != row.id)
         && crate::transport::login_lasts(&mut db, &holder).await?
