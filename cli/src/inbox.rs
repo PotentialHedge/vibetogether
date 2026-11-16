@@ -215,7 +215,7 @@ async fn receive(inbox: &Inbox, client: &Client) -> Result<(), Failure> {
     } else {
       State::Asleep
     };
-    let dnd = inbox.dnd()?;
+    let dnd = settled(inbox.dnd(), false);
     let issue = match &out {
       Some((_, read, held, held_dnd)) => (*read, *held, *held_dnd) != (stream.read, state, dnd),
       None => Instant::now() >= next,
@@ -244,15 +244,18 @@ fn accept(inbox: &Inbox, client: &Client, stream: &mut Stream, answer: Received)
   for item in &answer.items {
     let (content, ext) = render(item, client.server());
     let path = inbox.deliver(content.as_bytes(), &item.entry.from, &ext)?;
-    ring |= inbox.rings(
-      &[
-        ("from", &item.entry.from),
-        ("reach", reach_name(item.reach)),
-        ("session", &item.session.name),
-        ("session", &item.session.id),
-      ],
+    ring |= settled(
+      inbox.rings(
+        &[
+          ("from", &item.entry.from),
+          ("reach", reach_name(item.reach)),
+          ("session", &item.session.name),
+          ("session", &item.session.id),
+        ],
+        item.wakes(),
+      ),
       item.wakes(),
-    )?;
+    );
     stream
       .pending
       .insert(item.n, path.file_name().unwrap_or_default().to_owned());
@@ -262,6 +265,15 @@ fn accept(inbox: &Inbox, client: &Client, stream: &mut Stream, answer: Received)
     inbox.ring()?;
   }
   Ok(())
+}
+
+/// What the agent's do-not-disturb settings decide, or, where they can't be read, such as for a
+/// typo, `otherwise`, with why on stderr: a broken rule never stops the delivery.
+fn settled(decided: io::Result<bool>, otherwise: bool) -> bool {
+  decided.unwrap_or_else(|error| {
+    eprintln!("vibetogether: do not disturb ignored: {error}");
+    otherwise
+  })
 }
 
 /// Moves the read position over every pending item, oldest first, that is no longer `untaken`,
