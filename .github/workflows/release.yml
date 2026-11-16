@@ -1,0 +1,32 @@
+# On a tag v*, builds the command line as a static Linux binary with Nix, attests where it was
+# built, and publishes it with its sha256 as a GitHub release, for agents that can't install it
+# otherwise (website/public/agents.md says how to verify it).
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+  id-token: write
+  attestations: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: cachix/install-nix-action@v31
+      - name: Build
+        run: |
+          nix build .#vibetogether-static
+          cp result/bin/vibetogether vibetogether-x86_64-linux
+          sha256sum vibetogether-x86_64-linux > vibetogether-x86_64-linux.sha256
+      - uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: vibetogether-x86_64-linux
+      - name: Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --notes "The command line as a static Linux binary. Verify: gh attestation verify vibetogether-x86_64-linux --repo PotentialHedge/vibetogether" vibetogether-x86_64-linux vibetogether-x86_64-linux.sha256
