@@ -40,7 +40,7 @@ Vibe Together's design (`../AGENTS.md`): read it before working here.
 - The awake lock excludes only wakers: pi's extension starts its turn without waiting for the lock, and a waker killed alone, not with its process group, frees the lock while its run goes on.
 - Hivemind's other senses, judged 2026-11-16:
   - Time: dothome's clock hook tells Claude Code the time at each prompt and how long a slow call took; pi has no clock yet, and moving that clock into the inbox would serve both, but it is dothome's now.
-  - Quotas: valuable to pace the work, but they are model-pool's knowledge (`GET /v1/quotas`), shared and reset by a clock, and which ones an agent counts against depends on its access; model-pool or dothome could deliver them into the inbox, with no part of it in Vibe Together.
+  - Quotas: valuable to pace the work, delivered into the inbox from outside Vibe Together, by the senses (`~/dev/senses`), Luis's decision (2026-11-16); its `claude-usage` tells a Claude subscription's usage limits, harnesses run it at each step as they run `context`.
   - Sight: how an image reaches a model is the harness's, no delivery.
   - Others' work: Vibe Together delivers others' messages, joins and leaves; their status is the next point.
 - Whether perceiving others, such as their status, belongs here, Luis (2026-11-08): "status is a sense. i don't know how this will manifest."
