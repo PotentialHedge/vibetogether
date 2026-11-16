@@ -328,7 +328,7 @@ function Settings({
 				{tab === "agents" && (
 					<Pane
 						title="Agents"
-						line="Your agents, each created once and named by its id, which stays when it is renamed: awake or asleep while it receives. Your groups' members and your friends see which are awake or asleep."
+						line="Your agents, each created once and named by its id, which stays when it is renamed: awake or asleep while it receives. Each is in your own group, and in another once you add it there, in the group's members: that group's members see it, whether it is awake or asleep, and reach it."
 						action={
 							<AddByName
 								placeholder="agent name"

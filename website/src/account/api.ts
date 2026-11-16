@@ -11,6 +11,7 @@ import init, {
 	Client,
 	type Friend,
 	type Group,
+	type GroupAgent,
 	type Login,
 	type Overview,
 	type Project,
@@ -25,6 +26,7 @@ export type {
 	Agent,
 	Friend,
 	Group,
+	GroupAgent,
 	Login,
 	Project,
 	Reachable,
@@ -57,10 +59,13 @@ export type Seen = {
 	dms: Session[];
 	friends: Friend[];
 	reachable: Reachable[];
+	/** The person's agents that are not archived. */
+	agents: Agent[];
 };
 
 function seen(overview: Overview): Seen {
-	const { account, groups, dms, friends, reachable, version } = overview;
+	const { account, groups, dms, friends, reachable, agents, version } =
+		overview;
 	return {
 		version,
 		me: account,
@@ -73,6 +78,7 @@ function seen(overview: Overview): Seen {
 		dms,
 		friends,
 		reachable,
+		agents,
 	};
 }
 
@@ -144,18 +150,36 @@ function mock(): Api {
 		displayName: "Luis Wirth",
 		image: "https://avatars.githubusercontent.com/luiswirth",
 	};
+	const claude: GroupAgent = {
+		id: "a_k3x9q2mf",
+		name: "luiswirth/claude",
+		presence: "awake",
+	};
+	const codex: GroupAgent = {
+		id: "a_p8w1n5vb",
+		name: "luiswirth/codex",
+		presence: "offline",
+	};
 	let groups: Group[] = [
 		{
 			id: "g_0",
 			name: "luiswirth",
 			own: true,
 			members: ["luiswirth"],
+			agents: [claude, codex],
 		},
 		{
 			id: "g_1",
 			name: "Potential Hedge",
 			own: false,
 			members: ["luiswirth", "benarmstrong", "tristangabl"],
+			agents: [
+				{ id: "a_7tq2wz8c", name: "benarmstrong/claude", presence: "asleep" },
+				{ id: "a_q9v4k1zs", name: "benarmstrong/review", presence: "offline" },
+				{ id: "a_n2c8h6ty", name: "benarmstrong/old", presence: "archived" },
+				claude,
+				{ id: "a_m4p0d3xr", name: "tristangabl/codex", presence: "awake" },
+			],
 		},
 	];
 	const named = (id: string) => {
@@ -302,6 +326,7 @@ function mock(): Api {
 							})),
 						friends,
 						reachable,
+						agents: agents.filter((agent) => agent.presence !== "archived"),
 					})
 				: new Promise<Seen>((_, reject) =>
 						signal?.addEventListener("abort", () =>
@@ -336,6 +361,7 @@ function mock(): Api {
 				name,
 				own: false,
 				members: [me.name],
+				agents: [],
 			};
 			groups = [...groups, group];
 			sessions = [...sessions, general(group.id)];
@@ -347,10 +373,19 @@ function mock(): Api {
 			sessions = sessions.filter((session) => session.group?.id !== id);
 		},
 		addMember: async (id, name) => {
+			const agent = agents.find((a) => a.name === name);
 			groups = groups.map((group) =>
-				group.id === id
-					? { ...group, members: [...group.members, name] }
-					: group,
+				group.id !== id
+					? group
+					: agent
+						? {
+								...group,
+								agents: [
+									...group.agents,
+									{ id: agent.id, name, presence: agent.presence },
+								],
+							}
+						: { ...group, members: [...group.members, name] },
 			);
 			return groups.find((group) => group.id === id) as Group;
 		},
@@ -358,7 +393,13 @@ function mock(): Api {
 			groups = groups
 				.map((group) =>
 					group.id === id
-						? { ...group, members: group.members.filter((m) => m !== name) }
+						? {
+								...group,
+								members: group.members.filter((m) => m !== name),
+								agents: group.agents.filter(
+									(a) => a.name !== name && !a.name.startsWith(`${name}/`),
+								),
+							}
 						: group,
 				)
 				.filter((group) => group.id !== id || name !== me.name);

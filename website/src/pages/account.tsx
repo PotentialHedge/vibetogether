@@ -5,7 +5,7 @@
 
 import { ArrowLeft, MessagesSquare, X } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
-import { api, demo, type Seen, signedOut } from "@/account/api";
+import { api, demo, type Group, type Seen, signedOut } from "@/account/api";
 import { showSession } from "@/account/live";
 import { useActions, useReloadOnChange } from "@/account/parts";
 import {
@@ -58,17 +58,15 @@ function go(place: Place) {
 const LAST = "vibetogether last session";
 
 function App({ state, reload }: { state: State; reload: () => Promise<void> }) {
-	const { me, groups, projects, sessions, friends, dms, reachable } = state;
-	/** Whom a mention in a session can name: the people who see it, and of
-	 * their agents the awake or asleep ones. */
-	const mentionable = (people: string[]) => [
+	const { me, groups, projects, sessions, friends, dms, reachable, agents } =
+		state;
+	/** Whom a mention in a session of `group` can name: its people, and of its
+	 * agents the awake or asleep ones; a DM holds its two people alone. */
+	const mentionable = (group: Group | undefined, people: string[]) => [
 		...people,
-		...reachable
-			.map(({ name }) => name)
-			.filter(
-				(name) =>
-					name.includes("/") && people.includes(name.split("/")[0] as string),
-			),
+		...(group?.agents ?? [])
+			.filter(({ presence }) => presence === "awake" || presence === "asleep")
+			.map(({ name }) => name),
 	];
 	const { problem, act, dismiss } = useActions(reload);
 	const [deletingSession, setDeletingSession] = useState(false);
@@ -168,6 +166,7 @@ function App({ state, reload }: { state: State; reload: () => Promise<void> }) {
 						sessions={sessions}
 						friends={friends}
 						reachable={reachable}
+						agents={agents}
 						current={session?.id}
 						onSession={(id) => open({ session: id })}
 						act={act}
@@ -185,7 +184,7 @@ function App({ state, reload }: { state: State; reload: () => Promise<void> }) {
 					<Transcript
 						key={dm.dm.id}
 						as={me.name}
-						mentionable={mentionable([me.name, dm.friend.name])}
+						mentionable={mentionable(undefined, [me.name, dm.friend.name])}
 						session={{
 							id: dm.dm.id,
 							name: dm.friend.displayName || dm.friend.name,
@@ -201,17 +200,15 @@ function App({ state, reload }: { state: State; reload: () => Promise<void> }) {
 								<ArrowLeft />
 							</Button>
 						}
-						actions={<CopySessionPrompt session={dm.dm} />}
 					/>
 				) : session ? (
 					<Transcript
 						key={session.id}
 						as={me.name}
-						mentionable={mentionable(
-							groups.find((g) => g.id === session.group?.id)?.members ?? [
-								me.name,
-							],
-						)}
+						mentionable={(() => {
+							const group = groups.find((g) => g.id === session.group?.id);
+							return mentionable(group, group?.members ?? [me.name]);
+						})()}
 						session={session}
 						back={
 							<Button

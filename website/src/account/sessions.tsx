@@ -15,10 +15,12 @@ import {
 import { type ReactNode, useEffect, useState } from "react";
 import {
 	type Account,
+	type Agent,
 	api,
 	demo,
 	type Friend,
 	type Group,
+	type GroupAgent,
 	type Project,
 	type Reachable,
 	type Session,
@@ -729,12 +731,88 @@ function ProjectItem({
 	);
 }
 
-/** The group's people, all equal, and adding a friend to it. */
+/** Shown on hovering its member or agent where there is hover, always on a
+ * touch screen; spelled out, since Tailwind finds only whole class names. */
+const onHover = {
+	member:
+		"[@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover/member:opacity-100 [@media(hover:hover)]:focus-visible:opacity-100",
+	agent:
+		"[@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover/agent:opacity-100 [@media(hover:hover)]:focus-visible:opacity-100",
+};
+
+/** A person's agents in the group, under them: the awake or asleep ones, and
+ * the offline and archived ones collapsed. Any member removes one. */
+function MemberAgents({
+	person,
+	group,
+	reachable,
+	act,
+}: {
+	person: string;
+	group: Group;
+	reachable: Reachable[];
+	act: Act;
+}) {
+	const [open, setOpen] = useState(false);
+	const theirs = group.agents.filter((agent) =>
+		agent.name.startsWith(`${person}/`),
+	);
+	const live = (agent: GroupAgent) =>
+		agent.presence === "awake" || agent.presence === "asleep";
+	const hidden = theirs.filter((agent) => !live(agent)).length;
+	return (
+		<>
+			{theirs
+				.filter((agent) => open || live(agent))
+				.map((agent) => (
+					<div
+						key={agent.id}
+						className="group/agent flex h-6 items-center gap-2 pr-2 pl-9 text-xs text-muted-foreground"
+						title={`${agent.name} is ${agent.presence}`}
+					>
+						<Presence
+							presence={agent.presence}
+							dnd={reachable.find((r) => r.id === agent.id)?.dnd}
+							className="size-2"
+						/>
+						<span className="min-w-0 flex-1 truncate font-mono">
+							{agent.name.slice(person.length + 1)}
+						</span>
+						{!group.own && (
+							<Button
+								variant="ghost"
+								size="icon-xs"
+								aria-label={`Remove ${agent.name}`}
+								className={cn("size-5", onHover.agent)}
+								onClick={act(() => api.removeMember(group.id, agent.name))}
+							>
+								<X />
+							</Button>
+						)}
+					</div>
+				))}
+			{hidden > 0 && (
+				<button
+					type="button"
+					className="flex h-6 items-center pr-2 pl-9 text-left text-xs text-muted-foreground/70 hover:text-muted-foreground"
+					aria-expanded={open}
+					onClick={() => setOpen(!open)}
+				>
+					{open ? "hide offline" : `${hidden} offline`}
+				</button>
+			)}
+		</>
+	);
+}
+
+/** The group's people, all equal, each with their agents in it, and adding a
+ * friend or one of the person's own agents to it. */
 function Members({
 	me,
 	group,
 	friends,
 	reachable,
+	agents,
 	act,
 }: {
 	me: Account;
@@ -742,11 +820,16 @@ function Members({
 	friends: Friend[];
 	/** Everyone awake or asleep the person sees. */
 	reachable: Reachable[];
+	/** The person's agents that are not archived. */
+	agents: Agent[];
 	act: Act;
 }) {
 	const addable = friends.filter(
 		(friend) =>
 			friend.state === "friends" && !group.members.includes(friend.name),
+	);
+	const outside = agents.filter(
+		(agent) => !group.agents.some((member) => member.id === agent.id),
 	);
 	const people = group.members;
 	const face = (name: string) =>
@@ -769,35 +852,57 @@ function Members({
 									variant="ghost"
 									size="icon-xs"
 									aria-label={`Remove ${name}`}
-									// Shown on hover where there is one, always on a touch screen.
-									className="[@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover/member:opacity-100 [@media(hover:hover)]:focus-visible:opacity-100"
+									className={onHover.member}
 									onClick={act(() => api.removeMember(group.id, name))}
 								>
 									<X />
 								</Button>
 							)}
 						</div>
-						{reachable
-							.filter((agent) => agent.name.startsWith(`${name}/`))
-							.map((agent) => (
-								<div
-									key={agent.name}
-									className="flex h-6 items-center gap-2 pr-2 pl-9 text-xs text-muted-foreground"
-									title={`${agent.name} is ${agent.presence}`}
-								>
-									<Presence
-										presence={agent.presence}
-										dnd={agent.dnd}
-										className="size-2"
-									/>
-									<span className="min-w-0 truncate font-mono">
-										{agent.name.slice(name.length + 1)}
-									</span>
-								</div>
-							))}
+						<MemberAgents
+							person={name}
+							group={group}
+							reachable={reachable}
+							act={act}
+						/>
 					</li>
 				))}
 			</ul>
+			{!group.own && outside.length > 0 && (
+				<DropdownMenu>
+					<DropdownMenuTrigger
+						render={
+							<Button
+								variant="ghost"
+								size="sm"
+								className="justify-start text-muted-foreground"
+							/>
+						}
+					>
+						<Plus />
+						add your agent
+					</DropdownMenuTrigger>
+					<DropdownMenuContent side="top" align="start" className="w-56">
+						<DropdownMenuGroup>
+							<DropdownMenuLabel className="text-xs font-normal text-muted-foreground">
+								Lets it see and act in this group, and its members see and reach
+								it.
+							</DropdownMenuLabel>
+							{outside.map((agent) => (
+								<DropdownMenuItem
+									key={agent.id}
+									onClick={act(() => api.addMember(group.id, agent.name))}
+								>
+									<Presence presence={agent.presence} className="size-2" />
+									<span className="font-mono">
+										{agent.name.slice(me.name.length + 1)}
+									</span>
+								</DropdownMenuItem>
+							))}
+						</DropdownMenuGroup>
+					</DropdownMenuContent>
+				</DropdownMenu>
+			)}
 			{!group.own && (
 				<DropdownMenu>
 					<DropdownMenuTrigger
@@ -847,6 +952,7 @@ export function Sidebar({
 	sessions,
 	friends,
 	reachable,
+	agents,
 	current,
 	onSession,
 	act,
@@ -859,6 +965,8 @@ export function Sidebar({
 	friends: Friend[];
 	/** Everyone awake or asleep the person sees. */
 	reachable: Reachable[];
+	/** The person's agents that are not archived. */
+	agents: Agent[];
 	current: string | undefined;
 	onSession: (session: string) => void;
 	act: Act;
@@ -1019,6 +1127,7 @@ export function Sidebar({
 				group={group}
 				friends={friends}
 				reachable={reachable}
+				agents={agents}
 				act={act}
 			/>
 		</div>

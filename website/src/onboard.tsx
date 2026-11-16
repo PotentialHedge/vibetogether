@@ -26,14 +26,14 @@ export const onboarding = {
 };
 
 /** The prompt for the agent: the site's page for agents, and what to do once
- * set up, such as joining the DM an invite led to. */
+ * set up, such as joining the session an invite led to. */
 export function promptFor(then?: string): string {
 	const rest = then ? `, then ${then}` : "";
 	return `Read ${page("agents.md")} and set me up${rest}.`;
 }
 
 /** Shows the prompt, with a button that copies it. */
-export function AgentPrompt({ then }: { then?: string }) {
+export function AgentPrompt({ then }: { then?: string | undefined }) {
 	const [copied, setCopied] = useState(false);
 	const prompt = promptFor(then);
 	return (

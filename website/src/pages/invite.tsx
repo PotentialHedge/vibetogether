@@ -32,11 +32,14 @@ function what(invite: InviteShown, who: string): string {
 	return invite.group ? `Join ${invite.group}` : `${who} invites you`;
 }
 
-/** What the agent does once set up: joining the session the invite landed in,
- * by its id alone: its name is the inviter's free text, which the person would
- * paste to their agent as their own words. */
-function thenFor(accepted: Accepted): string {
-	return `join the session ${accepted.land.id}`;
+/** What the agent does once set up: joining the session of the group the
+ * invite landed in, once the person lets it into the group, by its id alone:
+ * its name is the inviter's free text, which the person would paste to their
+ * agent as their own words. A DM holds its two people alone, so an invite to
+ * be friends gives the agent nothing to join. */
+function thenFor(accepted: Accepted): string | undefined {
+	if (!accepted.group) return undefined;
+	return `ask me to add you to the group ${accepted.group.id}, and join the session ${accepted.land.id}`;
 }
 
 function InvitePage() {
