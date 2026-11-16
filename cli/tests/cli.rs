@@ -26,14 +26,22 @@ async fn exit_codes_say_what_went_wrong() {
     run(&setup, &["session", ".."], "").await.status.code(),
     Some(2)
   );
+  // Renaming and deleting tell what an id names by its prefix; an agent is archived instead.
+  let unknown = run(&setup, &["rename", "x_1", "y"], "").await;
+  assert_eq!(unknown.status.code(), Some(2));
+  assert!(String::from_utf8_lossy(&unknown.stderr).contains("s_"));
+  assert_eq!(
+    run(&setup, &["delete", "a_1"], "").await.status.code(),
+    Some(2)
+  );
   // Refused: no token, and no agent named with an agent token.
-  let anonymous = command(&setup.home, &setup.url, None, &["me"])
+  let anonymous = command(&setup.home, &setup.url, None, &["overview"])
     .output()
     .await
     .unwrap();
   assert_eq!(anonymous.status.code(), Some(3));
   assert!(String::from_utf8_lossy(&anonymous.stderr).contains("Sign in"));
-  let unnamed = command(&setup.home, &setup.url, Some(&setup.token), &["me"])
+  let unnamed = command(&setup.home, &setup.url, Some(&setup.token), &["overview"])
     .output()
     .await
     .unwrap();
@@ -43,15 +51,15 @@ async fn exit_codes_say_what_went_wrong() {
     &setup.home,
     "http://127.0.0.1:9",
     Some(&setup.token),
-    &["me"],
+    &["overview"],
   )
   .output()
   .await
   .unwrap();
   assert_eq!(closed.status.code(), Some(4));
-  let me = run(&setup, &["me"], "").await;
+  let me = run(&setup, &["overview"], "").await;
   assert_eq!(me.status.code(), Some(0));
-  assert_eq!(json(&me)["name"], "luis");
+  assert_eq!(json(&me)["account"]["name"], "luis");
 }
 
 #[tokio::test]
@@ -62,7 +70,7 @@ async fn a_token_goes_only_to_its_server() {
     format!("{}\nhttps://elsewhere.example", setup.token),
     setup.token.clone(),
   ] {
-    let refused = command(&setup.home, &setup.url, None, &["me"])
+    let refused = command(&setup.home, &setup.url, None, &["overview"])
       .env("VIBETOGETHER_TOKEN", stored)
       .env("VIBETOGETHER_AGENT", &setup.agent)
       .output()
@@ -72,7 +80,7 @@ async fn a_token_goes_only_to_its_server() {
     assert!(String::from_utf8_lossy(&refused.stderr).contains("goes to no other server"));
   }
   // A trailing slash is the same server.
-  let slash = command(&setup.home, &format!("{}/", setup.url), None, &["me"])
+  let slash = command(&setup.home, &format!("{}/", setup.url), None, &["overview"])
     .env(
       "VIBETOGETHER_TOKEN",
       format!("{}\n{}", setup.token, setup.url),
@@ -166,6 +174,24 @@ async fn an_agent_sends_and_receives() {
     .clone();
   assert_eq!(said["text"], "@luis Hi, `$you`.");
   assert_eq!(said["type"], "text/markdown; charset=utf-8; ping=\"luis\"");
+
+  // A session shows with who is in it, and renames by its id, as an agent does.
+  let shown = json(&run(&setup, &["session", &general], "").await);
+  assert_eq!(shown["name"], "general");
+  assert!(shown["participants"]["luis/scout"].is_object());
+  assert_eq!(
+    run(
+      &setup,
+      &["--agent", &agent, "rename", &agent, "scout-2"],
+      ""
+    )
+    .await
+    .status
+    .code(),
+    Some(0)
+  );
+  let overview = json(&run(&setup, &["overview"], "").await);
+  assert_eq!(overview["agents"][0]["name"], "luis/scout-2");
 }
 
 #[tokio::test]

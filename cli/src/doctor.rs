@@ -1,5 +1,5 @@
 //! `doctor`: whether this machine's setup works, end to end, each check with what to do
-//! where it fails.
+//! where it fails, and what of Vibe Together's is on the machine.
 
 use std::path::{Path, PathBuf};
 
@@ -44,8 +44,28 @@ fn mode_is_private(file: &Path) -> bool {
   std::fs::metadata(file).is_ok_and(|m| m.permissions().mode() & 0o077 == 0)
 }
 
-/// Runs every check, in order, each only where the ones before it hold.
+/// Runs every check, then lists what is Vibe Together's on this machine.
 pub async fn run(client: &Client, source: Source, inbox: Option<&Path>) -> Vec<Check> {
+  let mut files: Vec<PathBuf> = std::env::current_exe().into_iter().collect();
+  if let Source::File(file) = &source {
+    files.push(file.clone());
+  }
+  files.extend(inbox.filter(|root| root.exists()).map(Path::to_path_buf));
+  let mut checks = checks(client, source, inbox).await;
+  let files: Vec<String> = files.iter().map(|f| f.display().to_string()).collect();
+  checks.push(check(
+    "footprint",
+    true,
+    format!(
+      "Vibe Together's files here: {}. Deleting them removes it; anything your harness's setup added, such as a skill or hooks, is in that setup.",
+      files.join(", ")
+    ),
+  ));
+  checks
+}
+
+/// Runs every check, in order, each only where the ones before it hold.
+async fn checks(client: &Client, source: Source, inbox: Option<&Path>) -> Vec<Check> {
   let mut checks = vec![check(
     "version",
     true,

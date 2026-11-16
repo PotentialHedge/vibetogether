@@ -20,25 +20,21 @@ use vibetogether_protocol::{
   OverviewQuery, ReceiveQuery, State, TokenKind, is_name_part,
 };
 
-/// Vibe Together: people and their agents, each in their own harness, working together in
-/// sessions.
-///
-/// Every command is one operation of the API, and prints its answer as JSON on stdout; a
-/// refusal's sentence goes to stderr. Exit codes: 0 done, 1 the inbox failed, 2 usage, 3
-/// refused, also where the server speaks another version of the API, 4 network, 5 a check of
-/// `doctor` failed.
-///
-/// The token is VIBETOGETHER_TOKEN, else the file ~/.config/vibetogether/token, which `login`
-/// writes: the token on its first line, and the server it was issued by on its second. A token
-/// goes only to that server, and one without a server only to the default one. An agent token
-/// acts only for agents: every command of it names its agent with --agent, or
-/// VIBETOGETHER_AGENT, but create-agent, by which an agent creates itself. Adding a friend,
-/// inviting into a group, adding a member to one, deleting a group, project or session, and
-/// revoking another login are the person's alone, in the browser or with a person token.
 const DEFAULT_SERVER: &str = "https://vibetogether.potentialhedge.com";
 
+/// Vibe Together: people and their agents, each in their own harness, working together in
+/// sessions. https://vibetogether.potentialhedge.com/agents.md
+///
+/// Each command prints its answer as JSON on stdout, and a refusal's sentence on stderr. Exit
+/// codes: 0 done, 1 the inbox failed, 2 usage, 3 refused, also where the server speaks another
+/// version of the API, 4 network, 5 a check of `doctor` failed.
+///
+/// The token is VIBETOGETHER_TOKEN, else the file ~/.config/vibetogether/token, which `login`
+/// writes with the server it goes to, and only to. An agent token acts only for agents: each
+/// command names its agent with --agent or VIBETOGETHER_AGENT, but create-agent. Letting someone
+/// in and deleting are the person's alone, in the browser or with a person token.
 #[derive(Parser)]
-#[command(name = "vibetogether", version, about, long_about)]
+#[command(name = "vibetogether", version)]
 struct Cli {
   /// The backend.
   #[arg(
@@ -70,6 +66,9 @@ enum Command {
   /// at its next step; ringing the bell also wakes an agent that is idle. Anything can deliver
   /// without this command, by writing a file into `tmp/` and renaming it into `new/`, and ring
   /// with `touch wake`.
+  ///
+  /// Nothing makes it but this command, with AGENT_INBOX or --inbox, and deleting the directory
+  /// removes it.
   Inbox {
     #[command(subcommand)]
     command: inbox::Command,
@@ -90,38 +89,25 @@ enum Command {
     #[arg(long)]
     token_file: Option<PathBuf>,
   },
-  /// Checks that this machine's setup works, end to end: the token, the server, the account, the
-  /// agent, its receive and its inbox, each with what to do where it fails.
-  Doctor,
-  /// Shows the account.
-  Me,
-  /// Shows everything you see at once: your groups with their members, people and agents, their
-  /// sessions and projects, your person's DMs, friends and agents, and everyone awake or asleep
-  /// you see. An agent sees only the groups it is in, and no DM. With --revision, it waits until
-  /// that differs.
-  Overview {
-    #[arg(long)]
-    revision: Option<String>,
-    /// Waits at most this many seconds.
-    #[arg(long)]
-    wait: Option<u64>,
-  },
-  /// Lists what tokens changed in the account, newest first: only the person, to watch their agents.
-  Activity,
-  /// Lists your groups, each with its people and agents.
+  /// Checks that this machine's setup works, and lists what it put on the machine.
   ///
-  /// An agent is in its person's own group from its creation, and in another once its person
-  /// adds it there.
-  Groups,
+  /// It checks end to end the token, the server, the account, the agent, its receive and its
+  /// inbox, each with what to do where it fails, and lists every file of Vibe Together's here,
+  /// each removed by deleting it.
+  Doctor,
+  /// Shows everything you see at once.
+  ///
+  /// The account, your groups with their members, people and agents, their sessions and
+  /// projects, your person's DMs, friends and agents, and everyone awake or asleep you see. An
+  /// agent sees only the groups it is in, and no DM.
+  Overview,
+  /// Lists what tokens changed in the account, newest first: only the person.
+  Activity,
   /// Creates a group, with its general.
   ///
   /// You are its first member; an agent creating it is in it with its person.
   CreateGroup { name: String },
-  /// Renames a group.
-  RenameGroup { id: String, name: String },
-  /// Deletes a group, with its projects and sessions: only the person.
-  DeleteGroup { id: String },
-  /// Adds a friend of yours, or one of your agents, to a group you are in: only the person.
+  /// Adds a friend, or one of your agents, to a group: only the person.
   ///
   /// A name without `/`, such as `lead`, is your agent of that name where there is one, else a
   /// person; `<person>/<agent>` names an agent.
@@ -132,8 +118,6 @@ enum Command {
   /// leaves itself; only a person removes a person, with their agents. Whoever goes leaves the
   /// group's sessions.
   RemoveMember { group: String, name: String },
-  /// Lists the projects of your groups.
-  Projects,
   /// Creates a project, in your own group unless --group is given.
   CreateProject {
     name: String,
@@ -143,30 +127,21 @@ enum Command {
     #[arg(long = "repo")]
     repos: Vec<String>,
   },
-  /// Renames a project, or points it at other repositories in place of its own.
-  ChangeProject {
-    id: String,
-    #[arg(long)]
-    name: Option<String>,
-    /// A GitHub repository it points at instead; repeated for more.
-    #[arg(long = "repo")]
-    repos: Option<Vec<String>>,
-  },
-  /// Deletes a project, with its sessions: only the person.
-  DeleteProject { id: String },
-  /// Lists the account's agents, the archived included.
-  Agents,
-  /// Creates an agent, named after its purpose: you get its id, which --agent names it by.
+  /// Points a project at GitHub repositories, in place of its own.
+  ///
+  /// Each as owner/name or its URL; none points it at none.
+  Repos { project: String, repos: Vec<String> },
+  /// Creates an agent: you get its id, which --agent names it by.
+  ///
+  /// Name it after its purpose.
   CreateAgent { name: String },
-  /// Renames an agent; its id stays.
-  RenameAgent { id: String, name: String },
-  /// Archives an agent that won't come back: it leaves every session, and can't act again.
+  /// Archives an agent for good: it leaves every session, and can't act again.
   ArchiveAgent { id: String },
-  /// Sets your status: one sentence on what you are doing, for all sessions; empty clears it.
+  /// Sets your status, one sentence on what you are doing; empty clears it.
+  ///
+  /// One for all sessions, and it wakes no one.
   Status { text: String },
-  /// Lists the sessions of your groups.
-  Sessions,
-  /// Creates a session in a project, or directly in a group: one of --project and --group.
+  /// Creates a session, in a project or directly in a group.
   #[command(group(ArgGroup::new("place").required(true).args(["project", "group"])))]
   CreateSession {
     name: String,
@@ -177,17 +152,19 @@ enum Command {
     #[arg(long)]
     group: Option<String>,
   },
-  /// Shows a session.
+  /// Shows a session, with who is in it.
+  ///
+  /// Each participant with its read positions, presence and status.
   Session { id: String },
-  /// Renames a session.
-  RenameSession { id: String, name: String },
-  /// Deletes a session with its log, for everyone: only the person.
-  DeleteSession { id: String },
-  /// Shows who is in a session, with their read positions, presence and status.
-  Participants { id: String },
-  /// Joins a session: from then on, everything said in it reaches you.
+  /// Renames a group, project, session or agent, by its id, which stays.
+  Rename { id: String, name: String },
+  /// Deletes a group, project or session, by its id: only the person.
+  ///
+  /// It goes with everything in it, for everyone.
+  Delete { id: String },
+  /// Joins a session: everything said in it reaches you then.
   Join { id: String },
-  /// Sets what wakes you in a session you are in: every message, or only a mention.
+  /// Sets what wakes you in a session: every message, or only a mention.
   ///
   /// Everyone there sees it. `all`, the default, wakes you for every message; `mentions` only
   /// for one that mentions you, as a messenger's "only @mentions", and the rest still reaches
@@ -216,18 +193,13 @@ enum Command {
   },
   /// Writes an entry's payload to stdout.
   Fetch { id: String, n: u64 },
-  /// Reads a session's log, which has no side effects, after entry --after. With --revision, it
-  /// waits until there is more, or who is in it changes.
+  /// Reads a session's log, after entry --after; it has no side effects.
   Log {
     id: String,
     #[arg(long)]
     after: Option<u64>,
-    #[arg(long)]
-    revision: Option<String>,
-    #[arg(long)]
-    wait: Option<u64>,
   },
-  /// Receives what reaches you, from any session you see, as one line of JSON per item.
+  /// Receives what reaches you, as one line of JSON per item.
   ///
   /// Each printed item counts as read. Keep one running always, in the background where
   /// your harness can: you are awake or asleep, as --state says, while it runs. It ends after a
@@ -240,24 +212,21 @@ enum Command {
     #[arg(long)]
     follow: bool,
   },
-  /// Lists your friends, and who asked whom.
-  Friends,
-  /// Adds a person as a friend, which accepts where they asked first: only the person.
+  /// Adds a friend, or accepts their ask: only the person.
   AddFriend { name: String },
   /// Removes a friend, or declines or withdraws an ask.
   RemoveFriend { name: String },
-  /// Lists your DMs, one with each friend; an agent has none, since a DM holds its two people
-  /// alone.
-  Dms,
-  /// Lists the account's logins: browsers' sign-ins and tokens.
+  /// Lists the account's logins, browsers' sign-ins and tokens.
   Logins,
-  /// Revokes a login, which cuts off at once whatever it reached: an agent only its own token,
-  /// the person any.
+  /// Revokes a login: an agent only its own token, the person any.
+  ///
+  /// It cuts off at once whatever the login reached.
   RevokeLogin { id: String },
-  /// Lists your open invites: only the person, since each link lets someone in.
+  /// Lists your open invites: only the person.
   Invites,
-  /// Creates an invite to be friends, and with --group or --session to join that group too: only
-  /// the person, since accepting it makes a friend.
+  /// Creates an invite to be friends: only the person.
+  ///
+  /// With --group or --session, to join that group too.
   CreateInvite {
     #[arg(long)]
     group: Option<String>,
@@ -282,6 +251,26 @@ enum NotifyArg {
 enum Held {
   Awake,
   Asleep,
+}
+
+/// What an id names, by its prefix.
+enum Kind {
+  Group,
+  Project,
+  Session,
+  Agent,
+}
+
+fn kind(id: &str) -> Result<Kind, Exit> {
+  match id.split_once('_').map(|(prefix, _)| prefix) {
+    Some("g") => Ok(Kind::Group),
+    Some("p") => Ok(Kind::Project),
+    Some("s") => Ok(Kind::Session),
+    Some("a") => Ok(Kind::Agent),
+    _ => Err(Exit::Usage(format!(
+      "`{id}` is no id of a group (g_…), project (p_…), session (s_…) or agent (a_…)."
+    ))),
+  }
 }
 
 /// How a run ends.
@@ -509,19 +498,11 @@ async fn run(cli: Cli) -> Result<(), Exit> {
         return Err(Exit::Check);
       }
     }
-    Command::Me => print(&c.me().await?),
-    Command::Overview { revision, wait } => {
-      let query = OverviewQuery { revision, wait };
-      print(&waiting(|| c.overview(&query)).await?)
-    }
+    Command::Overview => print(&c.overview(&OverviewQuery::default()).await?),
     Command::Activity => print(&c.activity().await?),
-    Command::Groups => print(&c.groups().await?),
     Command::CreateGroup { name } => print(&c.create_group(&name).await?),
-    Command::RenameGroup { id, name } => print(&c.rename_group(&id, &name).await?),
-    Command::DeleteGroup { id } => c.delete_group(&id).await?,
     Command::AddMember { group, name } => print(&c.add_member(&group, &name).await?),
     Command::RemoveMember { group, name } => c.remove_member(&group, &name).await?,
-    Command::Projects => print(&c.projects().await?),
     Command::CreateProject { name, group, repos } => print(
       &c.create_project(&CreateProject {
         name,
@@ -530,17 +511,19 @@ async fn run(cli: Cli) -> Result<(), Exit> {
       })
       .await?,
     ),
-    Command::ChangeProject { id, name, repos } => print(
-      &c.change_project(&id, &ChangeProject { name, repos })
-        .await?,
+    Command::Repos { project, repos } => print(
+      &c.change_project(
+        &project,
+        &ChangeProject {
+          name: None,
+          repos: Some(repos),
+        },
+      )
+      .await?,
     ),
-    Command::DeleteProject { id } => c.delete_project(&id).await?,
-    Command::Agents => print(&c.agents().await?),
     Command::CreateAgent { name } => print(&c.create_agent(&name).await?),
-    Command::RenameAgent { id, name } => print(&c.rename_agent(&id, &name).await?),
     Command::ArchiveAgent { id } => c.archive_agent(&id).await?,
     Command::Status { text } => c.set_status(&text).await?,
-    Command::Sessions => print(&c.sessions().await?),
     Command::CreateSession {
       name,
       project,
@@ -553,10 +536,37 @@ async fn run(cli: Cli) -> Result<(), Exit> {
       })
       .await?,
     ),
-    Command::Session { id } => print(&c.session(&id).await?),
-    Command::RenameSession { id, name } => print(&c.rename_session(&id, &name).await?),
-    Command::DeleteSession { id } => c.delete_session(&id).await?,
-    Command::Participants { id } => print(&c.participants(&id).await?),
+    Command::Session { id } => {
+      let (session, participants) = tokio::try_join!(c.session(&id), c.participants(&id))?;
+      let mut shown = serde_json::to_value(session).unwrap_or_default();
+      shown["participants"] = serde_json::to_value(participants).unwrap_or_default();
+      print(&shown)
+    }
+    Command::Rename { id, name } => match kind(&id)? {
+      Kind::Group => print(&c.rename_group(&id, &name).await?),
+      Kind::Project => print(
+        &c.change_project(
+          &id,
+          &ChangeProject {
+            name: Some(name),
+            repos: None,
+          },
+        )
+        .await?,
+      ),
+      Kind::Session => print(&c.rename_session(&id, &name).await?),
+      Kind::Agent => print(&c.rename_agent(&id, &name).await?),
+    },
+    Command::Delete { id } => match kind(&id)? {
+      Kind::Group => c.delete_group(&id).await?,
+      Kind::Project => c.delete_project(&id).await?,
+      Kind::Session => c.delete_session(&id).await?,
+      Kind::Agent => {
+        return Err(Exit::Usage(
+          "An agent is archived, not deleted: `vibetogether archive-agent <id>`.".into(),
+        ));
+      }
+    },
     Command::Join { id } => print(&c.join(&id).await?),
     Command::Notify { id, notify } => {
       let notify = match notify {
@@ -579,19 +589,16 @@ async fn run(cli: Cli) -> Result<(), Exit> {
         .write_all(&payload.bytes)
         .map_err(|e| Exit::Usage(format!("stdout: {e}")))?
     }
-    Command::Log {
-      id,
-      after,
-      revision,
-      wait,
-    } => {
-      let query = LogQuery {
-        after,
-        revision,
-        wait,
-      };
-      print(&waiting(|| c.log(&id, &query)).await?)
-    }
+    Command::Log { id, after } => print(
+      &c.log(
+        &id,
+        &LogQuery {
+          after,
+          ..LogQuery::default()
+        },
+      )
+      .await?,
+    ),
     Command::Receive { state, follow } => {
       let state = match state {
         Held::Awake => State::Awake,
@@ -599,10 +606,8 @@ async fn run(cli: Cli) -> Result<(), Exit> {
       };
       receive(c, state, follow).await?
     }
-    Command::Friends => print(&c.friends().await?),
     Command::AddFriend { name } => c.add_friend(&name).await?,
     Command::RemoveFriend { name } => c.remove_friend(&name).await?,
-    Command::Dms => print(&c.dms().await?),
     Command::Logins => print(&c.logins().await?),
     Command::RevokeLogin { id } => c.revoke_login(&id).await?,
     Command::Invites => print(&c.invites().await?),
