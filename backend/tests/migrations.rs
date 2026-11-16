@@ -37,8 +37,9 @@ async fn agents_become_members_of_the_groups_they_worked_in() {
     INSERT INTO agent VALUES ('a_idle', 'u_luis', 'idle', NULL, NULL, NULL, '2026-11-01T00:00:00.000Z');
     INSERT INTO agent VALUES ('a_old', 'u_luis', 'old', NULL, NULL, '2026-11-02T00:00:00.000Z', '2026-11-01T00:00:00.000Z');
     INSERT INTO agent VALUES ('a_left', 'u_luis', 'left', NULL, NULL, NULL, '2026-11-01T00:00:00.000Z');
-    INSERT INTO participant VALUES ('s_build', 'a_lead', 'u_luis', 0, 1, 0, 0, '2026-11-01T00:00:00.000Z', 'all');
+    INSERT INTO participant VALUES ('s_build', 'a_lead', 'u_luis', 1, 1, 0, 0, '2026-11-01T00:00:00.000Z', 'all');
     INSERT INTO participant VALUES ('s_build', 'a_old', 'u_luis', 0, 1, 0, 0, '2026-11-01T00:00:00.000Z', 'all');
+    INSERT INTO participant VALUES ('s_build', 'a_idle', 'u_luis', 0, 1, 0, 0, '2026-11-01T00:00:00.000Z', 'all');
     INSERT INTO participant VALUES ('s_dm', 'a_lead', 'u_luis', 1, 1, 0, 0, '2026-11-01T00:00:00.000Z', 'all');
     INSERT INTO participant VALUES ('s_gone', 'a_left', 'u_luis', 1, 1, 0, 0, '2026-11-01T00:00:00.000Z', 'all');
     "#,
@@ -71,6 +72,13 @@ async fn agents_become_members_of_the_groups_they_worked_in() {
   );
   let inside: bool =
     sqlx::query_scalar("SELECT inside FROM participant WHERE session = 's_dm' AND id = 'a_lead'")
+      .fetch_one(&mut db)
+      .await
+      .unwrap();
+  assert!(!inside);
+  // Luis left the group Left before leaving took his agent out of its sessions: now it is out.
+  let inside: bool =
+    sqlx::query_scalar("SELECT inside FROM participant WHERE session = 's_gone' AND id = 'a_left'")
       .fetch_one(&mut db)
       .await
       .unwrap();

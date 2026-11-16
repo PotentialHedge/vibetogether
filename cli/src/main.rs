@@ -98,7 +98,7 @@ enum Command {
     #[arg(long)]
     wait: Option<u64>,
   },
-  /// Lists what tokens changed in the account, newest first.
+  /// Lists what tokens changed in the account, newest first: only the person, to watch their agents.
   Activity,
   /// Lists your groups, each with its people and agents. An agent is in its person's own group
   /// from its creation, and in another once its person adds it there.
@@ -281,7 +281,7 @@ enum Command {
   RevokeLogin {
     id: String,
   },
-  /// Lists your open invites.
+  /// Lists your open invites: only the person, since each link lets someone in.
   Invites,
   /// Creates an invite to be friends, and with --group or --session to join that group too: only
   /// the person does this, since accepting it makes a friend.

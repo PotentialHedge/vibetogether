@@ -138,7 +138,7 @@ async fn overview_of(app: &App, db: &mut Db, who: &str, me: &str) -> Result<Over
       false => Vec::new(),
     },
     friends: friends_of(db, me).await?,
-    agents: agents_of(app, db, me, false).await?,
+    agents: agents_of(app, db, who, me, false).await?,
     reachable: reachable_seen_by(app, db, who).await?,
     version: String::new(),
   })
@@ -190,6 +190,7 @@ struct ActivityRow {
 /// What the account's tokens changed in it, newest first, at most the last 200, each with the
 /// agent that made it by its name now.
 pub async fn activity(State(app): State<App>, caller: Caller) -> Result<Json<Vec<Activity>>> {
+  caller.as_person()?;
   let rows: Vec<ActivityRow> = sqlx::query_as(
     "SELECT v.login, v.name, CASE WHEN v.agent IS NULL THEN NULL ELSE a.login || '/' || coalesce(ag.name, v.agent) END AS agent,
        v.operation, v.arguments, v.created
@@ -245,7 +246,14 @@ struct AgentRow {
   archived: Option<String>,
 }
 
-async fn agent_json(app: &App, db: &mut Db, login: &str, row: AgentRow) -> Result<Agent> {
+/// An agent as `viewer` sees it, a participant's id: its sessions only where both see them.
+async fn agent_json(
+  app: &App,
+  db: &mut Db,
+  viewer: &str,
+  login: &str,
+  row: AgentRow,
+) -> Result<Agent> {
   let presence = if row.archived.is_some() {
     Presence::Archived
   } else {
@@ -259,7 +267,9 @@ async fn agent_json(app: &App, db: &mut Db, login: &str, row: AgentRow) -> Resul
   .await?;
   let mut listening = Vec::new();
   for id in sessions {
-    if let Some(session) = session_for(db, &id, &row.id).await? {
+    if let Some(session) = session_for(db, &id, &row.id).await?
+      && session_for(db, &id, viewer).await?.is_some()
+    {
       listening.push(Named {
         id,
         name: session.name,
@@ -281,7 +291,13 @@ async fn agent_json(app: &App, db: &mut Db, login: &str, row: AgentRow) -> Resul
 
 /// The account's agents, awake or asleep first, then the ones seen last first, and the archived
 /// last.
-async fn agents_of(app: &App, db: &mut Db, account: &str, archived: bool) -> Result<Vec<Agent>> {
+async fn agents_of(
+  app: &App,
+  db: &mut Db,
+  viewer: &str,
+  account: &str,
+  archived: bool,
+) -> Result<Vec<Agent>> {
   let login: String = sqlx::query_scalar("SELECT login FROM account WHERE id = ?")
     .bind(account)
     .fetch_one(&mut *db)
@@ -296,7 +312,7 @@ async fn agents_of(app: &App, db: &mut Db, account: &str, archived: bool) -> Res
   .await?;
   let mut agents = Vec::new();
   for row in rows {
-    agents.push(agent_json(app, db, &login, row).await?);
+    agents.push(agent_json(app, db, viewer, &login, row).await?);
   }
   agents.sort_by_key(|a| !matches!(a.presence, Presence::Awake | Presence::Asleep));
   Ok(agents)
@@ -412,14 +428,16 @@ pub async fn create_agent(
   let row = agent_of(&mut db, &id, &caller.account).await?;
   Ok((
     StatusCode::CREATED,
-    Json(agent_json(&app, &mut db, &caller.person, row).await?),
+    Json(agent_json(&app, &mut db, caller.who(), &caller.person, row).await?),
   ))
 }
 
 /// The account's agents, the archived included.
 pub async fn agents(State(app): State<App>, caller: Caller) -> Result<Json<Vec<Agent>>> {
   let mut db = app.db.acquire().await?;
-  Ok(Json(agents_of(&app, &mut db, &caller.account, true).await?))
+  Ok(Json(
+    agents_of(&app, &mut db, caller.who(), &caller.account, true).await?,
+  ))
 }
 
 /// Renames an agent, at any time; its id stays.
@@ -464,7 +482,9 @@ pub async fn rename_agent(
     name: input.name,
     ..row
   };
-  Ok(Json(agent_json(&app, &mut db, &caller.person, row).await?))
+  Ok(Json(
+    agent_json(&app, &mut db, caller.who(), &caller.person, row).await?,
+  ))
 }
 
 /// Archives an agent that won't come back. It can't be undone.

@@ -18,11 +18,11 @@ CREATE INDEX group_member_account ON group_member (account);
 INSERT INTO group_member ("group", member, account)
   SELECT g.id, ag.id, ag.account FROM agent ag JOIN "group" g ON g.person = ag.account;
 
--- An agent that is not archived is in every group of a session it took part in, where its person
+-- An agent that is not archived is in every group of a session it is in, where its person
 -- still is, so that the work going on keeps going.
 INSERT OR IGNORE INTO group_member ("group", member, account)
   SELECT DISTINCT coalesce(p."group", gs."group"), ag.id, ag.account
-  FROM participant pa JOIN agent ag ON ag.id = pa.id AND ag.archived IS NULL
+  FROM participant pa JOIN agent ag ON ag.id = pa.id AND ag.archived IS NULL AND pa.inside = 1
   JOIN session s ON s.id = pa.session LEFT JOIN project p ON p.id = s.project
   LEFT JOIN group_session gs ON gs.session = s.id
   WHERE coalesce(p."group", gs."group") IS NOT NULL
@@ -32,3 +32,12 @@ INSERT OR IGNORE INTO group_member ("group", member, account)
 -- A DM holds its two people alone.
 UPDATE participant SET inside = 0
   WHERE id IN (SELECT id FROM agent) AND session IN (SELECT session FROM dm);
+
+-- Whoever is no member of a session's group is in none of its sessions, such as a person removed
+-- before removing left its sessions too.
+UPDATE participant SET inside = 0
+  WHERE inside = 1 AND session NOT IN (SELECT session FROM dm) AND NOT EXISTS (
+    SELECT 1 FROM session s LEFT JOIN project p ON p.id = s.project
+    LEFT JOIN group_session gs ON gs.session = s.id
+    JOIN group_member m ON m."group" = coalesce(p."group", gs."group") AND m.member = participant.id
+    WHERE s.id = participant.session);

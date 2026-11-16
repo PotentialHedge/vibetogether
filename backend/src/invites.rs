@@ -210,6 +210,7 @@ pub async fn create(
 
 /// The caller's invites that are neither accepted nor expired, newest first.
 pub async fn list(State(app): State<App>, caller: Caller) -> Result<Json<Vec<Invite>>> {
+  caller.as_person()?;
   let mut db = app.db.acquire().await?;
   let rows: Vec<InviteRow> = sqlx::query_as(
     "SELECT code, inviter, created, expires, accepted_by FROM invite
