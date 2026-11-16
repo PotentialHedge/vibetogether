@@ -120,3 +120,143 @@ pub fn message_type(base: &str, ping: Option<&[String]>, fyi: &[String]) -> Stri
   }
   ty
 }
+
+/// The names `text` mentions, each once, in order: every `@name` at the start or after
+/// whitespace, not followed by a word character, `/` or `-`, where `name` is a login or an
+/// agent's `<login>/<agent>`, and `*` for `@everyone`.
+pub fn mentions(text: &str) -> Vec<String> {
+  let part = |s: &str| -> usize {
+    let mut end = 0;
+    for (i, c) in s.char_indices() {
+      let ok = c.is_ascii_lowercase() || c.is_ascii_digit() || (i > 0 && c == '-');
+      if !ok {
+        break;
+      }
+      end = i + c.len_utf8();
+    }
+    end
+  };
+  let mut found: Vec<String> = Vec::new();
+  let mut prev: Option<char> = None;
+  for (i, c) in text.char_indices() {
+    let starts = c == '@' && prev.is_none_or(char::is_whitespace);
+    prev = Some(c);
+    if !starts {
+      continue;
+    }
+    let rest = &text[i + 1..];
+    let mut end = part(rest);
+    if end == 0 {
+      continue;
+    }
+    if let Some(agent) = rest[end..].strip_prefix('/') {
+      let more = part(agent);
+      if more > 0 {
+        end += 1 + more;
+      }
+    }
+    let after = rest[end..].chars().next();
+    if after.is_some_and(|c| c.is_alphanumeric() || c == '_' || c == '/' || c == '-') {
+      continue;
+    }
+    let name = match &rest[..end] {
+      "everyone" => "*".to_string(),
+      name => name.to_string(),
+    };
+    if !found.contains(&name) {
+      found.push(name);
+    }
+  }
+  found
+}
+
+/// The mention that starts a message which wakes no one, as in Discord: whom it mentions it
+/// tells quietly.
+pub const SILENT: &str = "silent";
+
+/// A text message's type as its text says whom it reaches, the one way people and agents alike
+/// name them: every name it mentions as `@name` is added to its `ping`, so that no client can send
+/// a mention that reaches no one; one that starts with `@silent` pings no one and tells whom it
+/// mentions quietly, in its `fyi`. A type without `ping` that mentions no one stays as it is, and
+/// pings everyone in its session.
+pub fn with_mentions(ty: &str, text: &str) -> String {
+  let essence = ty.split(';').next().unwrap_or_default().trim();
+  if !is_message(ty) || !essence.to_ascii_lowercase().starts_with("text/") {
+    return ty.to_string();
+  }
+  let mut mentioned = mentions(text);
+  let silent = mentioned.first().is_some_and(|name| name == SILENT)
+    && text.trim_start().starts_with(&format!("@{SILENT}"));
+  if silent {
+    mentioned.remove(0);
+  }
+  if mentioned.is_empty() && !silent {
+    return ty.to_string();
+  }
+  let (key, mut names) = if silent {
+    ("fyi", names_of(ty, "fyi"))
+  } else {
+    ("ping", names_of(ty, "ping"))
+  };
+  for name in mentioned {
+    if !names.contains(&name) {
+      names.push(name);
+    }
+  }
+  let mut out = String::new();
+  let mut at = 0;
+  for (k, _, span) in parameters(ty) {
+    if k.eq_ignore_ascii_case(key) || (silent && k.eq_ignore_ascii_case("ping")) {
+      let start = ty[..span.start].rfind(';').unwrap_or(span.start);
+      out += &ty[at..start];
+      at = span.end;
+    }
+  }
+  out += &ty[at..];
+  if silent {
+    out += "; ping=\"\"";
+  }
+  if !names.is_empty() {
+    out += &format!("; {key}={}", quoted(&names));
+  }
+  out
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  #[test]
+  fn a_mention_pings() {
+    assert_eq!(
+      mentions("@vt-builder look, and @luiswirth/lead too; @everyone. a@b, @x_y, @Up"),
+      ["vt-builder", "luiswirth/lead", "*"]
+    );
+    assert_eq!(
+      with_mentions("text/markdown; charset=utf-8", "@vt-builder go"),
+      "text/markdown; charset=utf-8; ping=\"vt-builder\""
+    );
+    assert_eq!(
+      with_mentions("text/markdown; ping=\"\"", "@lead and @lead"),
+      "text/markdown; ping=\"lead\""
+    );
+    assert_eq!(
+      with_mentions("text/markdown; ping=\"ben\"; fyi=\"tristan\"", "hi @lead"),
+      "text/markdown; fyi=\"tristan\"; ping=\"ben lead\""
+    );
+    assert_eq!(
+      with_mentions("text/markdown; charset=utf-8", "@silent @ben look"),
+      "text/markdown; charset=utf-8; ping=\"\"; fyi=\"ben\""
+    );
+    assert_eq!(
+      with_mentions("text/markdown; ping=\"*\"", "  @silent update"),
+      "text/markdown; ping=\"\""
+    );
+    assert_eq!(
+      with_mentions("text/markdown", "not @silent here"),
+      "text/markdown; ping=\"silent\""
+    );
+    assert_eq!(with_mentions("text/markdown", "no one"), "text/markdown");
+    assert_eq!(with_mentions("image/png", "@lead"), "image/png");
+  }
+}

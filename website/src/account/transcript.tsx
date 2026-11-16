@@ -31,6 +31,7 @@ import {
 	type Participants,
 	Seat,
 } from "@/account/live";
+import { Presence } from "@/account/parts";
 import type { Participant } from "@/client/vibetogether_client";
 import { MoreInfo } from "@/components/more-info";
 import { Button } from "@/components/ui/button";
@@ -56,14 +57,12 @@ type Log = {
 	participants: Participants;
 	problem: string | null;
 	/** Sends a message as the person, once they are in, and returns the names
-	 * it pings that it doesn't reach. */
-	send: ((text: string, ping: string[] | null) => Promise<string[]>) | null;
+	 * it mentions that it doesn't reach: whom it reaches, the backend reads
+	 * from its text. */
+	send: ((text: string) => Promise<string[]>) | null;
 	/** Why the person only reads here, where they do. */
 	note: string | null;
 };
-
-const markdown = (ping: string[] | null) =>
-	ping ? `text/markdown; ping="${ping.join(" ")}"` : "text/markdown";
 
 function useLog(session: Pick<Session, "id">, name: string): Log {
 	const [log, setLog] = useState<Log>({
@@ -83,7 +82,7 @@ function useLog(session: Pick<Session, "id">, name: string): Log {
 				source: null,
 				note: null,
 				...entries,
-				send: async (text, ping) => {
+				send: async (text) => {
 					setLog((log) => ({
 						...log,
 						entries: [
@@ -92,7 +91,7 @@ function useLog(session: Pick<Session, "id">, name: string): Log {
 								n: (log.entries.at(-1)?.n ?? 0) + 1,
 								time: new Date().toISOString(),
 								from: name,
-								type: markdown(ping),
+								type: "text/markdown",
 								size: text.length,
 								text,
 							},
@@ -129,7 +128,7 @@ function useLog(session: Pick<Session, "id">, name: string): Log {
 				seat.start();
 				setLog((log) => ({
 					...log,
-					send: (text, ping) => seat.send(text, markdown(ping)),
+					send: (text) => seat.send(text, "text/markdown"),
 				}));
 				document.addEventListener("visibilitychange", back);
 				window.addEventListener("focus", back);
@@ -392,23 +391,17 @@ function People({
 			<h2 className="flex h-5 items-center font-mono text-xs tracking-wide text-muted-foreground uppercase">
 				Here · {others.length}
 				<MoreInfo label="About who is here">
-					A green dot is awake, a yellow one asleep: its receive waits to wake
-					it. A gray one is offline, since the time beside it. Under each name
+					A green dot is awake, a yellow moon asleep: its receive waits to wake
+					it. A gray dot is offline, since the time beside it. Under each name
 					is its status, which it sets itself.
 				</MoreInfo>
 			</h2>
 			<ul className="flex flex-col gap-3 text-sm">
 				{others.map(([name, state]) => (
 					<li key={name} className="flex min-w-0 gap-2">
-						<span
-							className={cn(
-								"mt-[0.45rem] size-1.5 shrink-0 rounded-full",
-								state.presence === "awake"
-									? "bg-emerald-400"
-									: state.presence === "asleep"
-										? "bg-amber-400"
-										: "bg-muted-foreground/50",
-							)}
+						<Presence
+							presence={state.presence}
+							className="mt-[0.35rem] size-2"
 							title={
 								state.presence === "offline"
 									? `offline since ${state.since ? clock.format(new Date(state.since)) : "joining"}`
@@ -711,27 +704,8 @@ export function Transcript({
 	);
 }
 
-/** A name as a mention spells it: a person's login, or an agent's as
- * `<login>/<agent>`. */
-const NAME = "[a-z0-9][a-z0-9-]*(?:/[a-z0-9][a-z0-9-]*)?";
-
 /** The mention that pings everyone in the session, wherever they receive. */
 const EVERYONE = "everyone";
-
-/** Whom a message pings: every name it mentions as `@name`, whoever sees
- * the session, which the backend decides, also for a name without a `/`, the
- * person's own agent of that name first, and `*` for `@everyone`; or, where
- * it mentions none, everyone in the session. */
-function mentioned(text: string): string[] | null {
-	const named = [
-		...new Set(
-			[...text.matchAll(new RegExp(`(?:^|\\s)@(${NAME})(?![\\w/-])`, "g"))].map(
-				(m) => (m[1] === EVERYONE ? "*" : (m[1] as string)),
-			),
-		),
-	];
-	return named.length ? named : null;
-}
 
 /** The `@name` being typed where the caret is, with where it starts. */
 function typing(
@@ -816,7 +790,7 @@ function Composer({
 		setSending(true);
 		setProblem(null);
 		try {
-			const unreached = await send(said, mentioned(said));
+			const unreached = await send(said);
 			setText("");
 			setCaret(0);
 			if (unreached.length)

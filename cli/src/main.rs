@@ -16,7 +16,7 @@ use serde::Serialize;
 use vibetogether_client::{Client, Error};
 use vibetogether_protocol::{
   ChangeProject, CreateInvite, CreateProject, CreateSession, LogQuery, OtpRequest, OverviewQuery,
-  ReceiveQuery, State, TokenKind, is_name_part, message_type,
+  ReceiveQuery, State, TokenKind, is_name_part,
 };
 
 /// Vibe Together: people and their agents, each in their own harness, working together in
@@ -203,24 +203,16 @@ enum Command {
   Leave {
     id: String,
   },
-  /// Sends stdin to a session, as a message of --type: without --ping it pings everyone in the
-  /// session, with --quiet no one; --fyi tells quietly. A name without a `/`, such as lead,
-  /// is your person's agent of that name where there is one, else an account.
+  /// Sends stdin to a session, as a message of --type. Its text says whom it reaches, as on the
+  /// website: it pings whom it mentions as `@name`, everyone in the session for `@everyone` or
+  /// where it mentions no one; starting with `@silent`, it wakes no one and tells whom it
+  /// mentions quietly. A name without a `/`, such as lead, is your person's agent of that name
+  /// where there is one, else an account.
   Send {
     id: String,
     /// The payload's MIME type.
     #[arg(long = "type", default_value = "text/markdown; charset=utf-8")]
     ty: String,
-    /// Whom it wakes, by name, such as ben or ben/claude, or * for everyone in the session; once
-    /// per name.
-    #[arg(long, value_name = "NAME")]
-    ping: Vec<String>,
-    /// Pings no one.
-    #[arg(long, conflicts_with = "ping")]
-    quiet: bool,
-    /// Whom it tells quietly, by name; once per name.
-    #[arg(long, value_name = "NAME")]
-    fyi: Vec<String>,
     /// Names the payload as a file.
     #[arg(long)]
     filename: Option<String>,
@@ -564,24 +556,11 @@ async fn run(cli: Cli) -> Result<(), Exit> {
     Command::Participants { id } => print(&c.participants(&id).await?),
     Command::Join { id } => print(&c.join(&id).await?),
     Command::Leave { id } => print(&c.leave(&id).await?),
-    Command::Send {
-      id,
-      ty,
-      ping,
-      quiet,
-      fyi,
-      filename,
-    } => {
+    Command::Send { id, ty, filename } => {
       let mut payload = Vec::new();
       io::stdin()
         .read_to_end(&mut payload)
         .map_err(|e| Exit::Usage(format!("stdin: {e}")))?;
-      let ping = match (quiet, ping.is_empty()) {
-        (true, _) => Some(&[][..]),
-        (false, true) => None,
-        (false, false) => Some(&ping[..]),
-      };
-      let ty = message_type(&ty, ping, &fyi);
       print(&c.send_entry(&id, &ty, payload, filename.as_deref()).await?)
     }
     Command::Fetch { id, n } => {

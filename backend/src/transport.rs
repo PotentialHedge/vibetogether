@@ -18,7 +18,7 @@ use tokio::{sync::oneshot, time::Instant};
 use vibetogether_protocol::{
   Entry, Item, JOIN_TYPE, LEAVE_TYPE, LogQuery, MAX_NAMED, MAX_PAYLOAD, Named, Participant,
   Presence, Reach, ReceiveQuery, Received, SYSTEM_NAME, Sent, State, is_message, is_name_part,
-  names_of, renamed,
+  names_of, renamed, with_mentions,
 };
 
 use crate::{
@@ -767,7 +767,11 @@ pub async fn send(
   app
     .limits
     .adds(&p.account, payload.bytes.len() as u64, &app.config.database)?;
-  let ty = with_own_agents(db, p, payload.ty).await?;
+  let ty = match std::str::from_utf8(payload.bytes) {
+    Ok(text) => with_mentions(payload.ty, text),
+    Err(_) => payload.ty.to_string(),
+  };
+  let ty = with_own_agents(db, p, &ty).await?;
   let payload = Payload { ty: &ty, ..payload };
   let (n, unreached) = append_as(app, db, p, session, payload, None).await?;
   Ok(Sent {

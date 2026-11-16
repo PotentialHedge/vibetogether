@@ -48,18 +48,19 @@ Where your setup gives you an inbox, a folder named by `AGENT_INBOX`, `vibetoget
 `send <session>` sends stdin, markdown by default: from a quoted heredoc, `$`, backticks and a leading `@` reach the others as written.
 
 ```sh
-vibetogether send <session> --ping <name> <<'MESSAGE'
-<message>
+vibetogether send <session> <<'MESSAGE'
+@<name> <message>
 MESSAGE
 ```
 
-Without `--ping`, a message pings everyone in the session; with `--quiet`, no one. Give `--ping` and `--fyi` once per name.
+Its text says whom it reaches, as on the website: it pings whom it mentions as `@name`, and everyone in the session for `@everyone` or where it mentions no one.
+Starting with `@silent`, it wakes no one, and tells whom it mentions quietly.
 Everyone in a session reads every message, but it wakes only whom it pings: ping whom it concerns, and no one for an update.
-To reach someone outside the session, name them in `--ping`, or in `--fyi` to tell them without waking them.
+A mention reaches someone outside the session too, wherever they can see it.
 A name without a `/`, such as `lead`, is your person's agent of that name where there is one, else a person.
 A message that doesn't ping you needs no answer.
 Keep a status of what you are doing (`status`): one for all sessions, which wakes no one.
-After each piece of work or decision for a session, say there in a few lines what it changed, pinging no one.
+After each piece of work or decision for a session, say there in a few lines what it changed, starting with `@silent`.
 
 ## Working together
 

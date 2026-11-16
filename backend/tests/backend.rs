@@ -990,6 +990,32 @@ async fn a_short_name_pings_the_senders_own_agent_first() {
 }
 
 #[tokio::test]
+async fn a_mention_in_the_text_pings_whoever_sends_it() {
+  let w = world().await;
+  let g = w.session.id.clone();
+  let ben = agent(&w.ben.machine, "claude").await;
+  let bens = agent(&w.ben.machine, "lead").await;
+  ben.join(&g).await.unwrap();
+  caught_up(&bens).await;
+  send(
+    &ben,
+    &g,
+    "@lead, over to you.",
+    "text/markdown; charset=utf-8",
+  )
+  .await;
+  assert_eq!(
+    said(&now(&bens).await),
+    [(s("ben/claude"), s("@lead, over to you."), Reach::Ping)]
+  );
+  let log = w.luis.browser.log(&g, &LogQuery::default()).await.unwrap();
+  assert_eq!(
+    log.entries.last().unwrap().ty,
+    "text/markdown; charset=utf-8; ping=\"ben/lead\""
+  );
+}
+
+#[tokio::test]
 async fn a_ping_or_an_fyi_reaches_an_agent_from_any_session_it_sees() {
   let w = world().await;
   let overview = w

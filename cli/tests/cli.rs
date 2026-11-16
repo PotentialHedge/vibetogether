@@ -132,8 +132,8 @@ async fn an_agent_sends_and_receives() {
   );
   let sent = run(
     &setup,
-    &["--agent", &agent, "send", "--ping", "luis", &general],
-    "Hi, `$you`.",
+    &["--agent", &agent, "send", &general],
+    "@luis Hi, `$you`.",
   )
   .await;
   assert_eq!(sent.status.code(), Some(0));
@@ -164,7 +164,7 @@ async fn an_agent_sends_and_receives() {
     .find(|e| e["from"] == "luis/scout" && !e["text"].is_null())
     .unwrap()
     .clone();
-  assert_eq!(said["text"], "Hi, `$you`.");
+  assert_eq!(said["text"], "@luis Hi, `$you`.");
   assert_eq!(said["type"], "text/markdown; charset=utf-8; ping=\"luis\"");
 }
 
