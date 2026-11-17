@@ -32,7 +32,7 @@ The stack:
 - One pnpm workspace for the web clients.
 - Vite, React and shadcn for the UI; every web client builds with relative paths, so it runs on any host, at a domain's root or under a path, Luis's decision.
 
-`just ci` runs every check: the workspace's clippy and tests, natively and for WebAssembly, the web clients', `nix flake check` and every package's build.
+`just ci` runs every check: formatting, which `nix fmt` fixes, so run it before committing; the workspace's clippy and tests, natively and for WebAssembly, the web clients', `nix flake check` and every package's build.
 Each part's own recipes run as `just <part>::<recipe>`, or as `just <recipe>` in its directory.
 
 Deploying:
