@@ -50,56 +50,22 @@ struct Cli {
   /// The agent's inbox, by convention `~/.agents/inbox/<agent>/`.
   #[arg(long, global = true, env = "AGENT_INBOX")]
   inbox: Option<PathBuf>,
-  /// The agent's outbox, by convention `~/.agents/outbox/<agent>/`.
-  #[arg(long, global = true, env = "AGENT_OUTBOX")]
-  outbox: Option<PathBuf>,
   #[command(subcommand)]
   command: Command,
 }
 
-/// The outbox's commands.
-#[derive(Subcommand)]
-enum OutboxCommand {
-  /// Writes one item, read from stdin, for a recipient, such as `telegram:luis`.
-  Send {
-    /// Whom it is for: the name an inbox item came from, to answer it.
-    recipient: String,
-    /// Its type, as a MIME type (`image/png`) or an extension (`png`).
-    #[arg(long = "type", default_value = "md")]
-    ty: String,
-  },
-}
-
 #[derive(Subcommand)]
 enum Command {
-  /// The agent's inbox, which Vibe Together delivers into.
+  /// Keeps the agent's inbox (`agentinbox`) filled from its stream.
   ///
-  /// A directory, made at first use, that anything else on the machine may deliver into too.
-  /// `new/` holds the items not yet taken in, `cur/` the
-  /// taken ones, `tmp/` the ones being written; the file `wake` is the doorbell, and the agent is
-  /// awake while a lock on the file `awake` is held. Each item is one file, named
-  /// `<time>.<sender>.<ext>`, with the time in UTC. Delivering is quiet: the agent sees the item
-  /// at its next step; ringing the bell also wakes an agent that is idle. Anything can deliver
-  /// without this command, by writing a file into `tmp/` and renaming it into `new/`, and ring
-  /// with `touch wake`.
-  ///
-  /// Nothing makes it but this command, with AGENT_INBOX or --inbox, and deleting the directory
-  /// removes it.
-  Inbox {
-    #[command(subcommand)]
-    command: inbox::Command,
-  },
-  /// The agent's outbox, the inbox's dual: what it says to someone outside.
-  ///
-  /// A directory like the inbox, `new/`, `cur/` and `tmp/`, each item one file named
-  /// `<time>.<recipient>.<ext>`. A subscriber, such as messagent for `telegram:`, carries the
-  /// items for the recipients it serves, and moves each to `cur/`; an item none serves stays in
-  /// `new/`. Answering an inbox item is writing an item for the name it came from. Anything can
-  /// write one without this command, by writing a file into `tmp/` and renaming it into `new/`.
-  Outbox {
-    #[command(subcommand)]
-    command: OutboxCommand,
-  },
+  /// One receive is kept open always, awake while the inbox's awake lock is held and asleep
+  /// otherwise. Each item that reaches the agent is delivered as text whose first line says where
+  /// it is from. A ping or a session's message also rings the bell, an fyi stays quiet, unless
+  /// the inbox's do-not-disturb rules say otherwise, matching `from`, `reach` (`ping`, `fyi`,
+  /// `session`) and `session` (its name or id); where they quiet a mention, the receive holds do
+  /// not disturb, so others see it. An item counts as received once it is in `new/`, and as read
+  /// once it and every item before it have left `new/`. It runs until refused.
+  Inbox,
   /// Gets a token, which the person approves at the link it prints.
   ///
   /// It writes the token to the token file, with the server it goes to, and waits until the
@@ -492,45 +458,23 @@ async fn receive(client: &Client, state: State, follow: bool) -> Result<(), Exit
 }
 
 async fn run(cli: Cli) -> Result<(), Exit> {
-  // Logging in and the inbox's local commands send no token, so they need none.
+  // Logging in sends no token, so it needs none.
   let (token, source) = match &cli.command {
     Command::Login { .. } => (None, doctor::Source::None),
-    Command::Inbox { command } if !matches!(command, inbox::Command::Receive) => {
-      (None, doctor::Source::None)
-    }
-    Command::Outbox { .. } => (None, doctor::Source::None),
     _ => token(&cli.server)?,
   };
   let client = Client::new(&cli.server, token).acting_as(cli.agent);
   let c = &client;
   match cli.command {
-    Command::Inbox { command } => {
+    Command::Inbox => {
       let root = cli
         .inbox
         .ok_or_else(|| Exit::Usage("No inbox: set AGENT_INBOX or pass --inbox.".into()))?;
-      return match inbox::run(&vibetogether_inbox::Inbox::new(root), command, c).await {
+      return match inbox::receive(&agentinbox::Inbox::new(root), c).await {
         Ok(()) => Ok(()),
         Err(inbox::Failure::Refused(error)) => Err(error.into()),
         Err(inbox::Failure::Inbox(error)) => Err(Exit::Inbox(error)),
       };
-    }
-    Command::Outbox {
-      command: OutboxCommand::Send { recipient, ty },
-    } => {
-      let root = cli
-        .outbox
-        .ok_or_else(|| Exit::Usage("No outbox: set AGENT_OUTBOX or pass --outbox.".into()))?;
-      let ext = vibetogether_inbox::extension(&ty)
-        .ok_or_else(|| Exit::Usage(format!("Unknown type `{ty}`.")))?;
-      if recipient.is_empty() {
-        return Err(Exit::Usage(
-          "A recipient is a name, such as telegram:luis.".into(),
-        ));
-      }
-      let path = vibetogether_inbox::Outbox::new(root)
-        .send(std::io::stdin().lock(), &recipient, &ext)
-        .map_err(Exit::Inbox)?;
-      print(&serde_json::json!({ "path": path }));
     }
     Command::Login {
       name,
@@ -538,7 +482,7 @@ async fn run(cli: Cli) -> Result<(), Exit> {
       token_file,
     } => login(c, name, person, token_file).await?,
     Command::Doctor => {
-      let checks = doctor::run(c, source, cli.inbox.as_deref(), cli.outbox.as_deref()).await;
+      let checks = doctor::run(c, source, cli.inbox.as_deref()).await;
       print(&checks);
       if !checks.iter().all(doctor::Check::ok) {
         return Err(Exit::Check);

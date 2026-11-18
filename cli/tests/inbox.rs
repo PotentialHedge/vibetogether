@@ -1,5 +1,4 @@
-//! The agent's inbox through the command line: the awake lock across processes, and Vibe
-//! Together's delivery into the inbox.
+//! Vibe Together's delivery into the agent's inbox, through the command line.
 
 mod common;
 
@@ -8,9 +7,9 @@ use std::{
   time::{Duration, Instant},
 };
 
+use agentinbox::Inbox;
 use common::*;
 use vibetogether_client::Client;
-use vibetogether_inbox::Inbox;
 use vibetogether_protocol::{LoginKind, Presence};
 
 async fn until(what: &str, check: impl AsyncFn() -> bool) {
@@ -19,37 +18,6 @@ async fn until(what: &str, check: impl AsyncFn() -> bool) {
     assert!(start.elapsed() < Duration::from_secs(10), "never {what}");
     tokio::time::sleep(Duration::from_millis(20)).await;
   }
-}
-
-/// `inbox awake` holds the lock across processes for as long as its stdin is open, and the
-/// system releases it when the pipe closes, also when the holder is killed.
-#[tokio::test]
-async fn awake_is_held_while_stdin_is_open() {
-  let setup = setup().await;
-  let inbox = Inbox::new(setup.home.join("inbox"));
-  let root = inbox.root.to_string_lossy().to_string();
-  assert!(!inbox.awake().unwrap());
-  let hold = || {
-    command(
-      &setup.home,
-      &setup.url,
-      None,
-      &["inbox", "--inbox", &root, "awake"],
-    )
-    .spawn()
-    .unwrap()
-  };
-
-  let mut holder = hold();
-  until("awake", async || inbox.awake().unwrap()).await;
-  drop(holder.stdin.take());
-  assert!(holder.wait().await.unwrap().success());
-  until("asleep", async || !inbox.awake().unwrap()).await;
-
-  let mut holder = hold();
-  until("awake", async || inbox.awake().unwrap()).await;
-  holder.kill().await.unwrap();
-  until("asleep", async || !inbox.awake().unwrap()).await;
 }
 
 /// What reaches the agent lands in its inbox, a ping ringing the bell, and is read once taken;
@@ -82,7 +50,7 @@ async fn vibe_together_delivers_into_the_inbox() {
     &setup.home,
     &setup.url,
     Some(&setup.token),
-    &["--agent", &agent, "inbox", "--inbox", &root, "receive"],
+    &["--agent", &agent, "inbox", "--inbox", &root],
   )
   .stdout(Stdio::null())
   .spawn()
@@ -99,7 +67,7 @@ async fn vibe_together_delivers_into_the_inbox() {
   .await;
   let join = inbox.take().unwrap();
   assert!(
-    matches!(&join[0].content, vibetogether_inbox::Content::Text(t) if t.ends_with("\n\"luis\" joined.\n"))
+    matches!(&join[0].content, agentinbox::Content::Text(t) if t.ends_with("\n\"luis\" joined.\n"))
   );
   // A join lands quietly: only a message rings.
   assert!(!inbox.wake_file().exists());
@@ -142,7 +110,7 @@ async fn vibe_together_delivers_into_the_inbox() {
   let texts: Vec<_> = items
     .iter()
     .map(|i| match &i.content {
-      vibetogether_inbox::Content::Text(text) => text.clone(),
+      agentinbox::Content::Text(text) => text.clone(),
       _ => panic!("not text"),
     })
     .collect();

@@ -3,6 +3,17 @@
 version = 4
 
 [[package]]
+name = "agentinbox"
+version = "0.1.0"
+source = "git+https://github.com/luiswirth/agentinbox#19968382335c22946488204e29e87d92a7d571e9"
+dependencies = [
+ "jiff",
+ "mime2ext",
+ "mime_guess",
+ "notify",
+]
+
+[[package]]
 name = "allocator-api2"
 version = "0.2.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2733,6 +2744,7 @@ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 name = "vibetogether"
 version = "0.9.0"
 dependencies = [
+ "agentinbox",
  "axum",
  "clap",
  "reqwest",
@@ -2742,7 +2754,6 @@ dependencies = [
  "tokio",
  "vibetogether-backend",
  "vibetogether-client",
- "vibetogether-inbox",
  "vibetogether-protocol",
 ]
 
@@ -2788,16 +2799,6 @@ dependencies = [
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",
-]
-
-[[package]]
-name = "vibetogether-inbox"
-version = "0.9.0"
-dependencies = [
- "jiff",
- "mime2ext",
- "mime_guess",
- "notify",
 ]
 
 [[package]]

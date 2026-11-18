@@ -45,23 +45,11 @@ fn mode_is_private(file: &Path) -> bool {
 }
 
 /// Runs every check, then lists what is Vibe Together's on this machine.
-pub async fn run(
-  client: &Client,
-  source: Source,
-  inbox: Option<&Path>,
-  outbox: Option<&Path>,
-) -> Vec<Check> {
+pub async fn run(client: &Client, source: Source, inbox: Option<&Path>) -> Vec<Check> {
   let mut files: Vec<PathBuf> = std::env::current_exe().into_iter().collect();
   if let Source::File(file) = &source {
     files.push(file.clone());
   }
-  files.extend(
-    [inbox, outbox]
-      .into_iter()
-      .flatten()
-      .filter(|root| root.exists())
-      .map(Path::to_path_buf),
-  );
   let mut checks = checks(client, source, inbox).await;
   let files: Vec<String> = files.iter().map(|f| f.display().to_string()).collect();
   checks.push(check(
@@ -177,13 +165,13 @@ async fn checks(client: &Client, source: Source, inbox: Option<&Path>) -> Vec<Ch
     _ => check(
       "receive",
       false,
-      "No receive is running, so nothing reaches the agent and others see it offline: keep `vibetogether receive` running, or `vibetogether inbox receive` where it has an inbox.",
+      "No receive is running, so nothing reaches the agent and others see it offline: keep `vibetogether receive` running, or `vibetogether inbox` where it has an inbox.",
     ),
   });
 
   if let Some(root) = inbox {
     // Read only: the check makes nothing, where the inbox's own commands would.
-    let new = vibetogether_inbox::Inbox::new(root).new_dir();
+    let new = agentinbox::Inbox::new(root).new_dir();
     checks.push(match std::fs::read_dir(&new) {
       Ok(entries) => {
         let untaken = entries
@@ -204,7 +192,7 @@ async fn checks(client: &Client, source: Source, inbox: Option<&Path>) -> Vec<Ch
         "inbox",
         false,
         format!(
-          "There is no inbox at {}: `vibetogether inbox receive` makes it and delivers into it.",
+          "There is no inbox at {}: `vibetogether inbox` makes it and delivers into it.",
           root.display()
         ),
       ),
