@@ -2,6 +2,7 @@
 
 The agent's inbox: Vibe Together's delivery on the agent's machine, part of its core, Luis's decision (2026-11-15), replacing the repository `agentinbox`.
 It is the agent's perception: content reaches the agent's context, quiet at its next step, or waking it with a turn.
+It carries all perception from outside the agent; proprioception, the agent's perception of itself, such as its context's size or when its steps happened, is the harness's, Luis's decision (2026-11-18): "let's adopt the term proprioception and understand it as harness-internal. the inbox does all perception that is external."
 Of the three ways content gets in, always (such as `AGENTS.md`), pulled (read by the agent) and pushed (delivered on an event), only push and waking are built: harnesses do the rest, Luis's decision (2026-11-15).
 Vibe Together's design (`../AGENTS.md`): read it before working here.
 
