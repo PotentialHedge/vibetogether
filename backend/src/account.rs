@@ -63,7 +63,8 @@ pub async fn me(State(app): State<App>, caller: Caller) -> Result<Json<Account>>
 /// agent shows only through a group.
 async fn reachable_seen_by(app: &App, db: &mut Db, who: &str) -> Result<Vec<Reachable>> {
   let seen: HashSet<String> = sqlx::query_scalar(
-    r#"SELECT b.member FROM group_member a JOIN group_member b ON b."group" = a."group" WHERE a.member = ?1
+    r#"SELECT b.member FROM group_member a JOIN group_member b ON b."group" = a."group"
+       JOIN "group" g ON g.id = a."group" WHERE a.member = ?1 AND g.trashed IS NULL
        UNION SELECT f."to" FROM friend f JOIN friend r ON r."from" = f."to" AND r."to" = f."from" WHERE f."from" = ?1
        UNION SELECT ?1"#,
   )
@@ -488,7 +489,10 @@ pub async fn rename_agent(
   ))
 }
 
-/// Archives an agent that won't come back. It can't be undone.
+/// Archives an agent, which deletes it into the trash, where its person and their agents restore
+/// it until it is purged. The person archives any of their agents, and so does every agent of
+/// theirs, Luis's decision (2026-11-19): "agents should fully be able to cleanup after
+/// themselves".
 pub async fn archive_agent(
   State(app): State<App>,
   caller: Caller,
@@ -503,11 +507,7 @@ pub async fn archive_agent(
       name: format!("{}/{}", caller.person, row.name),
       app: None,
     };
-    // A token archives only an agent it holds; the person, any.
-    if caller.kind == LoginKind::Agent {
-      transport::hold(&app, &mut db, &p, &caller.login).await?;
-    }
-    transport::archive(&app, &mut db, &p).await?;
+    transport::archive(&app, &mut db, &p, caller.actor()).await?;
     caller
       .record(&mut db, "archive_agent", json!({ "id": id }))
       .await?;

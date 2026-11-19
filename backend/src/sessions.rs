@@ -19,11 +19,12 @@ use vibetogether_protocol::{
 use crate::{
   App,
   caller::Caller,
-  db::{self, Db, SessionAccess, general_of, is_member, session_for},
+  db::{self, Db, SessionAccess, TRASH_DAYS, general_of, is_member, session_for},
   error::{Refusal, Result},
   extract::{Json as Body, Path, Query},
   groups::{check_name, repos_of},
   transport::{self, Payload, quoted},
+  trash,
 };
 
 /// The most sessions one project holds, and one group of its own, besides its general.
@@ -112,7 +113,9 @@ pub async fn sessions_of(db: &mut Db, who: &str, me: &str) -> Result<Vec<Session
     r#"SELECT s.id FROM session s LEFT JOIN project p ON p.id = s.project
        LEFT JOIN group_session gs ON gs.session = s.id
        JOIN group_member m ON m."group" = coalesce(p."group", gs."group")
-       WHERE m.member = ? ORDER BY coalesce(gs.general, 0) DESC, s.created"#,
+       JOIN "group" g ON g.id = m."group"
+       WHERE m.member = ? AND s.trashed IS NULL AND p.trashed IS NULL AND g.trashed IS NULL
+       ORDER BY coalesce(gs.general, 0) DESC, s.created"#,
   )
   .bind(who)
   .fetch_all(&mut *db)
@@ -188,10 +191,11 @@ pub async fn create(
   let me = &caller.account;
   let (group, project) = match (&input.project, &input.group) {
     (Some(project), None) => {
-      let group: Option<String> = sqlx::query_scalar(r#"SELECT "group" FROM project WHERE id = ?"#)
-        .bind(project)
-        .fetch_optional(&mut *db)
-        .await?;
+      let group: Option<String> =
+        sqlx::query_scalar(r#"SELECT "group" FROM project WHERE id = ? AND trashed IS NULL"#)
+          .bind(project)
+          .fetch_optional(&mut *db)
+          .await?;
       match group {
         Some(group) if is_member(&mut db, &group, caller.who()).await? => {
           (group, Some(project.clone()))
@@ -211,7 +215,7 @@ pub async fn create(
     Some(project) => {
       db::count(
         &mut db,
-        "SELECT count(*) FROM session WHERE project = ?",
+        "SELECT count(*) FROM session WHERE project = ? AND trashed IS NULL",
         &[project],
       )
       .await?
@@ -219,7 +223,8 @@ pub async fn create(
     None => {
       db::count(
         &mut db,
-        r#"SELECT count(*) FROM group_session WHERE "group" = ? AND general = 0"#,
+        r#"SELECT count(*) FROM group_session gs JOIN session s ON s.id = gs.session
+           WHERE gs."group" = ? AND gs.general = 0 AND s.trashed IS NULL"#,
         &[&group],
       )
       .await?
@@ -313,14 +318,13 @@ pub async fn rename(
   ))
 }
 
-/// Deletes a session of a group with its log, for everyone; a DM stays, and a group's general
-/// goes only with the group.
+/// Deletes a session of a group with its log, for everyone, into the trash; a DM stays, and a
+/// group's general goes only with the group. Any member of its group does it, an agent too.
 pub async fn delete(
   State(app): State<App>,
   caller: Caller,
   Path(id): Path<String>,
 ) -> Result<StatusCode> {
-  caller.as_person()?;
   let mut db = app.db.acquire().await?;
   let session = of_group(&mut db, &id, &caller).await?;
   if session.general {
@@ -329,13 +333,10 @@ pub async fn delete(
     ));
   }
   let place = where_of(&mut db, &session).await?;
-  sqlx::query("DELETE FROM session WHERE id = ?")
-    .bind(&session.id)
-    .execute(&mut *db)
-    .await?;
+  trash::put(&mut db, "session", &session.id, &caller).await?;
   let general = general_of(&mut db, session.group.as_deref().unwrap_or_default()).await?;
   let text = format!(
-    "{} deleted the session {}{place}.",
+    "{} deleted the session {}{place}, into the trash, where the group's members restore it within {TRASH_DAYS} days.",
     caller.actor(),
     quoted(&session.name)
   );

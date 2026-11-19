@@ -15,10 +15,13 @@ use vibetogether_protocol::{
 use crate::{
   App,
   caller::Caller,
-  db::{self, Db, MAX_GROUPS, MAX_MEMBERS, are_friends, general_of, is_member, own_group_of},
+  db::{
+    self, Db, MAX_GROUPS, MAX_MEMBERS, TRASH_DAYS, are_friends, general_of, is_member, own_group_of,
+  },
   error::{Refusal, Result},
   extract::{Json as Body, Path},
   transport::{self, participant_by_name, quoted},
+  trash,
 };
 
 /// The most projects one group holds.
@@ -118,8 +121,9 @@ pub struct GroupRow {
   pub person: Option<String>,
 }
 
-/// The group, where `who`, a person or an agent, is in it: to anyone else no group shows.
-async fn group_for(db: &mut Db, id: &str, who: &str) -> Result<GroupRow> {
+/// The group, where `who`, a person or an agent, is in it: to anyone else no group shows, nor
+/// one in the trash.
+pub async fn group_for(db: &mut Db, id: &str, who: &str) -> Result<GroupRow> {
   let group: Option<GroupRow> =
     sqlx::query_as(r#"SELECT id, name, person FROM "group" WHERE id = ?"#)
       .bind(id)
@@ -136,7 +140,7 @@ pub async fn groups_of(db: &mut Db, who: &str) -> Result<Vec<GroupRow>> {
   Ok(
     sqlx::query_as(
       r#"SELECT g.id, g.name, g.person FROM "group" g JOIN group_member m ON m."group" = g.id
-         WHERE m.member = ? ORDER BY g.person IS NULL, g.created"#,
+         WHERE m.member = ? AND g.trashed IS NULL ORDER BY g.person IS NULL, g.created"#,
     )
     .bind(who)
     .fetch_all(db)
@@ -218,7 +222,7 @@ pub async fn list(State(app): State<App>, caller: Caller) -> Result<Json<Vec<Gro
 async fn groups_besides_own(db: &mut Db, account: &str) -> Result<i64> {
   db::count(
     db,
-    r#"SELECT count(*) FROM group_member m JOIN "group" g ON g.id = m."group" WHERE m.member = ? AND g.person IS NULL"#,
+    r#"SELECT count(*) FROM group_member m JOIN "group" g ON g.id = m."group" WHERE m.member = ? AND g.person IS NULL AND g.trashed IS NULL"#,
     &[account],
   )
   .await
@@ -323,15 +327,15 @@ pub async fn rename(
   ))
 }
 
-/// Deletes a group, with its projects and their sessions; one's own group stays.
+/// Deletes a group, with its projects and their sessions, into the trash; one's own group stays.
+/// Any member does it, an agent too, Luis's decision (2026-11-19).
 pub async fn delete(
   State(app): State<App>,
   caller: Caller,
   Path(id): Path<String>,
 ) -> Result<StatusCode> {
-  caller.as_person()?;
   let mut db = app.db.acquire().await?;
-  let group = group_for(&mut db, &id, &caller.account).await?;
+  let group = group_for(&mut db, &id, caller.who()).await?;
   if group.person.is_some() {
     return Err(Refusal::forbidden(
       "Your own group stays as long as you do.",
@@ -344,15 +348,12 @@ pub async fn delete(
   .bind(&caller.account)
   .fetch_all(&mut *db)
   .await?;
-  sqlx::query(r#"DELETE FROM "group" WHERE id = ?"#)
-    .bind(&group.id)
-    .execute(&mut *db)
-    .await?;
+  trash::put(&mut db, "group", &group.id, &caller).await?;
   for other in others {
     let own = own_group_of(&mut db, &other).await?;
     let inbox = general_of(&mut db, &own).await?;
     let text = format!(
-      "{} deleted the group {}.",
+      "{} deleted the group {}, into the trash, where its members restore it within {TRASH_DAYS} days.",
       caller.actor(),
       quoted(&group.name)
     );
@@ -555,10 +556,10 @@ pub struct ProjectRow {
   pub group: String,
 }
 
-/// The project, where `who`, a person or an agent, is in its group.
-async fn project_for(db: &mut Db, id: &str, who: &str) -> Result<ProjectRow> {
+/// The project, where `who`, a person or an agent, is in its group, and it is not in the trash.
+pub async fn project_for(db: &mut Db, id: &str, who: &str) -> Result<ProjectRow> {
   let project: Option<ProjectRow> =
-    sqlx::query_as(r#"SELECT id, name, "group" FROM project WHERE id = ?"#)
+    sqlx::query_as(r#"SELECT id, name, "group" FROM project WHERE id = ? AND trashed IS NULL"#)
       .bind(id)
       .fetch_optional(&mut *db)
       .await?;
@@ -573,7 +574,8 @@ pub async fn projects_of(db: &mut Db, who: &str) -> Result<Vec<ProjectRow>> {
   Ok(
     sqlx::query_as(
       r#"SELECT p.id, p.name, p."group" FROM project p JOIN group_member m ON m."group" = p."group"
-         WHERE m.member = ? ORDER BY p.created"#,
+         JOIN "group" g ON g.id = p."group"
+         WHERE m.member = ? AND p.trashed IS NULL AND g.trashed IS NULL ORDER BY p.created"#,
     )
     .bind(who)
     .fetch_all(db)
@@ -623,7 +625,7 @@ pub async fn create_project(
   let group = group_for(&mut db, &group, caller.who()).await?;
   if db::count(
     &mut db,
-    r#"SELECT count(*) FROM project WHERE "group" = ?"#,
+    r#"SELECT count(*) FROM project WHERE "group" = ? AND trashed IS NULL"#,
     &[&group.id],
   )
   .await?
@@ -702,22 +704,19 @@ pub async fn change_project(
   ))
 }
 
-/// Deletes a project, with its sessions.
+/// Deletes a project, with its sessions, into the trash. Any member of its group does it, an
+/// agent too.
 pub async fn delete_project(
   State(app): State<App>,
   caller: Caller,
   Path(id): Path<String>,
 ) -> Result<StatusCode> {
-  caller.as_person()?;
   let mut db = app.db.acquire().await?;
   let project = project_for(&mut db, &id, caller.who()).await?;
-  sqlx::query("DELETE FROM project WHERE id = ?")
-    .bind(&project.id)
-    .execute(&mut *db)
-    .await?;
+  trash::put(&mut db, "project", &project.id, &caller).await?;
   let general = general_of(&mut db, &project.group).await?;
   let text = format!(
-    "{} deleted the project {}, with its sessions.",
+    "{} deleted the project {}, with its sessions, into the trash, where the group's members restore it within {TRASH_DAYS} days.",
     caller.actor(),
     quoted(&project.name)
   );

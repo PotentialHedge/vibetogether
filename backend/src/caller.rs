@@ -244,6 +244,9 @@ fn an_app_reaches_only_its_persons_sessions() {
     (Method::PUT, "/api/status"),
     (Method::DELETE, "/api/me"),
     (Method::GET, "/api/activity"),
+    (Method::GET, "/api/trash"),
+    (Method::POST, "/api/trash/s_1/restore"),
+    (Method::POST, "/api/agents/a_1/archive"),
   ] {
     assert!(!app_may(&method, path), "{method} {path}");
   }

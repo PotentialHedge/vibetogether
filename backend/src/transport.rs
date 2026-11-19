@@ -314,7 +314,8 @@ pub fn end_account(app: &App, account: &str) {
   );
 }
 
-/// Starts what runs on its own: an item unread for a week goes, every hour.
+/// Starts what runs on its own, every hour: an item unread for a week goes, and the trash is
+/// purged of what was deleted `TRASH_DAYS` ago.
 pub fn start(app: &App) {
   let app = app.clone();
   tokio::spawn(async move {
@@ -327,6 +328,13 @@ pub fn start(app: &App) {
         .await;
       if let Err(e) = gone {
         tracing::error!("dropping week-old items: {e}");
+      }
+      let purged = async {
+        let mut db = app.db.acquire().await?;
+        crate::trash::purge(&mut db).await
+      };
+      if let Err(e) = purged.await {
+        tracing::error!("purging the trash: {e:?}");
       }
     }
   });
@@ -881,10 +889,10 @@ pub async fn leave_group(app: &App, db: &mut Db, group: &str, id: &str) -> Resul
   Ok(())
 }
 
-/// Archives the agent, which said it won't come back: it leaves every session it is in, and every
-/// group but its person's own, receives and sends no more, its stream goes, and its name is free
-/// for another.
-pub async fn archive(app: &App, db: &mut Db, p: &Acting) -> Result<()> {
+/// Archives the agent, by `by`, into the trash: it leaves every session it is in, and every group
+/// but its person's own, receives and sends no more, its stream goes, and its name is free for
+/// another.
+pub async fn archive(app: &App, db: &mut Db, p: &Acting, by: &str) -> Result<()> {
   let sessions: Vec<String> =
     sqlx::query_scalar("SELECT session FROM participant WHERE id = ? AND inside = 1")
       .bind(&p.id)
@@ -905,8 +913,10 @@ pub async fn archive(app: &App, db: &mut Db, p: &Acting) -> Result<()> {
     .await?;
   }
   let mut tx = db.begin().await?;
-  sqlx::query("UPDATE agent SET archived = ?, holder = NULL WHERE id = ? AND account = ?")
+  // It keeps its holder, so that restored (`trash`) it is that login's again, and no other's.
+  sqlx::query("UPDATE agent SET archived = ?, archived_by = ? WHERE id = ? AND account = ?")
     .bind(db::now())
+    .bind(by)
     .bind(&p.id)
     .bind(&p.account)
     .execute(&mut *tx)

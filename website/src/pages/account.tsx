@@ -279,7 +279,7 @@ function App({ state, reload }: { state: State; reload: () => Promise<void> }) {
 					open={deletingSession}
 					onOpenChange={setDeletingSession}
 					title={`Delete ${session.name}?`}
-					description="Its transcript goes with it, for everyone in the group."
+					description="Its transcript goes with it, for everyone in the group, into the trash, where any member restores it within 30 days."
 					label="Delete session"
 					onConfirm={act(async () => {
 						await api.deleteSession(session.id);

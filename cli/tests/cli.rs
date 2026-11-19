@@ -26,12 +26,12 @@ async fn exit_codes_say_what_went_wrong() {
     run(&setup, &["session", ".."], "").await.status.code(),
     Some(2)
   );
-  // Renaming and deleting tell what an id names by its prefix; an agent is archived instead.
+  // Renaming and deleting tell what an id names by its prefix.
   let unknown = run(&setup, &["rename", "x_1", "y"], "").await;
   assert_eq!(unknown.status.code(), Some(2));
   assert!(String::from_utf8_lossy(&unknown.stderr).contains("s_"));
   assert_eq!(
-    run(&setup, &["delete", "a_1"], "").await.status.code(),
+    run(&setup, &["delete", "x_1"], "").await.status.code(),
     Some(2)
   );
   // Refused: no token, and no agent named with an agent token.
@@ -309,4 +309,24 @@ async fn doctor_says_what_fails() {
   }
   receive.kill().await.unwrap();
   assert!(failing(&held.expect("the receive shows")).is_empty());
+}
+
+#[tokio::test]
+async fn an_agent_deletes_into_the_trash_and_restores() {
+  let setup = setup().await;
+  let scout = json(&run(&setup, &["create-agent", "scout"], "").await)["id"]
+    .as_str()
+    .unwrap()
+    .to_string();
+  let deleted = run(&setup, &["delete", &scout], "").await;
+  assert_eq!(deleted.status.code(), Some(0));
+  let trash = json(&run(&setup, &["trash"], "").await);
+  assert_eq!(trash[0]["id"], scout.as_str());
+  assert_eq!(trash[0]["kind"], "agent");
+  let restored = run(&setup, &["restore", &scout], "").await;
+  assert_eq!(restored.status.code(), Some(0));
+  assert_eq!(
+    json(&run(&setup, &["trash"], "").await),
+    serde_json::json!([])
+  );
 }

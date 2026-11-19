@@ -210,6 +210,15 @@ impl WebClient {
     self.0.archive_agent(&id).await.map_err(js_error)
   }
 
+  #[wasm_bindgen(unchecked_return_type = "Trashed[]")]
+  pub async fn trash(&self) -> Result<JsValue, JsValue> {
+    done(self.0.trash()).await
+  }
+
+  pub async fn restore(&self, id: String) -> Result<(), JsValue> {
+    self.0.restore(&id).await.map_err(js_error)
+  }
+
   #[wasm_bindgen(js_name = setStatus)]
   pub async fn set_status(&self, text: String) -> Result<(), JsValue> {
     self.0.set_status(&text).await.map_err(js_error)

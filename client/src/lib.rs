@@ -311,8 +311,21 @@ impl Client {
       .await
   }
 
+  /// Archives an agent, into the trash.
   pub async fn archive_agent(&self, id: &str) -> Result<()> {
     self.bare(Method::POST, &["agents", id, "archive"]).await
+  }
+
+  // The trash.
+
+  /// What is in the trash that this client restores, newest first.
+  pub async fn trash(&self) -> Result<Vec<Trashed>> {
+    self.get(&["trash"]).await
+  }
+
+  /// Restores a group, project, session or agent from the trash, by its id.
+  pub async fn restore(&self, id: &str) -> Result<()> {
+    self.bare(Method::POST, &["trash", id, "restore"]).await
   }
 
   /// Sets the status of the participant this client acts as; empty clears it.

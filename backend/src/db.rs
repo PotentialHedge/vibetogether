@@ -90,15 +90,22 @@ pub async fn count(db: &mut Db, sql: &'static str, args: &[&str]) -> Result<i64>
 pub const MAX_GROUPS: i64 = 20;
 pub const MAX_MEMBERS: i64 = 50;
 
-/// Whether `member`, a person by their account's id or an agent by its id, is in the group.
+/// How long the trash keeps what was deleted, before it is purged.
+pub const TRASH_DAYS: i64 = 30;
+
+/// Whether `member`, a person by their account's id or an agent by its id, is in the group, where
+/// it is not in the trash: what is in the trash shows to no one but in it (`trash`).
 pub async fn is_member(db: &mut Db, group: &str, member: &str) -> Result<bool> {
   Ok(
-    sqlx::query(r#"SELECT 1 FROM group_member WHERE "group" = ? AND member = ?"#)
-      .bind(group)
-      .bind(member)
-      .fetch_optional(db)
-      .await?
-      .is_some(),
+    sqlx::query(
+      r#"SELECT 1 FROM group_member m JOIN "group" g ON g.id = m."group"
+         WHERE m."group" = ? AND m.member = ? AND g.trashed IS NULL"#,
+    )
+    .bind(group)
+    .bind(member)
+    .fetch_optional(db)
+    .await?
+    .is_some(),
   )
 }
 
@@ -190,13 +197,15 @@ pub struct SessionAccess {
 }
 
 /// The session, where `who` takes part in it, a person by their account's id or an agent by its
-/// id: a member of its group, or one of its DM's two friends, which no agent is.
+/// id: a member of its group, or one of its DM's two friends, which no agent is. A session in the
+/// trash, or in a project in it, is none (`is_member` takes care of a group in it).
 pub async fn session_for(db: &mut Db, id: &str, who: &str) -> Result<Option<SessionAccess>> {
   let session: Option<SessionAccess> = sqlx::query_as(
     r#"SELECT s.id, s.name, s.project, coalesce(p."group", gs."group") AS "group",
        coalesce(gs.general, 0) AS general, d.a, d.b FROM session s
        LEFT JOIN project p ON p.id = s.project LEFT JOIN group_session gs ON gs.session = s.id
-       LEFT JOIN dm d ON d.session = s.id WHERE s.id = ?"#,
+       LEFT JOIN dm d ON d.session = s.id
+       WHERE s.id = ? AND s.trashed IS NULL AND p.trashed IS NULL"#,
   )
   .bind(id)
   .fetch_optional(&mut *db)

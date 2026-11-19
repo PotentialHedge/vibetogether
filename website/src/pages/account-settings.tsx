@@ -1,5 +1,5 @@
 /** The account's settings, one tab each: friends, logins, what agents
- * changed, and signing out and deleting the account. They are part of the
+ * changed, the trash, and signing out and deleting the account. They are part of the
  * app, so the app's rail stays beside them. */
 
 import {
@@ -11,6 +11,7 @@ import {
 	KeyRound,
 	LogOut,
 	Monitor,
+	Trash2,
 	Users,
 } from "lucide-react";
 import { type ReactNode, useCallback, useEffect, useState } from "react";
@@ -21,6 +22,7 @@ import {
 	type Login,
 	type Seen,
 	signedOut,
+	type Trashed,
 } from "@/account/api";
 import {
 	AddByName,
@@ -39,15 +41,17 @@ import { page, render, Site } from "@/site";
 type State = Seen & {
 	logins: Login[];
 	activity: Activity[];
+	trash: Trashed[];
 };
 
 async function load(given?: Seen): Promise<State> {
-	const [seen, logins, activity] = await Promise.all([
+	const [seen, logins, activity, trash] = await Promise.all([
 		given ?? api.seen(),
 		api.logins(),
 		api.activity(),
+		api.trash(),
 	]);
-	return { ...seen, logins, activity };
+	return { ...seen, logins, activity, trash };
 }
 
 /** What each kind of login is, in plain words. */
@@ -81,6 +85,7 @@ const TABS = [
 	{ id: "friends", label: "Friends", icon: Users },
 	{ id: "logins", label: "Logins", icon: KeyRound },
 	{ id: "activity", label: "Activity", icon: History },
+	{ id: "trash", label: "Trash", icon: Trash2 },
 	{ id: "account", label: "Account", icon: CircleUser },
 ] as const;
 type Tab = (typeof TABS)[number]["id"];
@@ -145,7 +150,7 @@ function Settings({
 	state: State;
 	reload: () => Promise<void>;
 }) {
-	const { me, friends, logins, activity } = state;
+	const { me, friends, logins, activity, trash } = state;
 	const { problem, act } = useActions(reload);
 	const [tab, setTab] = useState<Tab>(tabOfAddress);
 	useEffect(() => {
@@ -336,6 +341,43 @@ function Settings({
 									<Titled
 										title={change.operation}
 										detail={`${change.agent ?? change.name} · ${when.format(new Date(change.created))}${Object.keys(change.arguments).length ? ` · ${argumentsOf(change.arguments)}` : ""}`}
+									/>
+								</Row>
+							))}
+						</Rows>
+					</Pane>
+				)}
+
+				{tab === "trash" && (
+					<Pane
+						title="Trash"
+						line="What you and your agents deleted, with everything in it: it shows nowhere else until it is restored, and goes for good 30 days after it was deleted."
+					>
+						<Rows empty="The trash is empty.">
+							{trash.map((item) => (
+								<Row
+									key={item.id}
+									actions={
+										<Button
+											variant="ghost"
+											size="sm"
+											onClick={act(() => api.restore(item.id))}
+										>
+											Restore
+										</Button>
+									}
+								>
+									<Titled
+										title={item.name}
+										detail={[
+											item.project
+												? `session in ${item.group?.name} / ${item.project.name}`
+												: item.group
+													? `${item.kind} in ${item.group.name}`
+													: item.kind,
+											`deleted ${when.format(new Date(item.trashed))}${item.by ? ` by ${item.by}` : ""}`,
+											`gone ${date.format(new Date(item.purged))}`,
+										].join(" · ")}
 									/>
 								</Row>
 							))}

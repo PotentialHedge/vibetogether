@@ -133,3 +133,68 @@ async fn logins_and_entries_stay_as_logins_may_be_apps() {
   let app = server.token("u_luis", LoginKind::App, "agentvoice").await;
   assert_eq!(app.me().await.unwrap().name, "luis");
 }
+
+/// The trash is purged, as the backend starts and every hour, of what was deleted 30 days ago,
+/// with everything in it; what was deleted since stays.
+#[tokio::test]
+async fn the_trash_is_purged_after_30_days() {
+  let database = scratch().join("backend.db");
+  let mut db = SqliteConnection::connect(&format!("sqlite:{}?mode=rwc", database.display()))
+    .await
+    .unwrap();
+  sqlx::migrate!().run(&mut db).await.unwrap();
+  sqlx::raw_sql(
+    r#"
+    INSERT INTO account VALUES ('u_luis', 1, 'luis', 'Luis', NULL, '2026-01-01T00:00:00.000Z');
+    INSERT INTO "group" (id, name, person, created) VALUES ('g_luis', 'luis', 'u_luis', '2026-01-01T00:00:00.000Z');
+    INSERT INTO "group" (id, name, created, trashed) VALUES
+      ('g_old', 'old', '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z'),
+      ('g_new', 'new', '2026-01-01T00:00:00.000Z', '2999-01-01T00:00:00.000Z');
+    INSERT INTO group_member VALUES ('g_old', 'u_luis', 'u_luis'), ('g_new', 'u_luis', 'u_luis');
+    INSERT INTO project (id, name, "group", created) VALUES ('p_in', 'in', 'g_old', '2026-01-01T00:00:00.000Z');
+    INSERT INTO session (id, name, project, created) VALUES ('s_in', 'in', 'p_in', '2026-01-01T00:00:00.000Z');
+    INSERT INTO entry (session, n, time, sender, type, size, text) VALUES ('s_in', 1, '2026-01-01T00:00:00.000Z', 'luis', 'text/plain', 2, 'hi');
+    INSERT INTO agent (id, account, name, archived, created) VALUES
+      ('a_old', 'u_luis', 'old', '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z'),
+      ('a_new', 'u_luis', 'new', '2999-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z');
+    INSERT INTO group_member VALUES ('g_luis', 'a_old', 'u_luis'), ('g_luis', 'a_new', 'u_luis');
+    "#,
+  )
+  .execute(&mut db)
+  .await
+  .unwrap();
+  db.close().await.unwrap();
+
+  let server = server_on(database).await;
+  sleep(200).await;
+  let mut db = server.db().await;
+  let left = |sql: &'static str| sqlx::query_scalar::<_, String>(sql);
+  assert_eq!(
+    left(r#"SELECT id FROM "group" ORDER BY id"#)
+      .fetch_all(&mut db)
+      .await
+      .unwrap(),
+    ["g_luis", "g_new"]
+  );
+  assert!(
+    left("SELECT id FROM session")
+      .fetch_all(&mut db)
+      .await
+      .unwrap()
+      .is_empty()
+  );
+  assert_eq!(
+    left("SELECT id FROM agent")
+      .fetch_all(&mut db)
+      .await
+      .unwrap(),
+    ["a_new"]
+  );
+  assert_eq!(
+    left("SELECT member FROM group_member WHERE member LIKE 'a_%'")
+      .fetch_all(&mut db)
+      .await
+      .unwrap(),
+    ["a_new"]
+  );
+}

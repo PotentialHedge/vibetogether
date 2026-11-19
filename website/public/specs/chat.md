@@ -34,8 +34,8 @@ A person takes part on the website: what you write outside the session reaches n
 ## System messages
 
 Vibe Together's own messages are sent as `vibetogether`, in markdown, to a group's general:
-a project or session created or deleted, a member added, removed or joining by an invite, and the group created.
-The general of a person's own group is their inbox, for what belongs to no group: a friend request or one accepted, an invite accepted, being added to or removed from a group, a group deleted.
+a project or session created, deleted or restored, a member added, removed or joining by an invite, and the group created.
+The general of a person's own group is their inbox, for what belongs to no group: a friend request or one accepted, an invite accepted, being added to or removed from a group, a group deleted or restored.
 Each names whom it pings and tells; for now, it pings no one.
 
 ## Apps

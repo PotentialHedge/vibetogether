@@ -56,7 +56,9 @@ async fn target_of(db: &mut Db, code: &str) -> Result<Option<Target>> {
     sqlx::query_as(
       r#"SELECT g.id AS "group", g.name AS group_name, g.person IS NOT NULL AS own,
          s.id AS session, s.name AS session_name
-         FROM invite i JOIN "group" g ON g.id = i."group" LEFT JOIN session s ON s.id = i.session
+         FROM invite i JOIN "group" g ON g.id = i."group"
+         LEFT JOIN session s ON s.id = i.session AND s.trashed IS NULL
+           AND NOT EXISTS (SELECT 1 FROM project p WHERE p.id = s.project AND p.trashed IS NOT NULL)
          WHERE i.code = ?"#,
     )
     .bind(code)
@@ -350,7 +352,7 @@ pub async fn accept(
     }
     let besides = db::count(
       &mut tx,
-      r#"SELECT count(*) FROM group_member m JOIN "group" g ON g.id = m."group" WHERE m.member = ? AND g.person IS NULL"#,
+      r#"SELECT count(*) FROM group_member m JOIN "group" g ON g.id = m."group" WHERE m.member = ? AND g.person IS NULL AND g.trashed IS NULL"#,
       &[me],
     )
     .await?;

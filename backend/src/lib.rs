@@ -18,6 +18,7 @@ mod legacy;
 mod limits;
 mod sessions;
 mod transport;
+mod trash;
 
 use std::{ops::Deref, sync::Arc, time::Instant};
 
@@ -122,6 +123,8 @@ impl App {
       .route("/agents", get(account::agents).post(account::create_agent))
       .route("/agents/{id}", axum::routing::patch(account::rename_agent))
       .route("/agents/{id}/archive", post(account::archive_agent))
+      .route("/trash", get(trash::list))
+      .route("/trash/{id}/restore", post(trash::restore))
       .route("/status", put(account::set_status))
       .route("/sessions", get(sessions::list).post(sessions::create))
       .route(

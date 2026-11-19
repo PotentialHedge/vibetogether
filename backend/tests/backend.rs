@@ -1060,7 +1060,9 @@ async fn every_group_has_its_general_which_stays_as_long_as_the_group() {
     .entries;
   assert_eq!(
     mail.last().unwrap().text.as_deref(),
-    Some("ben deleted the group `doomed`.")
+    Some(
+      "ben deleted the group `doomed`, into the trash, where its members restore it within 30 days."
+    )
   );
 }
 
@@ -2049,7 +2051,7 @@ async fn adding_a_member_keeps_to_their_limit_of_groups() {
 }
 
 #[tokio::test]
-async fn letting_someone_in_and_deleting_are_the_persons_alone() {
+async fn letting_someone_in_is_the_persons_alone() {
   let w = world().await;
   let tristan = w.server.person("tristan").await;
   tristan.browser.add_friend("luis").await.unwrap();
@@ -2075,9 +2077,6 @@ async fn letting_someone_in_and_deleting_are_the_persons_alone() {
       })
       .await,
   );
-  refused(machine.delete_session(&w.session.id).await);
-  refused(machine.delete_project(&w.project.id).await);
-  refused(machine.delete_group(&w.group.id).await);
   let logins = w.luis.browser.logins().await.unwrap();
   let other = logins.iter().find(|l| l.kind == LoginKind::Person).unwrap();
   refused(machine.revoke_login(&other.id).await);
@@ -2107,11 +2106,101 @@ async fn letting_someone_in_and_deleting_are_the_persons_alone() {
     == Some("tristan asked to be your friend: to accept, add them back on the website, or with a person token.")));
   // The person does all of it.
   w.luis.own.add_friend("tristan").await.unwrap();
-  w.luis.own.delete_session(&w.session.id).await.unwrap();
-  w.luis.own.delete_project(&w.project.id).await.unwrap();
-  w.luis.own.delete_group(&w.group.id).await.unwrap();
   let mine = logins.iter().find(|l| l.kind == LoginKind::Agent).unwrap();
   machine.revoke_login(&mine.id).await.unwrap();
+}
+
+#[tokio::test]
+async fn agents_delete_into_the_trash_whence_whoever_could_delete_restores() {
+  let w = world().await;
+  let machine = &w.luis.machine;
+  let s_ = &w.session.id;
+  w.ben.browser.join(s_).await.unwrap();
+  send(&w.ben.browser, s_, "Kept.", "text/plain").await;
+  // An agent deletes a session: it shows nowhere but in the trash of its group's members.
+  machine.delete_session(s_).await.unwrap();
+  assert_eq!(status(w.ben.browser.session(s_).await), 404);
+  assert_eq!(
+    status(w.ben.browser.log(s_, &LogQuery::default()).await),
+    404
+  );
+  let trash = w.ben.browser.trash().await.unwrap();
+  assert_eq!(trash.len(), 1);
+  assert_eq!(
+    (trash[0].kind, trash[0].by.as_deref()),
+    (TrashKind::Session, Some("luis/laptop"))
+  );
+  assert!(w.eve.browser.trash().await.unwrap().is_empty());
+  assert_eq!(status(w.eve.browser.restore(s_).await), 404);
+  // Another member's agent restores it, with its log and who was in it.
+  w.ben.machine.restore(s_).await.unwrap();
+  let log = w.ben.browser.log(s_, &LogQuery::default()).await.unwrap();
+  assert!(
+    log
+      .entries
+      .iter()
+      .any(|e| e.text.as_deref() == Some("Kept."))
+  );
+  assert!(log.participants.contains_key("ben"));
+  assert_eq!(status(w.ben.machine.restore(s_).await), 404);
+
+  // A project goes with its sessions, and comes back with them.
+  machine.delete_project(&w.project.id).await.unwrap();
+  assert_eq!(status(w.ben.browser.session(s_).await), 404);
+  assert!(w.ben.browser.projects().await.unwrap().is_empty());
+  let trash = w.luis.browser.trash().await.unwrap();
+  assert_eq!(
+    trash.iter().map(|t| t.id.as_str()).collect::<Vec<_>>(),
+    [w.project.id.as_str()]
+  );
+  w.luis.browser.restore(&w.project.id).await.unwrap();
+  w.ben.browser.session(s_).await.unwrap();
+
+  // A group goes with everything in it; what was in it is restored with it alone.
+  machine.delete_group(&w.group.id).await.unwrap();
+  assert!(
+    w.ben
+      .browser
+      .groups()
+      .await
+      .unwrap()
+      .iter()
+      .all(|g| g.id != w.group.id)
+  );
+  assert_eq!(status(w.ben.browser.session(s_).await), 404);
+  assert_eq!(status(machine.delete_project(&w.project.id).await), 404);
+  machine.delete_session(s_).await.unwrap_err();
+  w.ben.browser.restore(&w.group.id).await.unwrap();
+  w.ben.browser.session(s_).await.unwrap();
+
+  // An agent archives another of its person's, into the trash, which only they see.
+  let lead = agent(&w.luis.machine, "lead").await;
+  machine.archive_agent(&id(&lead)).await.unwrap();
+  assert_eq!(status(lead.set_status("back").await), 403);
+  let trash = w.luis.browser.trash().await.unwrap();
+  assert_eq!(
+    (trash[0].kind, trash[0].name.as_str()),
+    (TrashKind::Agent, "luis/lead")
+  );
+  assert!(
+    w.ben
+      .browser
+      .trash()
+      .await
+      .unwrap()
+      .iter()
+      .all(|t| t.kind != TrashKind::Agent)
+  );
+  // Restored, it is its holder's again; its name taken meanwhile, it waits for a rename.
+  machine.restore(&id(&lead)).await.unwrap();
+  lead.set_status("back").await.unwrap();
+  machine.archive_agent(&id(&lead)).await.unwrap();
+  let _other = agent(&w.luis.machine, "lead").await;
+  assert_eq!(status(machine.restore(&id(&lead)).await), 409);
+  // An app restores nothing.
+  let luis = w.luis.browser.me().await.unwrap().id;
+  let app = w.server.token(&luis, LoginKind::App, "voice").await;
+  assert_eq!(status(app.trash().await), 403);
 }
 
 /// The group's agents, by name, as `client` sees it.

@@ -206,7 +206,8 @@ function NameDialog({
 	);
 }
 
-/** Asking before something is deleted for good, since nothing brings it back. */
+/** Asking before something is deleted, into the trash, where it waits 30 days
+ * to be restored. */
 export function ConfirmDialog({
 	open,
 	onOpenChange,
@@ -671,7 +672,7 @@ function ProjectItem({
 				description={
 					sessions.length === 0
 						? "It has no sessions."
-						: `${sessions.length === 1 ? "Its session goes" : `Its ${sessions.length} sessions go`} with it, for everyone in the group.`
+						: `${sessions.length === 1 ? "Its session goes" : `Its ${sessions.length} sessions go`} with it, for everyone in the group, into the trash, where any member restores it within 30 days.`
 				}
 				label="Delete project"
 				onConfirm={act(() => api.deleteProject(project.id))}
@@ -1095,7 +1096,7 @@ export function Sidebar({
 				open={deleting}
 				onOpenChange={setDeleting}
 				title={`Delete ${group.name}?`}
-				description="Its projects and their sessions go with it, for every member."
+				description="Its projects and their sessions go with it, for every member, into the trash, where any member restores it within 30 days."
 				label="Delete group"
 				onConfirm={act(() => api.deleteGroup(group.id))}
 			/>

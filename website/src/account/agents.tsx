@@ -1,14 +1,16 @@
 /** The person's agents, in the app beside their groups: each with its
  * presence and status, the groups it is in, picked from one button, and
- * renamed or archived in place. Only the person adds an agent to a group. */
+ * renamed or archived in place, into the trash. Only the person adds an agent
+ * to a group. */
 
 import { ArrowLeft, Bot, Users } from "lucide-react";
-import { type ReactNode, useEffect, useState } from "react";
-import { type Agent, api, type Group } from "@/account/api";
+import { type ReactNode, useState } from "react";
+import { type Agent, api, demo, type Group } from "@/account/api";
 import { AddByName, Presence, Titled } from "@/account/parts";
 import { Picker } from "@/account/picker";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { page } from "@/site";
 
 type Act = (action: () => Promise<unknown>) => () => Promise<void>;
 
@@ -33,16 +35,6 @@ export function Agents({
 	/** The way back to the navigation, on a phone. */
 	back: ReactNode;
 }) {
-	// The archived ones come only from the account's own list.
-	const [archived, setArchived] = useState<Agent[]>([]);
-	const [showArchived, setShowArchived] = useState(false);
-	useEffect(() => {
-		void live;
-		api.agents().then(
-			(all) => setArchived(all.filter((a) => a.presence === "archived")),
-			() => setArchived([]),
-		);
-	}, [live]);
 	const shared = groups.filter((group) => !group.own);
 	return (
 		<div className="flex min-h-0 flex-1 flex-col">
@@ -84,29 +76,12 @@ export function Agents({
 							))}
 						</ul>
 					)}
-					{archived.length > 0 && (
-						<div className="flex flex-col gap-2">
-							<button
-								type="button"
-								className="self-start text-xs text-muted-foreground underline-offset-4 hover:underline"
-								onClick={() => setShowArchived((on) => !on)}
-							>
-								{showArchived ? "hide archived" : `${archived.length} archived`}
-							</button>
-							{showArchived && (
-								<ul className="divide-y overflow-hidden rounded-xl border bg-card/50 opacity-60">
-									{archived.map((agent) => (
-										<li key={agent.id} className="px-4 py-3">
-											<Titled
-												title={agent.name}
-												detail={`${agent.id} · archived`}
-											/>
-										</li>
-									))}
-								</ul>
-							)}
-						</div>
-					)}
+					<a
+						href={page(`account/settings/?tab=trash${demo ? "#demo" : ""}`)}
+						className="self-start text-xs text-muted-foreground underline-offset-4 hover:underline"
+					>
+						Archived agents are in the trash, for 30 days.
+					</a>
 				</div>
 			</div>
 		</div>
@@ -114,8 +89,8 @@ export function Agents({
 }
 
 /** One agent: its name, id, presence and status, its groups behind one
- * button, renamed in place, and archived after a second click, since that
- * can't be undone. */
+ * button, renamed in place, and archived after a second click, into the
+ * trash. */
 function AgentRow({
 	agent,
 	groups,
@@ -172,7 +147,7 @@ function AgentRow({
 							size="sm"
 							onClick={act(() => api.archiveAgent(agent.id))}
 						>
-							Archive for good
+							Archive, into the trash
 						</Button>
 						<Button
 							variant="ghost"

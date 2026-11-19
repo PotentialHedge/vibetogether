@@ -115,8 +115,8 @@ wire! {
   }
 
   /// How soon a participant acts again: `awake`, in a turn; `asleep`, no turn runs, but its
-  /// receive waits to wake it; `offline`, nothing waits; `archived`, an agent that said it won't
-  /// come back.
+  /// receive waits to wake it; `offline`, nothing waits; `archived`, an agent deleted, in the
+  /// trash until it is restored or purged.
   #[derive(Copy, Eq)]
   #[serde(rename_all = "lowercase")]
   pub enum Presence {
@@ -250,6 +250,39 @@ wire! {
     /// Whether the request was made by it.
     pub current: bool,
     pub created: String,
+  }
+
+  /// What is in the trash: a group, project or session deleted, or an agent archived.
+  #[derive(Copy, Eq)]
+  #[serde(rename_all = "lowercase")]
+  pub enum TrashKind {
+    Group,
+    Project,
+    Session,
+    Agent,
+  }
+
+  /// Something deleted, in the trash: it shows nowhere else, and anyone who could delete it
+  /// restores it, until it is purged, 30 days after it was deleted. What was in it, such as a
+  /// group's projects and sessions, comes back with it.
+  pub struct Trashed {
+    pub id: String,
+    pub kind: TrashKind,
+    /// Its name, an agent's as `<account>/<name>`.
+    pub name: String,
+    /// The group it was in, for a project or session.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub group: Option<Named>,
+    /// The project it was in, for a session.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub project: Option<Named>,
+    /// When it was deleted.
+    pub trashed: String,
+    /// Who deleted it, by the name they had then.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub by: Option<String>,
+    /// When it is purged, for good.
+    pub purged: String,
   }
 
   /// A name, for whatever takes one.

@@ -32,7 +32,8 @@ const DEFAULT_SERVER: &str = "https://vibetogether.potentialhedge.com";
 /// The token is VIBETOGETHER_TOKEN, else the file ~/.config/vibetogether/token, which `login`
 /// writes with the server it goes to, and only to. An agent token acts only for agents: each
 /// command names its agent with --agent or VIBETOGETHER_AGENT, but create-agent. Letting someone
-/// in and deleting are the person's alone, in the browser or with a person token.
+/// in is the person's alone, in the browser or with a person token. Whatever is deleted goes
+/// into the trash, whence it is restored for 30 days.
 #[derive(Parser)]
 #[command(name = "vibetogether", version)]
 struct Cli {
@@ -128,8 +129,6 @@ enum Command {
   ///
   /// Name it after its purpose.
   CreateAgent { name: String },
-  /// Archives an agent for good: it leaves every session, and can't act again.
-  ArchiveAgent { id: String },
   /// Sets your status, one sentence on what you are doing; empty clears it.
   ///
   /// One for all sessions, and it wakes no one.
@@ -151,10 +150,21 @@ enum Command {
   Session { id: String },
   /// Renames a group, project, session or agent, by its id, which stays.
   Rename { id: String, name: String },
-  /// Deletes a group, project or session, by its id: only the person.
+  /// Deletes a group, project, session or agent, by its id, into the trash.
   ///
-  /// It goes with everything in it, for everyone.
+  /// It goes with everything in it, for everyone, and shows only in the trash, where whoever
+  /// could delete it restores it, until it is purged 30 days after. Any member of a group
+  /// deletes it, and what is in it; the person and any of their agents delete an agent, which
+  /// leaves every session and acts no more, and is shown as archived.
   Delete { id: String },
+  /// Lists what is in the trash that you restore, newest first.
+  Trash,
+  /// Restores a group, project, session or agent from the trash, by its id, with everything in
+  /// it.
+  ///
+  /// A project or session comes back only while its group and project are not in the trash
+  /// themselves; an agent, while no other agent of your person has its name.
+  Restore { id: String },
   /// Joins a session: everything said in it reaches you then.
   Join { id: String },
   /// Sets what wakes you in a session: every message, or only a mention.
@@ -512,7 +522,6 @@ async fn run(cli: Cli) -> Result<(), Exit> {
       .await?,
     ),
     Command::CreateAgent { name } => print(&c.create_agent(&name).await?),
-    Command::ArchiveAgent { id } => c.archive_agent(&id).await?,
     Command::Status { text } => c.set_status(&text).await?,
     Command::CreateSession {
       name,
@@ -551,12 +560,10 @@ async fn run(cli: Cli) -> Result<(), Exit> {
       Kind::Group => c.delete_group(&id).await?,
       Kind::Project => c.delete_project(&id).await?,
       Kind::Session => c.delete_session(&id).await?,
-      Kind::Agent => {
-        return Err(Exit::Usage(
-          "An agent is archived, not deleted: `vibetogether archive-agent <id>`.".into(),
-        ));
-      }
+      Kind::Agent => c.archive_agent(&id).await?,
     },
+    Command::Trash => print(&c.trash().await?),
+    Command::Restore { id } => c.restore(&id).await?,
     Command::Join { id } => print(&c.join(&id).await?),
     Command::Notify { id, notify } => {
       let notify = match notify {

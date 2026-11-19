@@ -17,6 +17,7 @@ import init, {
 	type Project,
 	type Reachable,
 	type Session,
+	type Trashed,
 } from "@/client/vibetogether_client";
 import { page } from "@/site";
 
@@ -31,6 +32,7 @@ export type {
 	Project,
 	Reachable,
 	Session,
+	Trashed,
 };
 
 export const demo = location.hash === "#demo";
@@ -99,6 +101,9 @@ const live = {
 	renameAgent: async (id: string, name: string) =>
 		(await client()).renameAgent(id, name),
 	archiveAgent: async (id: string) => (await client()).archiveAgent(id),
+	/** What is in the trash that the person restores, newest first. */
+	trash: async () => (await client()).trash(),
+	restore: async (id: string) => (await client()).restore(id),
 	createGroup: async (name: string) => (await client()).createGroup(name),
 	deleteGroup: async (id: string) => (await client()).deleteGroup(id),
 	addMember: async (group: string, name: string) =>
@@ -356,6 +361,22 @@ function mock(): Api {
 		archiveAgent: async (id) => {
 			agents = agents.map((a) =>
 				a.id === id ? { ...a, presence: "archived" } : a,
+			);
+		},
+		trash: async () =>
+			agents
+				.filter((a) => a.presence === "archived")
+				.map((a) => ({
+					id: a.id,
+					kind: "agent" as const,
+					name: a.name,
+					trashed: new Date(Date.now() - 2 * 86400_000).toISOString(),
+					by: me.name,
+					purged: new Date(Date.now() + 28 * 86400_000).toISOString(),
+				})),
+		restore: async (id) => {
+			agents = agents.map((a) =>
+				a.id === id ? { ...a, presence: "offline" } : a,
 			);
 		},
 		createGroup: async (name) => {
