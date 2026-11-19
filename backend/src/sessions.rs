@@ -12,13 +12,14 @@ use axum::{
 use serde_json::json;
 use sqlx::Connection;
 use vibetogether_protocol::{
-  CreateSession, Joined, Left, Log, LogQuery, MAX_PAYLOAD, MAX_WAIT, NameBody, NotifyBody,
-  Participant, ReceiveQuery, Received, SendQuery, Sent, Session, SessionProject,
+  AgentsReceiveQuery, AgentsReceived, CreateSession, Joined, Left, Log, LogQuery, LoginKind,
+  MAX_PAYLOAD, MAX_WAIT, NameBody, NotifyBody, Participant, ReceiveQuery, Received, SendQuery,
+  Sent, Session, SessionProject,
 };
 
 use crate::{
   App,
-  caller::Caller,
+  caller::{Caller, Unnamed},
   db::{self, Db, SessionAccess, TRASH_DAYS, general_of, is_member, session_for},
   error::{Refusal, Result},
   extract::{Json as Body, Path, Query},
@@ -530,6 +531,24 @@ pub async fn log(
   };
   Ok(Json(
     transport::observe(&app, &caller, &session.id, query).await?,
+  ))
+}
+
+/// Several agents of the account receive at once, with an agent token that names none: one
+/// waiting receive for, say, every agent on a machine.
+pub async fn receive_agents(
+  State(app): State<App>,
+  Unnamed(caller): Unnamed,
+  Body(query): Body<AgentsReceiveQuery>,
+) -> Result<Json<AgentsReceived>> {
+  checked_wait(query.wait)?;
+  if caller.kind != LoginKind::Agent || caller.agent.is_some() {
+    return Err(Refusal::bad(
+      "A receive for several agents is an agent token's, naming no agent of its own.",
+    ));
+  }
+  Ok(Json(
+    transport::receive_agents(&app, &caller.account, &caller.person, &caller.login, query).await?,
   ))
 }
 

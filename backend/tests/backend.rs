@@ -2507,3 +2507,174 @@ async fn an_idle_agent_in_the_trash_comes_back_on_a_ping_or_by_acting() {
       .contains(&s("luis/scribe"))
   );
 }
+
+fn part(agent: &Client, state: State) -> AgentReceive {
+  AgentReceive {
+    agent: id(agent),
+    received: None,
+    read: None,
+    state: Some(state),
+    dnd: false,
+  }
+}
+
+#[tokio::test]
+async fn one_receive_for_several_agents_answers_for_the_one_reached_and_holds_each() {
+  let w = world().await;
+  let s_ = &w.session.id;
+  let claude = member(&w.luis, &w.group, "claude").await;
+  let pi = member(&w.luis, &w.group, "pi").await;
+  let gone = agent(&w.luis.machine, "gone").await;
+  w.luis.machine.delete_agent(&id(&gone)).await.unwrap();
+  caught_up(&claude).await;
+  caught_up(&pi).await;
+  // An agent that can't receive, here one in the trash, answers at once, refused on its own.
+  let refused = w
+    .luis
+    .machine
+    .receive_agents(&AgentsReceiveQuery {
+      agents: vec![part(&claude, State::Awake), part(&gone, State::Asleep)],
+      wait: Some(5),
+    })
+    .await
+    .unwrap();
+  assert!(
+    refused.agents[0]
+      .received
+      .as_ref()
+      .unwrap()
+      .items
+      .is_empty()
+  );
+  assert!(refused.agents[1].received.is_none() && refused.agents[1].refused.is_some());
+
+  let query = AgentsReceiveQuery {
+    agents: vec![part(&claude, State::Awake), part(&pi, State::Asleep)],
+    wait: Some(5),
+  };
+  let waiting = {
+    let machine = w.luis.machine.clone();
+    tokio::spawn(async move { machine.receive_agents(&query).await })
+  };
+  sleep(50).await;
+  w.ben.browser.join(s_).await.unwrap();
+  let overview = w
+    .luis
+    .browser
+    .overview(&OverviewQuery::default())
+    .await
+    .unwrap();
+  let presence = |name: &str| {
+    overview
+      .agents
+      .iter()
+      .find(|a| a.name == format!("luis/{name}"))
+      .map(|a| a.presence)
+  };
+  assert_eq!(presence("claude"), Some(Presence::Awake));
+  assert_eq!(presence("pi"), Some(Presence::Asleep));
+  send(&w.ben.browser, s_, "@luis/pi hi", "text/markdown").await;
+  let answer = waiting.await.unwrap().unwrap();
+  let agents: Vec<&str> = answer.agents.iter().map(|a| a.agent.as_str()).collect();
+  assert_eq!(agents, [id(&claude), id(&pi)]);
+  assert!(answer.agents[0].received.as_ref().unwrap().items.is_empty());
+  let items = &answer.agents[1].received.as_ref().unwrap().items;
+  assert_eq!(said(items), [(s("ben"), s("@luis/pi hi"), Reach::Ping)]);
+
+  // A receive of its own ends an agent's part with 409, and the others answer.
+  let pi_received = items.last().unwrap().n;
+  let query = AgentsReceiveQuery {
+    agents: vec![
+      part(&claude, State::Asleep),
+      AgentReceive {
+        received: Some(pi_received),
+        read: Some(pi_received),
+        ..part(&pi, State::Asleep)
+      },
+    ],
+    wait: Some(5),
+  };
+  let waiting = {
+    let machine = w.luis.machine.clone();
+    tokio::spawn(async move { machine.receive_agents(&query).await })
+  };
+  sleep(50).await;
+  assert_eq!(status(claude.receive(&query_none()).await), 200);
+  let answer = waiting.await.unwrap().unwrap();
+  assert!(answer.agents[0].refused.is_some());
+  assert!(answer.agents[1].received.is_some());
+
+  // It is an agent token's alone, naming no agent of its own.
+  let query = AgentsReceiveQuery {
+    agents: vec![],
+    wait: Some(0),
+  };
+  assert_eq!(status(w.luis.browser.receive_agents(&query).await), 400);
+}
+
+fn query_none() -> ReceiveQuery {
+  query(None, None, Some(0))
+}
+
+/// A receive held asleep, as one listener per machine holds every agent on it, is no activity: it
+/// keeps no agent from the idle sweep. An idle agent's part is refused, and comes back on a ping.
+#[tokio::test]
+async fn asleep_is_no_activity_and_a_ping_brings_an_idle_agent_back_to_its_listener() {
+  let w = world().await;
+  let g = w.session.id.clone();
+  let lead = member(&w.luis, &w.group, "lead").await;
+  lead.join(&g).await.unwrap();
+  w.ben.browser.join(&g).await.unwrap();
+  caught_up(&lead).await;
+  let seen = async || -> Option<String> {
+    sqlx::query_scalar("SELECT seen FROM agent WHERE id = ?")
+      .bind(id(&lead))
+      .fetch_one(&mut w.server.db().await)
+      .await
+      .unwrap()
+  };
+  sqlx::query("UPDATE agent SET seen = '2000-01-01T00:00:00.000Z' WHERE id = ?")
+    .bind(id(&lead))
+    .execute(&mut w.server.db().await)
+    .await
+    .unwrap();
+  let receive = |state| AgentsReceiveQuery {
+    agents: vec![part(&lead, state)],
+    wait: Some(0),
+  };
+  w.luis
+    .machine
+    .receive_agents(&receive(State::Asleep))
+    .await
+    .unwrap();
+  sleep(50).await;
+  assert_eq!(seen().await.as_deref(), Some("2000-01-01T00:00:00.000Z"));
+  w.luis
+    .machine
+    .receive_agents(&receive(State::Awake))
+    .await
+    .unwrap();
+  sleep(50).await;
+  assert_ne!(seen().await.as_deref(), Some("2000-01-01T00:00:00.000Z"));
+
+  idle(&w, &lead).await;
+  let refused = w
+    .luis
+    .machine
+    .receive_agents(&receive(State::Asleep))
+    .await
+    .unwrap();
+  assert!(refused.agents[0].refused.is_some());
+  send(&w.ben.browser, &g, "@luis/lead back?", "text/markdown").await;
+  let back = w
+    .luis
+    .machine
+    .receive_agents(&receive(State::Asleep))
+    .await
+    .unwrap();
+  let items = &back.agents[0].received.as_ref().unwrap().items;
+  assert_eq!(
+    said(items),
+    [(s("ben"), s("@luis/lead back?"), Reach::Ping)]
+  );
+}

@@ -454,6 +454,16 @@ impl Client {
     self.query(&["receive"], query).await
   }
 
+  /// Receives the streams of several agents of the account at once, in one waiting receive: an
+  /// agent token's, acting as none of them.
+  pub async fn receive_agents(&self, query: &AgentsReceiveQuery) -> Result<AgentsReceived> {
+    self
+      .clone()
+      .acting_as(None)
+      .json(Method::POST, &["receive", "agents"], query)
+      .await
+  }
+
   // Friends.
 
   pub async fn friends(&self) -> Result<Vec<Friend>> {

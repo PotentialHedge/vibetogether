@@ -14,11 +14,11 @@ use std::{
 
 use axum::http::StatusCode;
 use sqlx::Connection;
-use tokio::{sync::oneshot, time::Instant};
+use tokio::{sync::mpsc, time::Instant};
 use vibetogether_protocol::{
-  Entry, Item, JOIN_TYPE, LEAVE_TYPE, LogQuery, MAX_NAMED, MAX_PAYLOAD, Named, Notify, Participant,
-  Presence, Reach, ReceiveQuery, Received, SYSTEM_NAME, Sent, State, is_message, is_name_part,
-  names_of, renamed, with_mentions,
+  AgentReceived, AgentsReceiveQuery, AgentsReceived, Entry, Item, JOIN_TYPE, LEAVE_TYPE, LogQuery,
+  MAX_NAMED, MAX_PAYLOAD, Named, Notify, Participant, Presence, Reach, ReceiveQuery, Received,
+  SYSTEM_NAME, Sent, State, is_message, is_name_part, names_of, renamed, with_mentions,
 };
 
 use crate::{
@@ -124,14 +124,17 @@ struct Holds {
   dnd: bool,
 }
 
-/// A receive waiting on its participant's stream, with what it holds.
+/// A receive waiting on its participant's stream, with what it holds. A receive for several
+/// agents waits as one receiver for each, all of one request.
 struct Receiver {
   account: String,
   participant: String,
   login: String,
   held: Holds,
-  /// Ends it: with nothing, it answers what there is; with a refusal, it refuses.
-  end: oneshot::Sender<Option<Refusal>>,
+  /// The request it waits for, which the account's limit counts.
+  request: u64,
+  /// Ends it, by its key: with nothing, it answers what there is; with a refusal, it refuses.
+  end: mpsc::UnboundedSender<(u64, Option<Refusal>)>,
 }
 
 /// When a participant's last receive started or ended, and the state it held.
@@ -283,7 +286,7 @@ fn end(app: &App, which: impl Fn(&Receiver) -> bool, why: impl Fn() -> Option<Re
         .collect();
       for key in keys {
         if let Some(r) = inner.receivers.remove(&key) {
-          let _ = r.end.send(why());
+          let _ = r.end.send((key, why()));
         }
       }
       heard(app, inner, &account, &id, state);
@@ -364,6 +367,13 @@ pub async fn login_lasts(db: &mut Db, login: &str) -> Result<bool> {
 /// login: another login takes it once its holder is revoked, or has neither acted as it for an
 /// hour nor has a receive of it waiting. A person is no agent, and every login of theirs is them.
 pub async fn hold(app: &App, db: &mut Db, p: &Acting, login: &str) -> Result<()> {
+  hold_as(app, db, p, login, true).await
+}
+
+/// `hold`, where `active` says whether this counts as the agent's activity, which keeps it from
+/// the idle sweep (`trash::sweep_idle`): a receive held asleep doesn't, since one listener per
+/// machine keeps every agent on it asleep for good.
+async fn hold_as(app: &App, db: &mut Db, p: &Acting, login: &str, active: bool) -> Result<()> {
   if p.id == p.account {
     return Ok(());
   }
@@ -385,12 +395,14 @@ pub async fn hold(app: &App, db: &mut Db, p: &Acting, login: &str) -> Result<()>
   let other = agent.holder.as_ref().filter(|holder| *holder != login);
   let now = db::now();
   let taken = sqlx::query(
-    "UPDATE agent SET holder = ?1, seen = ?2 WHERE id = ?3 AND (holder IS NULL OR holder = ?1
+    "UPDATE agent SET holder = ?1, seen = CASE WHEN ?4 THEN ?2 ELSE seen END WHERE id = ?3
+     AND (holder IS NULL OR holder = ?1
      OR NOT EXISTS (SELECT 1 FROM login WHERE id = agent.holder AND (expires IS NULL OR expires > ?2)))",
   )
   .bind(login)
   .bind(&now)
   .bind(&p.id)
+  .bind(active)
   .execute(&mut *db)
   .await?;
   if taken.rows_affected() == 0 {
@@ -1318,8 +1330,9 @@ impl Drop for Waiting {
         heard(app, inner, &p.account, &p.id, *held);
       }
     });
-    // When its last receive ended, which its sessions show while it is offline.
-    let (app, p) = (app.clone(), p.clone());
+    // When its last receive ended, which its sessions show while it is offline; for the agent,
+    // only where it held it awake, which counts as its activity (`hold_as`).
+    let (app, p, active) = (app.clone(), p.clone(), held.state == State::Awake);
     tokio::spawn(async move {
       let now = db::now();
       let ended = async {
@@ -1328,9 +1341,10 @@ impl Drop for Waiting {
           .bind(&p.id)
           .execute(&app.db)
           .await?;
-        sqlx::query("UPDATE agent SET seen = ? WHERE id = ?")
+        sqlx::query("UPDATE agent SET seen = ? WHERE id = ? AND ?")
           .bind(&now)
           .bind(&p.id)
+          .bind(active)
           .execute(&app.db)
           .await
       };
@@ -1341,18 +1355,28 @@ impl Drop for Waiting {
   }
 }
 
-/// A participant receives its stream: the items after `received`, as given or as stored. Naming
-/// `received` and `read` stores them first (`acknowledge`). It returns as soon as there is an
-/// item, or after `wait` seconds, and holds the participant's `state` and `dnd` meanwhile. An agent has one
-/// receive at a time: a newer one ends the one before with 409; a person has one per page.
-pub async fn receive(app: &App, p: &Acting, login: &str, query: ReceiveQuery) -> Result<Received> {
-  let held = Holds {
-    state: query.state.unwrap_or_default(),
-    dnd: query.dnd,
-  };
-  let (received, read) = {
+/// One participant's part of a receive: who it is, what it holds, and its positions.
+struct Part {
+  p: Acting,
+  held: Holds,
+  after: u64,
+  received: u64,
+  read: u64,
+}
+
+/// Starts a participant's part of a receive: has `login` hold it, ends an agent's receive before,
+/// stores the positions it names, and notes that it is heard.
+async fn begin(
+  app: &App,
+  login: &str,
+  p: Acting,
+  received: Option<u64>,
+  read: Option<u64>,
+  held: Holds,
+) -> Result<Part> {
+  let (stored, read) = {
     let mut db = app.db.acquire().await?;
-    hold(app, &mut db, p, login).await?;
+    hold_as(app, &mut db, &p, login, held.state == State::Awake).await?;
     if p.id != p.account {
       end(
         app,
@@ -1364,73 +1388,226 @@ pub async fn receive(app: &App, p: &Acting, login: &str, query: ReceiveQuery) ->
         },
       );
     }
-    acknowledge(app, &mut db, &p.id, query.received, query.read).await?
+    acknowledge(app, &mut db, &p.id, received, read).await?
   };
-  let after = query.received.unwrap_or(received).min(received);
+  let after = received.unwrap_or(stored).min(stored);
   change(app, &p.id, |inner| {
     heard(app, inner, &p.account, &p.id, held)
   });
-  let answer = async || {
-    let mut db = app.db.acquire().await?;
-    let items = items_of(&mut db, &p.id, after).await?;
-    Ok::<_, Refusal>(Received {
-      items,
-      received,
-      read,
-    })
-  };
-  let now = answer().await?;
-  if !now.items.is_empty() || query.wait == Some(0) {
-    return Ok(now);
+  Ok(Part {
+    p,
+    held,
+    after,
+    received: stored,
+    read,
+  })
+}
+
+/// What reached a part's participant after its position.
+async fn answer_of(app: &App, part: &Part) -> Result<Received> {
+  let mut db = app.db.acquire().await?;
+  let items = items_of(&mut db, &part.p.id, part.after).await?;
+  Ok(Received {
+    items,
+    received: part.received,
+    read: part.read,
+  })
+}
+
+/// Waits on the parts' streams as one receive of the account: returns as soon as any has an
+/// item, or after `wait` seconds, each part's answer, or the refusal that ended it.
+async fn wait_on(
+  app: &App,
+  account: &str,
+  login: &str,
+  parts: &[Part],
+  wait: Option<u64>,
+) -> Result<Vec<Result<Received>>> {
+  let mut now = Vec::with_capacity(parts.len());
+  for part in parts {
+    now.push(answer_of(app, part).await?);
   }
-  let (tx, rx) = oneshot::channel();
-  let key = change(app, &p.id, |inner| {
-    let waiting = inner
+  if parts.is_empty() || wait == Some(0) || now.iter().any(|r| !r.items.is_empty()) {
+    return Ok(now.into_iter().map(Ok).collect());
+  }
+  let (tx, mut rx) = mpsc::unbounded_channel();
+  {
+    let inner = app.live.0.lock().unwrap();
+    let mut requests: Vec<u64> = inner
       .receivers
       .values()
-      .filter(|r| r.account == p.account)
-      .count();
-    if waiting >= MAX_WAITING {
+      .filter(|r| r.account == account)
+      .map(|r| r.request)
+      .collect();
+    requests.sort_unstable();
+    requests.dedup();
+    if requests.len() >= MAX_WAITING {
       return Err(Refusal::busy(
         StatusCode::SERVICE_UNAVAILABLE,
         "This account has too many receives waiting.",
         10,
       ));
     }
-    inner.next += 1;
-    let key = inner.next;
-    inner.receivers.insert(
+  }
+  let mut request = None;
+  let mut waiting = Vec::with_capacity(parts.len());
+  for part in parts {
+    let key = change(app, &part.p.id, |inner| {
+      inner.next += 1;
+      let key = inner.next;
+      inner.receivers.insert(
+        key,
+        Receiver {
+          account: account.to_string(),
+          participant: part.p.id.clone(),
+          login: login.to_string(),
+          held: part.held,
+          request: *request.get_or_insert(key),
+          end: tx.clone(),
+        },
+      );
+      key
+    });
+    waiting.push(Waiting {
+      app: app.clone(),
       key,
-      Receiver {
-        account: p.account.clone(),
-        participant: p.id.clone(),
-        login: login.to_string(),
-        held,
-        end: tx,
-      },
-    );
-    Ok(key)
-  })?;
-  let waiting = Waiting {
-    app: app.clone(),
-    key,
-    p: p.clone(),
-    held,
-  };
+      p: part.p.clone(),
+      held: part.held,
+    });
+  }
+  drop(tx);
   let timeout = async {
-    match query.wait {
+    match wait {
       Some(seconds) => tokio::time::sleep(Duration::from_secs(seconds)).await,
       None => std::future::pending().await,
     }
   };
+  let mut refused: HashMap<u64, Refusal> = HashMap::new();
   tokio::select! {
-    ended = rx => if let Ok(Some(refusal)) = ended {
-      return Err(refusal);
+    ended = rx.recv() => if let Some((key, Some(refusal))) = ended {
+      refused.insert(key, refusal);
     },
     () = timeout => {}
   }
+  let keys: Vec<u64> = waiting.iter().map(|w| w.key).collect();
   drop(waiting);
-  answer().await
+  while let Ok((key, why)) = rx.try_recv() {
+    if let Some(refusal) = why {
+      refused.insert(key, refusal);
+    }
+  }
+  let mut answers = Vec::with_capacity(parts.len());
+  for (part, key) in parts.iter().zip(keys) {
+    answers.push(match refused.remove(&key) {
+      Some(refusal) => Err(refusal),
+      None => Ok(answer_of(app, part).await?),
+    });
+  }
+  Ok(answers)
+}
+
+/// A participant receives its stream: the items after `received`, as given or as stored. Naming
+/// `received` and `read` stores them first (`acknowledge`). It returns as soon as there is an
+/// item, or after `wait` seconds, and holds the participant's `state` and `dnd` meanwhile. An agent has one
+/// receive at a time: a newer one ends the one before with 409; a person has one per page.
+pub async fn receive(app: &App, p: &Acting, login: &str, query: ReceiveQuery) -> Result<Received> {
+  let held = Holds {
+    state: query.state.unwrap_or_default(),
+    dnd: query.dnd,
+  };
+  let part = begin(app, login, p.clone(), query.received, query.read, held).await?;
+  wait_on(app, &p.account, login, &[part], query.wait)
+    .await?
+    .pop()
+    .expect("one part, one answer")
+}
+
+/// The most agents one receive for several waits on.
+pub const MAX_AGENTS_RECEIVED: usize = 100;
+
+/// Several agents of the account receive their streams at once, each as `receive` takes it, in
+/// one waiting receive: such as one per machine, for every agent on it. An agent that can't
+/// receive, such as one in the trash or another login's, is refused on its own, at once, and the
+/// others receive what there is.
+pub async fn receive_agents(
+  app: &App,
+  account: &str,
+  person: &str,
+  login: &str,
+  query: AgentsReceiveQuery,
+) -> Result<AgentsReceived> {
+  if query.agents.len() > MAX_AGENTS_RECEIVED {
+    return Err(Refusal::bad(format!(
+      "A receive for several agents names at most {MAX_AGENTS_RECEIVED}."
+    )));
+  }
+  let mut answers: Vec<AgentReceived> = Vec::with_capacity(query.agents.len());
+  let mut parts = Vec::new();
+  let mut at = Vec::new();
+  for asked in query.agents {
+    if answers.iter().any(|a| a.agent == asked.agent) {
+      return Err(Refusal::bad(format!(
+        "The agent {} is named twice.",
+        asked.agent
+      )));
+    }
+    let name: Option<String> = {
+      let mut db = app.db.acquire().await?;
+      sqlx::query_scalar("SELECT name FROM agent WHERE id = ? AND account = ?")
+        .bind(&asked.agent)
+        .bind(account)
+        .fetch_optional(&mut *db)
+        .await?
+    };
+    let begun = match name {
+      None => Err(Refusal::not_found("No such agent of this account.")),
+      Some(name) => {
+        let p = Acting {
+          account: account.to_string(),
+          id: asked.agent.clone(),
+          name: format!("{person}/{name}"),
+          app: None,
+        };
+        let held = Holds {
+          state: asked.state.unwrap_or_default(),
+          dnd: asked.dnd,
+        };
+        begin(app, login, p, asked.received, asked.read, held).await
+      }
+    };
+    match begun {
+      Ok(part) => {
+        at.push(answers.len());
+        parts.push(part);
+        answers.push(AgentReceived {
+          agent: asked.agent,
+          received: None,
+          refused: None,
+        });
+      }
+      Err(refusal) => answers.push(AgentReceived {
+        agent: asked.agent,
+        received: None,
+        refused: Some(refusal.message),
+      }),
+    }
+  }
+  // A refusal answers at once, so the caller learns of it and asks again without that agent.
+  let wait = if parts.len() < answers.len() {
+    Some(0)
+  } else {
+    query.wait
+  };
+  for (i, answer) in at
+    .into_iter()
+    .zip(wait_on(app, account, login, &parts, wait).await?)
+  {
+    match answer {
+      Ok(received) => answers[i].received = Some(received),
+      Err(refusal) => answers[i].refused = Some(refusal.message),
+    }
+  }
+  Ok(AgentsReceived { agents: answers })
 }
 
 #[derive(sqlx::FromRow)]

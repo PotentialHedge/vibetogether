@@ -57,16 +57,24 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
-  /// Keeps the agent's inbox (`agentinbox`) filled from its stream.
+  /// Keeps agents' inboxes (`agentinbox`) filled from their streams: the agent's that --agent
+  /// names, or, with none, every agent's on the machine, one listener for all.
   ///
-  /// One receive is kept open always, awake while the inbox's awake lock is held and asleep
-  /// otherwise. Each item that reaches the agent is delivered as text whose first line says where
+  /// With no agent named, it serves each inbox in --inboxes, `~/.agents/inbox` by default, whose
+  /// file `vibetogether` holds its agent's id, and follows them as they come and go. One receive
+  /// is kept open always, for all of them, each agent awake while its inbox's awake lock is held
+  /// and asleep otherwise. Each item that reaches the agent is delivered as text whose first line says where
   /// it is from. A ping or a session's message also rings the bell, an fyi stays quiet, unless
   /// the inbox's do-not-disturb rules say otherwise, matching `from`, `reach` (`ping`, `fyi`,
   /// `session`) and `session` (its name or id); where they quiet a mention, the receive holds do
   /// not disturb, so others see it. An item counts as received once it is in `new/`, and as read
-  /// once it and every item before it have left `new/`. It runs until refused.
-  Inbox,
+  /// once it and every item before it have left `new/`. An agent the server refuses, such as one
+  /// in the trash, is told so in its inbox and tried again later. It runs until refused.
+  Inbox {
+    /// The directory of the machine's inboxes, where no agent is named.
+    #[arg(long)]
+    inboxes: Option<PathBuf>,
+  },
   /// Gets a token, which the person approves at the link it prints.
   ///
   /// It writes the token to the token file, with the server it goes to, and waits until the
@@ -476,11 +484,21 @@ async fn run(cli: Cli) -> Result<(), Exit> {
   let client = Client::new(&cli.server, token).acting_as(cli.agent);
   let c = &client;
   match cli.command {
-    Command::Inbox => {
-      let root = cli
-        .inbox
-        .ok_or_else(|| Exit::Usage("No inbox: set AGENT_INBOX or pass --inbox.".into()))?;
-      return match inbox::receive(&agentinbox::Inbox::new(root), c).await {
+    Command::Inbox { inboxes } => {
+      let agents = match c.agent() {
+        Some(agent) => inbox::Agents::One {
+          agent: agent.to_string(),
+          inbox: cli.inbox.ok_or_else(|| {
+            Exit::Usage("No inbox for the agent: set AGENT_INBOX or pass --inbox.".into())
+          })?,
+        },
+        None => inbox::Agents::Machine(
+          inboxes
+            .or_else(|| std::env::home_dir().map(|home| home.join(".agents/inbox")))
+            .ok_or_else(|| Exit::Usage("No home: pass --inboxes.".into()))?,
+        ),
+      };
+      return match inbox::receive(&agents, c).await {
         Ok(()) => Ok(()),
         Err(inbox::Failure::Refused(error)) => Err(error.into()),
         Err(inbox::Failure::Inbox(error)) => Err(Exit::Inbox(error)),

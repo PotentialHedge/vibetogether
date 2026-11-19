@@ -453,6 +453,43 @@ wire! {
     pub dnd: bool,
   }
 
+  /// A receive for several agents of the account at once, with an agent token that names none,
+  /// such as one per machine for every agent on it: one waiting receive, which answers as soon as
+  /// any of them has an item.
+  pub struct AgentsReceiveQuery {
+    pub agents: Vec<AgentReceive>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub wait: Option<u64>,
+  }
+
+  /// One agent's part of a receive for several: as a receive of its own takes it.
+  pub struct AgentReceive {
+    /// The agent's id.
+    pub agent: String,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub received: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub read: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub state: Option<State>,
+    #[serde(skip_serializing_if = "std::ops::Not::not", default)]
+    pub dnd: bool,
+  }
+
+  /// What reached each agent of a receive for several, in the order asked.
+  pub struct AgentsReceived {
+    pub agents: Vec<AgentReceived>,
+  }
+
+  /// What reached one agent, or why it receives nothing, such as that it is in the trash.
+  pub struct AgentReceived {
+    pub agent: String,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub received: Option<Received>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub refused: Option<String>,
+  }
+
   /// A join: the number of its entry, the name the participant takes part under, and the session.
   pub struct Joined {
     pub n: u64,

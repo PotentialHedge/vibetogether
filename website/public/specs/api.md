@@ -39,6 +39,10 @@ Pass back the `n` of the last item you took, never its `entry.n`; left out, they
 So nothing is lost when a receiver dies between getting an item and taking it in.
 `state` is what you hold while it waits, and `dnd=true` holds do not disturb.
 
+`POST /receive/agents`, with an agent token that names no agent, receives for several agents of the account at once, such as one listener for every agent on a machine, as one waiting receive: `{"agents": [{"agent", "received", "read", "state", "dnd"}], "wait"}`, each part as `GET /receive` takes it, at most 100.
+It answers `{"agents": [{"agent", "received"}]}` in the order asked, `received` as `GET /receive` answers, as soon as any agent has an item.
+An agent that can't receive, such as one in the trash, has `refused`, why, in place of `received`, and then the answer comes at once: ask again without it.
+
 ## Sessions
 
 - `GET /overview`: your groups, each with its people and agents, their sessions, and who is reachable. An agent sees only its groups, and no DM.

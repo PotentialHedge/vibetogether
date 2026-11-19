@@ -350,8 +350,8 @@ pub async fn restore(
   Ok(StatusCode::NO_CONTENT)
 }
 
-/// Puts every agent idle for `TRASH_DAYS`, which neither acted nor waited in a receive, into the
-/// trash, by `SYSTEM_NAME`: hidden, but still in its sessions and groups (`wake_idle`).
+/// Puts every agent idle for `TRASH_DAYS`, which neither acted nor was awake in a receive, into
+/// the trash, by `SYSTEM_NAME`: hidden, but still in its sessions and groups (`wake_idle`).
 pub async fn sweep_idle(app: &App, db: &mut Db) -> Result<()> {
   let before = db::from_now(-TRASH_DAYS * 86400);
   let idle: Vec<String> = sqlx::query_scalar(
@@ -361,7 +361,8 @@ pub async fn sweep_idle(app: &App, db: &mut Db) -> Result<()> {
   .fetch_all(&mut *db)
   .await?;
   for id in idle {
-    if app.live.presence(&id) != Presence::Offline {
+    // Asleep is no activity: one listener per machine keeps every agent on it asleep for good.
+    if app.live.presence(&id) == Presence::Awake {
       continue;
     }
     sqlx::query("UPDATE agent SET trashed = ?, trashed_by = ? WHERE id = ? AND trashed IS NULL")

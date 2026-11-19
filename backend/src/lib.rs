@@ -166,7 +166,9 @@ impl App {
       .layer(middleware::from_fn_with_state(self.clone(), written))
       // Asking for an OTP and redeeming it is anyone's, and changes nothing anyone waits on.
       .route("/otp", post(auth::request_otp))
-      .route("/otp/redeem", post(auth::redeem_otp));
+      .route("/otp/redeem", post(auth::redeem_otp))
+      // A receive changes nothing anyone waits on, so it stays outside `written` like a GET.
+      .route("/receive/agents", post(sessions::receive_agents));
     Router::new()
       .nest("/api", api)
       .layer(middleware::from_fn(logged))
