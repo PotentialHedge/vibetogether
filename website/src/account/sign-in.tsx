@@ -28,10 +28,24 @@ export function GitHubIcon({ className }: { className?: string }) {
 	);
 }
 
-/** Signs in with GitHub, and comes back to `back`, a page of the site. */
+/** Signs in with GitHub, and comes back to `back`, a page of the site. On a
+ * server with an owner, whoever reaches it is its owner, so it signs in at
+ * once. */
 export function SignIn({ back }: { back: string }) {
 	const [busy, setBusy] = useState(false);
 	const [problem, setProblem] = useState<string | null>(null);
+	const [owned, setOwned] = useState<boolean | null>(null);
+	useEffect(() => {
+		api.owned().then(
+			async (owned) => {
+				setOwned(owned);
+				if (owned) location.href = await api.signIn(back);
+			},
+			() => setOwned(false),
+		);
+	}, [back]);
+	if (owned !== false)
+		return <p className="text-sm text-muted-foreground">Signing in…</p>;
 	return (
 		<div className="flex flex-col gap-3">
 			<Button

@@ -23,6 +23,7 @@ import {
 	type Group,
 	type Project,
 	type Reachable,
+	type Seen,
 	type Session,
 } from "@/account/api";
 import { doNotDisturb, setDoNotDisturb } from "@/account/live";
@@ -344,6 +345,7 @@ export function Rail({
 	act,
 	reload,
 	settings = false,
+	servers = [],
 }: {
 	me: Account;
 	/** Who asked to be friends, waiting for an answer. */
@@ -364,11 +366,41 @@ export function Rail({
 	reload: () => Promise<void>;
 	/** Whether the settings are open, which the person's face marks. */
 	settings?: boolean;
+	/** The person's other servers, whose groups follow the home server's,
+	 * each under its host, or its host alone where it is not reached. */
+	servers?: Seen["servers"];
 }) {
 	const [adding, setAdding] = useState(false);
 	const [theme, setTheme] = useTheme();
 	const [dnd, setDnd] = useState(doNotDisturb);
-	const sorted = [...groups].sort((a, b) => Number(b.own) - Number(a.own));
+	const on = (server: string | undefined) =>
+		groups
+			.filter((group) => group.server === server)
+			.sort((a, b) => Number(b.own) - Number(a.own));
+	const button = (group: Group) => (
+		<button
+			key={group.id}
+			type="button"
+			title={[
+				group.own ? `${group.name}, your own group` : group.name,
+				group.server && `on ${group.server}`,
+			]
+				.filter(Boolean)
+				.join(", ")}
+			aria-label={group.name}
+			aria-current={group.id === open}
+			onClick={() => onOpen(group.id)}
+			className={cn(
+				"relative rounded-xl ring-offset-2 ring-offset-background transition-shadow hover:ring-2 hover:ring-ring/40",
+				group.id === open && "ring-2 ring-ring",
+			)}
+		>
+			<GroupFace group={group} />
+			{pinged.has(group.id) && group.id !== open && (
+				<span className="absolute -top-0.5 -right-0.5 size-2.5 rounded-full bg-primary ring-2 ring-card" />
+			)}
+		</button>
+	);
 	return (
 		<nav
 			aria-label="DMs, agents and groups"
@@ -392,7 +424,12 @@ export function Rail({
 				<button
 					key={dm.id}
 					type="button"
-					title={friend.displayName || friend.name}
+					title={[
+						friend.displayName || friend.name,
+						dm.server && `on ${dm.server}`,
+					]
+						.filter(Boolean)
+						.join(", ")}
 					aria-label={`DM with ${friend.name}`}
 					aria-current={dm.id === open}
 					onClick={() => onDm(dm.id)}
@@ -421,28 +458,28 @@ export function Rail({
 			>
 				<Bot className="size-5" />
 			</button>
-			{sorted.map((group) => [
-				<button
-					key={group.id}
-					type="button"
-					title={group.own ? `${group.name}, your own group` : group.name}
-					aria-label={group.name}
-					aria-current={group.id === open}
-					onClick={() => onOpen(group.id)}
-					className={cn(
-						"relative rounded-xl ring-offset-2 ring-offset-background transition-shadow hover:ring-2 hover:ring-ring/40",
-						group.id === open && "ring-2 ring-ring",
-					)}
-				>
-					<GroupFace group={group} />
-					{pinged.has(group.id) && group.id !== open && (
-						<span className="absolute -top-0.5 -right-0.5 size-2.5 rounded-full bg-primary ring-2 ring-card" />
-					)}
-				</button>,
+			{on(undefined).map((group) => [
+				button(group),
 				// The person's own group stands apart from the groups they share.
 				group.own && (
 					<span key="apart" className="h-px w-8 shrink-0 bg-border" />
 				),
+			])}
+			{servers.map(({ host, reached }) => [
+				<span key={`${host} apart`} className="h-px w-8 shrink-0 bg-border" />,
+				<span
+					key={host}
+					title={
+						reached ? `Your groups on ${host}` : `${host} can't be reached now`
+					}
+					className={cn(
+						"w-14 truncate text-center text-[10px] leading-tight text-muted-foreground",
+						!reached && "line-through opacity-60",
+					)}
+				>
+					{host.split(".")[0]}
+				</span>,
+				...on(host).map(button),
 			])}
 			<Button
 				variant="ghost"
@@ -960,9 +997,16 @@ export function Sidebar({
 			<header className="flex h-14 shrink-0 items-center gap-2 border-b px-4">
 				<h2
 					className="min-w-0 flex-1 truncate font-mono font-medium"
-					title={group.name}
+					title={
+						group.server ? `${group.name}, on ${group.server}` : group.name
+					}
 				>
 					{group.name}
+					{group.server && (
+						<span className="ml-1.5 font-sans text-xs font-normal text-muted-foreground">
+							{group.server}
+						</span>
+					)}
 				</h2>
 				{!group.own && (
 					<DropdownMenu>

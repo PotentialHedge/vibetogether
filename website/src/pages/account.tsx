@@ -37,6 +37,9 @@ type Place = {
 	group?: string | undefined;
 	session?: string | undefined;
 	dm?: string | undefined;
+	/** The host of the server the open session is on, where it is not the
+	 * home server. */
+	server?: string | undefined;
 };
 
 function placeOfAddress(): Place {
@@ -46,14 +49,17 @@ function placeOfAddress(): Place {
 		group: query.get("group") ?? undefined,
 		session: query.get("session") ?? undefined,
 		dm: query.get("dm") ?? undefined,
+		server: query.get("server") ?? undefined,
 	};
 }
 
 function go(place: Place) {
 	const query = new URLSearchParams();
 	if (place.agents) query.set("agents", "");
-	else if (place.session) query.set("session", place.session);
-	else if (place.dm) query.set("dm", place.dm);
+	else if (place.session) {
+		query.set("session", place.session);
+		if (place.server) query.set("server", place.server);
+	} else if (place.dm) query.set("dm", place.dm);
 	else if (place.group) query.set("group", place.group);
 	const search = query.size ? `?${query}`.replace(/=$/, "") : "";
 	history.pushState(null, "", `${location.pathname}${search}${location.hash}`);
@@ -62,8 +68,20 @@ function go(place: Place) {
 const LAST = "vibetogether last session";
 
 function App({ state, reload }: { state: State; reload: () => Promise<void> }) {
-	const { me, groups, projects, sessions, friends, dms, reachable, agents } =
-		state;
+	const {
+		me,
+		groups,
+		projects,
+		sessions,
+		friends,
+		dms,
+		reachable,
+		agents,
+		servers,
+	} = state;
+	/** The person's name on the server a thing is on. */
+	const nameOn = (server: string | undefined) =>
+		servers.find((s) => s.host === server)?.account ?? me.name;
 	/** Whom a mention in a session of `group` can name: its people, and of its
 	 * agents the awake or asleep ones; a DM holds its two people alone. */
 	const mentionable = (group: Group | undefined, people: string[]) => [
@@ -79,8 +97,11 @@ function App({ state, reload }: { state: State; reload: () => Promise<void> }) {
 		if (place.agents || place.session || place.dm || place.group) return place;
 		const last = localStorage.getItem(LAST);
 		if (last?.startsWith("dm:")) return { dm: last.slice(3) };
-		return last && sessions.some((session) => session.id === last)
-			? { session: last }
+		// A session of another server is kept as `<id>@<host>`.
+		const [id, server] = last?.split("@") ?? [];
+		return id &&
+			sessions.some((session) => session.id === id && session.server === server)
+			? { session: id, server }
 			: {};
 	});
 	// On a phone: whether the navigation is shown, rather than the session.
@@ -107,7 +128,10 @@ function App({ state, reload }: { state: State; reload: () => Promise<void> }) {
 		: dmsOfFriends.find(({ friend }) => friend.name === place.dm);
 	const session = dm
 		? undefined
-		: sessions.find((session) => session.id === place.session);
+		: sessions.find(
+				(session) =>
+					session.id === place.session && session.server === place.server,
+			);
 	const group =
 		dm || place.agents
 			? undefined
@@ -117,7 +141,11 @@ function App({ state, reload }: { state: State; reload: () => Promise<void> }) {
 				groups.find((group) => group.own) ??
 				groups[0]);
 	useEffect(() => {
-		if (session) localStorage.setItem(LAST, session.id);
+		if (session)
+			localStorage.setItem(
+				LAST,
+				session.server ? `${session.id}@${session.server}` : session.id,
+			);
 	}, [session]);
 	useEffect(() => {
 		if (dm) localStorage.setItem(LAST, `dm:${dm.friend.name}`);
@@ -155,6 +183,7 @@ function App({ state, reload }: { state: State; reload: () => Promise<void> }) {
 					}
 					dms={dmsOfFriends}
 					groups={groups}
+					servers={servers}
 					open={dm?.dm.id ?? group?.id}
 					onOpen={(id) => open({ group: id })}
 					onAgents={() => open({ agents: true })}
@@ -179,7 +208,8 @@ function App({ state, reload }: { state: State; reload: () => Promise<void> }) {
 						reachable={reachable}
 						agents={agents}
 						current={session?.id}
-						onSession={(id) => open({ session: id })}
+						// The sidebar's sessions are its group's, on its server.
+						onSession={(id) => open({ session: id, server: group.server })}
 						act={act}
 						reload={reload}
 					/>
@@ -202,8 +232,11 @@ function App({ state, reload }: { state: State; reload: () => Promise<void> }) {
 				) : dm ? (
 					<Transcript
 						key={dm.dm.id}
-						as={me.name}
-						mentionable={mentionable(undefined, [me.name, dm.friend.name])}
+						as={nameOn(dm.dm.server)}
+						mentionable={mentionable(undefined, [
+							nameOn(dm.dm.server),
+							dm.friend.name,
+						])}
 						session={{
 							id: dm.dm.id,
 							name: dm.friend.displayName || dm.friend.name,
@@ -222,11 +255,14 @@ function App({ state, reload }: { state: State; reload: () => Promise<void> }) {
 					/>
 				) : session ? (
 					<Transcript
-						key={session.id}
-						as={me.name}
+						key={`${session.server} ${session.id}`}
+						as={nameOn(session.server)}
 						mentionable={(() => {
 							const group = groups.find((g) => g.id === session.group?.id);
-							return mentionable(group, group?.members ?? [me.name]);
+							return mentionable(
+								group,
+								group?.members ?? [nameOn(session.server)],
+							);
 						})()}
 						session={session}
 						back={
