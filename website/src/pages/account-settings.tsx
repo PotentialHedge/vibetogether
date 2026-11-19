@@ -84,6 +84,15 @@ const argumentsOf = (args: Record<string, unknown>) =>
 		)
 		.join(" · ");
 
+/** A place in the app as its query: what it opens, with the host of the
+ * server it is on where that is not the home one. */
+const placeQuery = (place: Record<string, string | undefined>) =>
+	new URLSearchParams(
+		Object.entries(place).filter((entry): entry is [string, string] =>
+			Boolean(entry[1]),
+		),
+	).toString();
+
 /** The app, with what the query opens. */
 const app = (query = "") => page(`account/${query}${demo ? "#demo" : ""}`);
 
@@ -428,7 +437,7 @@ function ServersPane({
 	return (
 		<Pane
 			title="Servers"
-			line="Your other Vibe Together servers, such as the public one, whose groups and sessions show beside this one's. This server keeps a person token for each."
+			line="Your other Vibe Together servers, such as the public one, whose groups and sessions show beside this one's. This server keeps a token for each."
 			action={
 				<AddByName
 					placeholder="https://server"
@@ -559,7 +568,9 @@ function InApp({
 	const { me, friends, groups, sessions, dms, servers } = state;
 	const { act } = useActions(reload);
 	const dmsOfFriends: DmOfFriend[] = dms.flatMap((dm) => {
-		const friend = friends.find((friend) => friend.name === dm.friend);
+		const friend = friends.find(
+			(friend) => friend.name === dm.friend && friend.server === dm.server,
+		);
 		return friend ? [{ dm, friend }] : [];
 	});
 	return (
@@ -579,16 +590,18 @@ function InApp({
 					groups={groups}
 					servers={servers}
 					open={undefined}
-					onOpen={(id) => {
-						location.href = app(`?group=${encodeURIComponent(id)}`);
+					onOpen={(group) => {
+						location.href = app(
+							`?${placeQuery({ group: group.id, server: group.server })}`,
+						);
 					}}
 					onAgents={() => {
 						location.href = app("?agents");
 					}}
-					onDm={(id) => {
-						const friend = dmsOfFriends.find(({ dm }) => dm.id === id)?.friend;
-						if (friend)
-							location.href = app(`?dm=${encodeURIComponent(friend.name)}`);
+					onDm={({ dm, friend }) => {
+						location.href = app(
+							`?${placeQuery({ dm: friend.name, server: dm.server })}`,
+						);
 					}}
 					act={act}
 					reload={reload}

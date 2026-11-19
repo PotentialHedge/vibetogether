@@ -68,7 +68,11 @@ type Act = (action: () => Promise<unknown>) => () => Promise<void>;
 
 /** Makes an invite to the session, to be friends and join its group, and
  * copies its link, for the person to send. */
-export function InviteToSession({ session }: { session: { id: string } }) {
+export function InviteToSession({
+	session,
+}: {
+	session: { id: string; server?: string };
+}) {
 	const [state, setState] = useState<"idle" | "copied" | string>("idle");
 	return (
 		<Button
@@ -81,7 +85,10 @@ export function InviteToSession({ session }: { session: { id: string } }) {
 			}
 			onClick={async () => {
 				try {
-					const { link } = await api.inviteToSession(session.id);
+					const { link } = await api.inviteToSession(
+						session.id,
+						session.server,
+					);
 					await navigator.clipboard.writeText(link);
 					setState("copied");
 					setTimeout(() => setState("idle"), 2000);
@@ -356,8 +363,8 @@ export function Rail({
 	groups: Group[];
 	/** The open group's id, or the open DM's. */
 	open: string | undefined;
-	onOpen: (group: string) => void;
-	onDm: (dm: string) => void;
+	onOpen: (group: Group) => void;
+	onDm: (dm: DmOfFriend) => void;
 	/** Opens the person's agents. */
 	onAgents: () => void;
 	/** Whether the agents are open. */
@@ -389,7 +396,7 @@ export function Rail({
 				.join(", ")}
 			aria-label={group.name}
 			aria-current={group.id === open}
-			onClick={() => onOpen(group.id)}
+			onClick={() => onOpen(group)}
 			className={cn(
 				"relative rounded-xl ring-offset-2 ring-offset-background transition-shadow hover:ring-2 hover:ring-ring/40",
 				group.id === open && "ring-2 ring-ring",
@@ -432,7 +439,7 @@ export function Rail({
 						.join(", ")}
 					aria-label={`DM with ${friend.name}`}
 					aria-current={dm.id === open}
-					onClick={() => onDm(dm.id)}
+					onClick={() => onDm({ dm, friend })}
 					className={cn(
 						"relative rounded-full ring-offset-2 ring-offset-background transition-shadow hover:ring-2 hover:ring-ring/40",
 						dm.id === open && "ring-2 ring-ring",
@@ -501,7 +508,7 @@ export function Rail({
 				onName={async (name) => {
 					const group = await api.createGroup(name);
 					await reload();
-					onOpen(group.id);
+					onOpen(group);
 				}}
 			/>
 			<DropdownMenu>
@@ -668,39 +675,44 @@ function ProjectItem({
 				>
 					{project.name}
 				</span>
-				<Button
-					variant="ghost"
-					size="icon-xs"
-					title="New session"
-					aria-label={`New session in ${project.name}`}
-					onClick={() => setAdding(true)}
-				>
-					<Plus />
-				</Button>
-				<DropdownMenu>
-					<DropdownMenuTrigger
-						render={
-							<Button
-								variant="ghost"
-								size="icon-xs"
-								aria-label={`${project.name}, more`}
-							/>
-						}
-					>
-						<Ellipsis />
-					</DropdownMenuTrigger>
-					<DropdownMenuContent align="end" className="w-44">
-						<DropdownMenuItem onClick={() => setLinking(true)}>
-							GitHub repos
-						</DropdownMenuItem>
-						<DropdownMenuItem
-							variant="destructive"
-							onClick={() => setDeleting(true)}
+				{/* Seen in part, through an app's token, it is only read and sent in. */}
+				{!project.partial && (
+					<>
+						<Button
+							variant="ghost"
+							size="icon-xs"
+							title="New session"
+							aria-label={`New session in ${project.name}`}
+							onClick={() => setAdding(true)}
 						>
-							Delete project
-						</DropdownMenuItem>
-					</DropdownMenuContent>
-				</DropdownMenu>
+							<Plus />
+						</Button>
+						<DropdownMenu>
+							<DropdownMenuTrigger
+								render={
+									<Button
+										variant="ghost"
+										size="icon-xs"
+										aria-label={`${project.name}, more`}
+									/>
+								}
+							>
+								<Ellipsis />
+							</DropdownMenuTrigger>
+							<DropdownMenuContent align="end" className="w-44">
+								<DropdownMenuItem onClick={() => setLinking(true)}>
+									GitHub repos
+								</DropdownMenuItem>
+								<DropdownMenuItem
+									variant="destructive"
+									onClick={() => setDeleting(true)}
+								>
+									Delete project
+								</DropdownMenuItem>
+							</DropdownMenuContent>
+						</DropdownMenu>
+					</>
+				)}
 			</div>
 			<ConfirmDialog
 				open={deleting}
@@ -712,7 +724,7 @@ function ProjectItem({
 						: `${sessions.length === 1 ? "Its session goes" : `Its ${sessions.length} sessions go`} with it, for everyone in the group, into the trash, where any member restores it within 30 days.`
 				}
 				label="Delete project"
-				onConfirm={act(() => api.deleteProject(project.id))}
+				onConfirm={act(() => api.deleteProject(project.id, project.server))}
 			/>
 			<NameDialog
 				open={linking}
@@ -723,9 +735,11 @@ function ProjectItem({
 				placeholder="owner/repo, owner/repo"
 				initial={project.repos.map(repoName).join(", ")}
 				onName={async (repos) => {
-					await api.changeProject(project.id, {
-						repos: repos.split(/[\s,]+/).filter(Boolean),
-					});
+					await api.changeProject(
+						project.id,
+						{ repos: repos.split(/[\s,]+/).filter(Boolean) },
+						project.server,
+					);
 					await reload();
 				}}
 			/>
@@ -757,7 +771,7 @@ function ProjectItem({
 						/>
 					</li>
 				))}
-				{sessions.length === 0 && (
+				{sessions.length === 0 && !project.partial && (
 					<li>
 						<button
 							type="button"
@@ -780,6 +794,7 @@ function ProjectItem({
 					const session = await api.createSession(
 						{ project: project.id },
 						name,
+						project.server,
 					);
 					await reload();
 					onSession(session.id);
@@ -838,7 +853,9 @@ function MemberAgents({
 						size="icon-xs"
 						aria-label={`Remove ${agent.name}`}
 						className={cn("size-5", onHover.agent)}
-						onClick={act(() => api.removeMember(group.id, agent.name))}
+						onClick={act(() =>
+							api.removeMember(group.id, agent.name, group.server),
+						)}
 					>
 						<X />
 					</Button>
@@ -888,7 +905,9 @@ function Members({
 									size="icon-xs"
 									aria-label={`Remove ${name}`}
 									className={onHover.member}
-									onClick={act(() => api.removeMember(group.id, name))}
+									onClick={act(() =>
+										api.removeMember(group.id, name, group.server),
+									)}
 								>
 									<X />
 								</Button>
@@ -920,15 +939,20 @@ function Members({
 						</>
 					}
 					choices={[
+						// The friends of the group's server, and on the home server
+						// the person's agents, which are there.
 						...friends
-							.filter((friend) => friend.state === "friends")
+							.filter(
+								(friend) =>
+									friend.state === "friends" && friend.server === group.server,
+							)
 							.map((friend) => ({
 								id: friend.name,
 								name: friend.name,
 								face: <Person {...friend} size="sm" />,
 								ticked: group.members.includes(friend.name),
 							})),
-						...agents.map((agent) => ({
+						...(group.server ? [] : agents).map((agent) => ({
 							id: agent.name,
 							name: agent.name.slice(me.name.length + 1),
 							face: <Bot className="size-4 text-muted-foreground" />,
@@ -939,8 +963,8 @@ function Members({
 					onPick={(choice) =>
 						act(() =>
 							choice.ticked
-								? api.removeMember(group.id, choice.id)
-								: api.addMember(group.id, choice.id),
+								? api.removeMember(group.id, choice.id, group.server)
+								: api.addMember(group.id, choice.id, group.server),
 						)()
 					}
 					trigger={
@@ -1008,7 +1032,9 @@ export function Sidebar({
 						</span>
 					)}
 				</h2>
-				{!group.own && (
+				{/* Seen in part, through an app's token, a group is only read and
+				    sent in: no one is let in, and nothing made or deleted. */}
+				{!group.own && !group.partial && (
 					<DropdownMenu>
 						<DropdownMenuTrigger
 							render={
@@ -1024,7 +1050,9 @@ export function Sidebar({
 						<DropdownMenuContent align="end" className="w-44">
 							{!last && (
 								<DropdownMenuItem
-									onClick={act(() => api.removeMember(group.id, me.name))}
+									onClick={act(() =>
+										api.removeMember(group.id, me.name, group.server),
+									)}
 								>
 									Leave group
 								</DropdownMenuItem>
@@ -1042,15 +1070,17 @@ export function Sidebar({
 			<div className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto p-2">
 				<Heading
 					action={
-						<Button
-							variant="ghost"
-							size="icon-xs"
-							title="New session"
-							aria-label={`New session in ${group.name}`}
-							onClick={() => setAddingSession(true)}
-						>
-							<Plus />
-						</Button>
+						!group.partial && (
+							<Button
+								variant="ghost"
+								size="icon-xs"
+								title="New session"
+								aria-label={`New session in ${group.name}`}
+								onClick={() => setAddingSession(true)}
+							>
+								<Plus />
+							</Button>
+						)
 					}
 				>
 					Sessions
@@ -1073,15 +1103,17 @@ export function Sidebar({
 				</ul>
 				<Heading
 					action={
-						<Button
-							variant="ghost"
-							size="icon-xs"
-							title="New project"
-							aria-label="New project"
-							onClick={() => setAdding(true)}
-						>
-							<Plus />
-						</Button>
+						!group.partial && (
+							<Button
+								variant="ghost"
+								size="icon-xs"
+								title="New project"
+								aria-label="New project"
+								onClick={() => setAdding(true)}
+							>
+								<Plus />
+							</Button>
+						)
 					}
 				>
 					Projects
@@ -1109,7 +1141,7 @@ export function Sidebar({
 					label="Create project"
 					placeholder="project name"
 					onName={async (name) => {
-						await api.createProject(group.id, name);
+						await api.createProject(group.id, name, group.server);
 						await reload();
 					}}
 				/>
@@ -1121,7 +1153,11 @@ export function Sidebar({
 					label="Create session"
 					placeholder="session name"
 					onName={async (name) => {
-						const session = await api.createSession({ group: group.id }, name);
+						const session = await api.createSession(
+							{ group: group.id },
+							name,
+							group.server,
+						);
 						await reload();
 						onSession(session.id);
 					}}
@@ -1129,10 +1165,16 @@ export function Sidebar({
 				{projects.length === 0 && (
 					<div className="flex flex-col items-start gap-2 px-2 py-2 text-sm text-muted-foreground">
 						<p>No projects yet.</p>
-						<Button variant="outline" size="sm" onClick={() => setAdding(true)}>
-							<Plus />
-							New project
-						</Button>
+						{!group.partial && (
+							<Button
+								variant="outline"
+								size="sm"
+								onClick={() => setAdding(true)}
+							>
+								<Plus />
+								New project
+							</Button>
+						)}
 					</div>
 				)}
 			</div>
@@ -1142,16 +1184,23 @@ export function Sidebar({
 				title={`Delete ${group.name}?`}
 				description="Its projects and their sessions go with it, for every member, into the trash, where any member restores it within 30 days."
 				label="Delete group"
-				onConfirm={act(() => api.deleteGroup(group.id))}
+				onConfirm={act(() => api.deleteGroup(group.id, group.server))}
 			/>
-			<Members
-				me={me}
-				group={group}
-				friends={friends}
-				reachable={reachable}
-				agents={agents}
-				act={act}
-			/>
+			{group.partial ? (
+				<p className="border-t px-4 py-3 text-xs text-pretty text-muted-foreground">
+					Seen through an app's token on {group.server}: its sessions are read
+					and sent in here, and the rest is on {group.server}'s website.
+				</p>
+			) : (
+				<Members
+					me={me}
+					group={group}
+					friends={friends}
+					reachable={reachable}
+					agents={agents}
+					act={act}
+				/>
+			)}
 		</div>
 	);
 }

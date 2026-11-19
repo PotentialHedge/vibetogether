@@ -64,7 +64,7 @@ type Log = {
 	note: string | null;
 };
 
-function useLog(session: Pick<Session, "id">, name: string): Log {
+function useLog(session: Pick<Session, "id" | "server">, name: string): Log {
 	const [log, setLog] = useState<Log>({
 		live: false,
 		source: null,
@@ -103,7 +103,7 @@ function useLog(session: Pick<Session, "id">, name: string): Log {
 			return;
 		}
 		let gone = false;
-		const seat = new Seat(session.id);
+		const seat = new Seat(session.id, session.server);
 		setLog((log) => ({ ...log, source: seat }));
 		const stop = seat.subscribe({
 			entry: () =>
@@ -143,7 +143,7 @@ function useLog(session: Pick<Session, "id">, name: string): Log {
 			document.removeEventListener("visibilitychange", back);
 			window.removeEventListener("focus", back);
 		};
-	}, [session.id, name]);
+	}, [session.id, session.server, name]);
 	return log;
 }
 
@@ -455,8 +455,9 @@ export function Transcript({
 	back,
 	mentionable: seeing,
 }: {
-	/** A session or a DM, as far as the transcript shows it. */
-	session: Pick<Session, "id" | "name">;
+	/** A session or a DM, as far as the transcript shows it, and the host of
+	 * its server where it is not the home one. */
+	session: Pick<Session, "id" | "name" | "server">;
 	/** The person's account name, under which they are in the session. */
 	as: string;
 	/** What can be done with the session, at the header's end. */

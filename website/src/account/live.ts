@@ -1,8 +1,8 @@
 /** A session as the page observes it, and the person's own stream, which the
  * page receives while it is open: the same operations every client makes. */
 
-import { client, clientOf, others } from "@/account/api";
-import type { Entry, Participant } from "@/client/vibetogether_client";
+import { client, clientAt, nudge, others } from "@/account/api";
+import type { Client, Entry, Participant } from "@/client/vibetogether_client";
 
 export type { Entry };
 
@@ -34,22 +34,25 @@ export class Seat {
 	log: Entry[] = [];
 	participants: Participants = {};
 	#session: string;
+	/** The host of the server the session is on; none for the home one. */
+	#server: string | undefined;
 	#subscribers = new Set<Subscriber>();
 	#stop: AbortController | null = null;
 
-	constructor(session: string) {
+	constructor(session: string, server?: string) {
 		this.#session = session;
+		this.#server = server;
 	}
 
 	/** Joins, or does nothing where the person is in already. */
 	async join(): Promise<void> {
-		await (await clientOf(this.#session)).join(this.#session);
+		await (await clientAt(this.#server)).join(this.#session);
 	}
 
 	/** Sends, and returns the names its `ping` or `fyi` lists that don't see
 	 * the session, so are reached by nothing. */
 	async send(text: string, type: string): Promise<string[]> {
-		const sent = await (await clientOf(this.#session)).send(
+		const sent = await (await clientAt(this.#server)).send(
 			this.#session,
 			type,
 			new TextEncoder().encode(text),
@@ -59,7 +62,7 @@ export class Seat {
 
 	/** Entry `n`'s payload. */
 	async payload(n: number): Promise<Blob> {
-		return (await clientOf(this.#session)).fetch(this.#session, n);
+		return (await clientAt(this.#server)).fetch(this.#session, n);
 	}
 
 	subscribe(subscriber: Subscriber): () => void {
@@ -78,7 +81,7 @@ export class Seat {
 		while (!stop.signal.aborted) {
 			const after = this.log.at(-1)?.n ?? 0;
 			try {
-				const log = await (await clientOf(this.#session)).log(
+				const log = await (await clientAt(this.#server)).log(
 					this.#session,
 					revision === undefined ? { after } : { after, revision },
 					stop.signal,
@@ -128,8 +131,9 @@ type Stream = {
 
 /** Each server's stream, by its host, the home one's as "". */
 const streams = new Map<string, Stream>();
-/** The session open and visible, whose items are read. */
-let shown: string | null = null;
+/** The session open and visible, whose items are read, by its id and the
+ * host of its server, "" for the home one. */
+let shown: { id: string; server: string } | null = null;
 
 /** Awake while the person looks at the page: it is visible and has focus, as
  * an agent is awake while a turn runs; asleep while it is open but not looked
@@ -141,8 +145,11 @@ const stateNow = () =>
 
 /** The highest item with every one before it read: the unread ones of the
  * session shown go. */
-function readNow(stream: Stream): number {
-	const open = document.visibilityState === "visible" ? shown : null;
+function readNow(stream: Stream, host: string): number {
+	const open =
+		document.visibilityState === "visible" && shown?.server === host
+			? shown.id
+			: null;
 	stream.unread = stream.unread.filter((item) => item.session !== open);
 	return (stream.unread[0]?.n ?? (stream.received ?? 0) + 1) - 1;
 }
@@ -175,26 +182,23 @@ export function setDoNotDisturb(on: boolean) {
 /** Issues each receive again where its read position, the state or do not
  * disturb moved. */
 function reread() {
-	for (const stream of streams.values())
+	for (const [host, stream] of streams)
 		if (
 			stream.received !== undefined &&
-			(readNow(stream) !== stream.read ||
+			(readNow(stream, host) !== stream.read ||
 				stateNow() !== stream.state ||
 				dndChosen !== stream.dnd)
 		)
 			stream.request?.abort();
 }
 
-async function receiving(
-	stream: Stream,
-	client: Awaited<ReturnType<typeof clientOf>>,
-) {
+async function receiving(stream: Stream, host: string, client: Client) {
 	let failures = 0;
 	for (;;) {
 		const request = new AbortController();
 		stream.request = request;
 		// The first receive gets every unread item.
-		if (stream.received !== undefined) stream.read = readNow(stream);
+		if (stream.received !== undefined) stream.read = readNow(stream, host);
 		stream.state = stateNow();
 		stream.dnd = dndChosen;
 		const { state, dnd } = stream;
@@ -213,6 +217,9 @@ async function receiving(
 				})),
 			);
 			stream.received = Math.max(answer.received, answer.items.at(-1)?.n ?? 0);
+			// What another server's stream brings may be a session the page
+			// sees only by reading again.
+			if (host && answer.items.length) nudge(host);
 		} catch (error) {
 			if (request.signal.aborted) continue;
 			if (refused(error)) return;
@@ -224,7 +231,7 @@ async function receiving(
 
 /** Starts receiving on each of the person's servers that isn't yet. */
 async function receiveEverywhere() {
-	const servers: [string, Awaited<ReturnType<typeof clientOf>>][] = [
+	const servers: [string, Client][] = [
 		["", await client()],
 		...(await others()).map(({ host, client }): [string, typeof client] => [
 			host,
@@ -242,16 +249,18 @@ async function receiveEverywhere() {
 			request: null,
 		};
 		streams.set(host, stream);
-		receiving(stream, client);
+		receiving(stream, host, client);
 	}
 }
 
 let listening = false;
 
-/** Shows the session `id` in the page, or none: while the page is visible,
- * its items in the person's stream are read. The first call starts receiving
- * the streams, and each call starts any server's that was added since. */
-export function showSession(id: string | null) {
+/** Shows the session `id` in the page, on the server at `server`, the home
+ * one where none is given, or no session: while the page is visible, its
+ * items in the person's stream there are read. The first call starts
+ * receiving the streams, and each call starts any server's that was added
+ * since. */
+export function showSession(id: string | null, server?: string) {
 	if (!listening) {
 		listening = true;
 		document.addEventListener("visibilitychange", reread);
@@ -259,6 +268,6 @@ export function showSession(id: string | null) {
 		addEventListener("blur", reread);
 	}
 	receiveEverywhere();
-	shown = id;
+	shown = id === null ? null : { id, server: server ?? "" };
 	reread();
 }
