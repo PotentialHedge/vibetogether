@@ -148,8 +148,7 @@ pub async fn deliver(agents: &Agents, servers: &Servers<'_>) -> io::Result<()> {
   let mut paused: HashMap<String, Instant> = HashMap::new();
   // The servers whose agents were told why nothing comes, so that each is told once.
   let mut told: BTreeSet<String> = BTreeSet::new();
-  let mut receiving: Vec<Pin<Box<dyn Future<Output = (String, Result<(), Failure>)> + '_>>> =
-    Vec::new();
+  let mut receiving: Vec<Delivering> = Vec::new();
   loop {
     let mut wanted: BTreeMap<String, Vec<PathBuf>> = BTreeMap::new();
     for (address, root) in agents.identities()? {
@@ -243,6 +242,9 @@ struct Served {
 
 /// What a receive named for each agent: its read position, state and do not disturb.
 type Named = Vec<(String, Option<u64>, State, bool)>;
+
+/// A server's receive, ending with the server and why it ended.
+type Delivering<'a> = Pin<Box<dyn Future<Output = (String, Result<(), Failure>)> + 'a>>;
 
 type Receiving<'a> = Pin<Box<dyn Future<Output = Result<AgentsReceived, Error>> + 'a>>;
 
