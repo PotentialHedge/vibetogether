@@ -371,6 +371,7 @@ pub async fn sweep_idle(app: &App, db: &mut Db) -> Result<()> {
       .bind(&id)
       .execute(&mut *db)
       .await?;
+    crate::transport::end_agent(app, &id);
   }
   Ok(())
 }

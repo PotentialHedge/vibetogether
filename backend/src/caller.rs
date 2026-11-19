@@ -35,6 +35,8 @@ pub struct Caller {
 #[derive(Deserialize)]
 struct AgentParam {
   agent: Option<String>,
+  /// A receive's state: one held asleep is no activity (`transport::hold_as`).
+  state: Option<vibetogether_protocol::State>,
 }
 
 /// The name of the cookie a browser's sign-in is held in: over HTTPS `__Host-`, Secure and for
@@ -137,10 +139,15 @@ async fn caller_of(app: &App, parts: &Parts, unnamed: bool) -> Result<Option<Cal
       .execute(&mut *db)
       .await?;
   }
-  let named = axum::extract::Query::<AgentParam>::try_from_uri(&parts.uri)
+  let param = axum::extract::Query::<AgentParam>::try_from_uri(&parts.uri)
     .map_err(|e| Refusal::bad(e.body_text()))?
-    .0
-    .agent;
+    .0;
+  // A receive held asleep, as by a listener that holds the agent for good, is no activity, so it
+  // brings no idle agent back: only a ping does then.
+  let path = parts.uri.path();
+  let active = !(path.strip_prefix("/api").unwrap_or(path) == "/receive"
+    && param.state == Some(vibetogether_protocol::State::Asleep));
+  let named = param.agent;
   let agent = match (kind, named) {
     (LoginKind::Agent, Some(id)) => {
       let found: Option<(String, Option<String>, Option<String>)> =
@@ -161,7 +168,7 @@ async fn caller_of(app: &App, parts: &Parts, unnamed: bool) -> Result<Option<Cal
         ));
       }
       // Idle no more once it acts, an agent the idle sweep trashed comes back (`trash`).
-      if trashed.is_some() && !crate::trash::wake_idle(&mut db, &id).await? {
+      if trashed.is_some() && !(active && crate::trash::wake_idle(&mut db, &id).await?) {
         return Err(Refusal::forbidden(
           "This agent is in the trash: it acts no more.",
         ));

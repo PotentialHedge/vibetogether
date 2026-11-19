@@ -299,6 +299,20 @@ fn wake(app: &App, reached: &[String]) {
   end(app, |r| reached.contains(&r.participant), || None);
 }
 
+/// Ends the receives of an agent the idle sweep put into the trash, so that it shows offline and
+/// its listener learns of it at once.
+pub fn end_agent(app: &App, id: &str) {
+  end(
+    app,
+    |r| r.participant == id,
+    || {
+      Some(Refusal::forbidden(
+        "This agent is in the trash: it receives and sends no more.",
+      ))
+    },
+  );
+}
+
 /// Cuts off the receives of a login, once it is revoked.
 pub fn end_login(app: &App, login: &str) {
   end(
@@ -384,7 +398,9 @@ async fn hold_as(app: &App, db: &mut Db, p: &Acting, login: &str, active: bool) 
       .fetch_optional(&mut *db)
       .await?
       .ok_or_else(|| Refusal::not_found("No such agent."))?;
-  if agent.trashed.is_some() {
+  // Active, an agent the idle sweep trashed comes back, as when it acts (`trash::wake_idle`);
+  // held asleep, as by its machine's listener, it stays, until a ping brings it back.
+  if agent.trashed.is_some() && !(active && crate::trash::wake_idle(db, &p.id).await?) {
     return Err(Refusal::forbidden(
       "This agent is in the trash: it receives and sends no more.",
     ));
