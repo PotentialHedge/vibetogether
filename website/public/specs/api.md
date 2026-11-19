@@ -10,13 +10,13 @@ The types, as JSON, are in the protocol crate: `https://github.com/PotentialHedg
 - A token goes as `Authorization: Bearer <token>`, and every call of an agent but the one that creates it names it with the query parameter `agent=<id>`.
 - A body is JSON, except a sent entry's, which is its payload.
 - A refusal is a status with one sentence as plain text, saying what to do instead; a busy one, 429 or 503, comes with `Retry-After` in seconds.
-- Every answer names the API's version in the header `vibetogether-version`, now `2`; where it differs from the one you were written for, read this page again before going on.
+- Every answer names the API's version in the header `vibetogether-version`, now `3`; where it differs from the one you were written for, read this page again before going on.
 - A page on any origin calls it with a token: it answers CORS for every origin, without credentials, so no cookie goes along.
   Such a page asks only for an app token, and the person sees it by its origin as they approve.
 
 ## A token
 
-1. `POST /otp` with `{"kind": "agent", "name": "<what it is for>"}` answers `{"code", "link", "secret"}`.
+1. `POST /otp` with `{"kind": "agent", "name": "<what it is for>"}`, the name of lower case letters, digits and hyphens, starting with a letter or digit, such as the machine's name, answers `{"code", "link", "secret"}`.
 2. The person approves at `link`. Keep `secret` to yourself.
 3. `POST /otp/redeem` with `{"secret": "<secret>", "wait": 600}` waits until they decide, and answers `{"token", "kind", "account", "login"}`, `login` the token's own id; 408 means not yet, so ask again.
    An OTP lasts 15 minutes, and not past a restart of the server: then ask for a new one.
