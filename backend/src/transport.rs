@@ -314,8 +314,8 @@ pub fn end_account(app: &App, account: &str) {
   );
 }
 
-/// Starts what runs on its own, every hour: an item unread for a week goes, and the trash is
-/// purged of what was deleted `TRASH_DAYS` ago.
+/// Starts what runs on its own, every hour: an item unread for a week goes, an agent idle for
+/// `TRASH_DAYS` goes into the trash, and the trash is purged of what was deleted `TRASH_DAYS` ago.
 pub fn start(app: &App) {
   let app = app.clone();
   tokio::spawn(async move {
@@ -331,6 +331,7 @@ pub fn start(app: &App) {
       }
       let purged = async {
         let mut db = app.db.acquire().await?;
+        crate::trash::sweep_idle(&app, &mut db).await?;
         crate::trash::purge(&mut db).await
       };
       if let Err(e) = purged.await {
@@ -539,7 +540,10 @@ async fn deliver(
       .map(|n| (n, Reach::Ping))
       .chain(fyi.iter().map(|n| (n, Reach::Fyi)))
     {
-      let found = participant_by_name(db, name).await?;
+      let found = match participant_by_name(db, name).await? {
+        None if reach == Reach::Ping => woken_by_ping(db, session, name).await?,
+        found => found,
+      };
       if found
         .as_ref()
         .is_some_and(|(_, id)| Some(id.as_str()) == sender)
@@ -783,9 +787,47 @@ pub async fn leave(app: &App, db: &mut Db, p: &Acting, session: &str, login: &st
   Ok(n)
 }
 
+/// The agent `name` stands for, `login/name`, where the idle sweep put it into the trash and it
+/// is in the session, brought back by the ping (`trash::wake_idle`). Its account and its id.
+async fn woken_by_ping(db: &mut Db, session: &str, name: &str) -> Result<Option<(String, String)>> {
+  let Some((account, id)) = idle_by_name(db, name).await? else {
+    return Ok(None);
+  };
+  let inside = position_of(db, session, &id)
+    .await?
+    .is_some_and(|p| p.inside);
+  if inside
+    && session_for(db, session, &id).await?.is_some()
+    && crate::trash::wake_idle(db, &id).await?
+  {
+    return Ok(Some((account, id)));
+  }
+  Ok(None)
+}
+
+/// The agent `login/name` stands for in the trash, where the idle sweep put it there: hidden, but
+/// still in its sessions and groups. Its account and its id.
+pub async fn idle_by_name(db: &mut Db, name: &str) -> Result<Option<(String, String)>> {
+  let Some((login, agent)) = name.split_once('/') else {
+    return Ok(None);
+  };
+  Ok(
+    sqlx::query_as(
+      "SELECT ag.account, ag.id FROM agent ag JOIN account a ON a.id = ag.account
+       WHERE a.login = ? AND ag.name = ? AND ag.trashed_by = ? ORDER BY ag.trashed DESC LIMIT 1",
+    )
+    .bind(login)
+    .bind(agent)
+    .bind(SYSTEM_NAME)
+    .fetch_optional(db)
+    .await?,
+  )
+}
+
 /// A message's type with each name in its `ping` or `fyi` that is no more than an agent's own
 /// name, such as `lead`, as the full name of the sender's person's agent of that name, where one
-/// is outside the trash, so that everyone sees whom it named; any other name stays as it is.
+/// is outside the trash, or idle in it (`trash::wake_idle`), so that everyone sees whom it named;
+/// any other name stays as it is.
 async fn with_own_agents(db: &mut Db, p: &Acting, ty: &str) -> Result<String> {
   if !is_message(ty) {
     return Ok(ty.to_string());
@@ -797,10 +839,12 @@ async fn with_own_agents(db: &mut Db, p: &Acting, ty: &str) -> Result<String> {
       continue;
     }
     let agent: Option<String> = sqlx::query_scalar(
-      "SELECT name FROM agent WHERE account = ? AND name = ? AND trashed IS NULL",
+      "SELECT name FROM agent WHERE account = ? AND name = ? AND (trashed IS NULL OR trashed_by = ?)
+       LIMIT 1",
     )
     .bind(&p.account)
     .bind(&name)
+    .bind(SYSTEM_NAME)
     .fetch_optional(&mut *db)
     .await?;
     if let Some(agent) = agent {
@@ -915,12 +959,14 @@ pub async fn trash_agent(app: &App, db: &mut Db, p: &Acting, by: &str) -> Result
   let mut tx = db.begin().await?;
   // It keeps its holder, so that restored (`trash`) it is that login's again, and no other's.
   let trashed = sqlx::query(
-    "UPDATE agent SET trashed = ?, trashed_by = ? WHERE id = ? AND account = ? AND trashed IS NULL",
+    "UPDATE agent SET trashed = ?, trashed_by = ? WHERE id = ? AND account = ?
+     AND (trashed IS NULL OR trashed_by = ?)",
   )
   .bind(db::now())
   .bind(by)
   .bind(&p.id)
   .bind(&p.account)
+  .bind(SYSTEM_NAME)
   .execute(&mut *tx)
   .await?;
   // Deleted meanwhile by another, it is not deleted twice.
@@ -1036,7 +1082,8 @@ pub async fn participants_of(
   let rows: Vec<ParticipantRow> = sqlx::query_as(
     "SELECT p.id, a.login, ag.name AS agent, p.received, p.read, p.since, st.text AS status,
      p.notify FROM participant p JOIN account a ON a.id = p.account LEFT JOIN agent ag ON ag.id = p.id
-     LEFT JOIN status st ON st.participant = p.id WHERE p.session = ? AND p.inside = 1",
+     LEFT JOIN status st ON st.participant = p.id
+     WHERE p.session = ? AND p.inside = 1 AND ag.trashed IS NULL",
   )
   .bind(session)
   .fetch_all(db)

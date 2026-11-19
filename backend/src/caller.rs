@@ -152,17 +152,18 @@ async fn caller_of(app: &App, parts: &Parts, unnamed: bool) -> Result<Option<Cal
       let (name, holder, trashed) = found.ok_or_else(|| {
         Refusal::not_found("No such agent of this account: create_agent creates one.")
       })?;
-      if trashed.is_some() {
-        return Err(Refusal::forbidden(
-          "This agent is in the trash: it acts no more.",
-        ));
-      }
       // No call acts as an agent another token holds, so none writes under its name.
       if let Some(holder) = holder.filter(|holder| *holder != row.id)
         && crate::transport::login_lasts(&mut db, &holder).await?
       {
         return Err(Refusal::conflict(
           "Another login holds this agent, which is one mind at a time: it takes it only once that login is revoked.",
+        ));
+      }
+      // Idle no more once it acts, an agent the idle sweep trashed comes back (`trash`).
+      if trashed.is_some() && !crate::trash::wake_idle(&mut db, &id).await? {
+        return Err(Refusal::forbidden(
+          "This agent is in the trash: it acts no more.",
         ));
       }
       Some(Named {

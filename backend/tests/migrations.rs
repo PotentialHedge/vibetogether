@@ -156,8 +156,10 @@ async fn the_trash_is_purged_after_30_days() {
     INSERT INTO entry (session, n, time, sender, type, size, text) VALUES ('s_in', 1, '2026-01-01T00:00:00.000Z', 'luis', 'text/plain', 2, 'hi');
     INSERT INTO agent (id, account, name, trashed, created) VALUES
       ('a_old', 'u_luis', 'old', '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z'),
-      ('a_new', 'u_luis', 'new', '2999-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z');
-    INSERT INTO group_member VALUES ('g_luis', 'a_old', 'u_luis'), ('g_luis', 'a_new', 'u_luis');
+      ('a_new', 'u_luis', 'new', '2999-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z'),
+      ('a_idle', 'u_luis', 'idle', NULL, '2026-01-01T00:00:00.000Z');
+    INSERT INTO group_member VALUES ('g_luis', 'a_old', 'u_luis'), ('g_luis', 'a_new', 'u_luis'),
+      ('g_luis', 'a_idle', 'u_luis');
     "#,
   )
   .execute(&mut db)
@@ -184,17 +186,25 @@ async fn the_trash_is_purged_after_30_days() {
       .is_empty()
   );
   assert_eq!(
-    left("SELECT id FROM agent")
+    left("SELECT id FROM agent ORDER BY id")
       .fetch_all(&mut db)
       .await
       .unwrap(),
-    ["a_new"]
+    ["a_idle", "a_new"]
+  );
+  // An agent idle for 30 days goes into the trash by itself, and stays in its groups.
+  assert_eq!(
+    left("SELECT trashed_by FROM agent WHERE id = 'a_idle'")
+      .fetch_all(&mut db)
+      .await
+      .unwrap(),
+    ["vibetogether"]
   );
   assert_eq!(
-    left("SELECT member FROM group_member WHERE member LIKE 'a_%'")
+    left("SELECT member FROM group_member WHERE member LIKE 'a_%' ORDER BY member")
       .fetch_all(&mut db)
       .await
       .unwrap(),
-    ["a_new"]
+    ["a_idle", "a_new"]
   );
 }

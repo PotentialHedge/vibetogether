@@ -8,11 +8,17 @@
 //! session, and every list. Whoever could delete it restores it: for a group, its members; for a
 //! project or session, the members of its group, while the group and project it is in are not in
 //! the trash themselves; for an agent, its person and their agents.
+//!
+//! An agent idle for `TRASH_DAYS` goes into the trash by itself, Luis's decision (2026-11-19):
+//! "sure idle agents go to the trash after 30 days". A ping in a session it is in brings it back,
+//! as does its own acting, as his answer accepted. Decided by an agent, as follow-ups: only an
+//! agent the sweep trashed comes back so, since one someone deleted stays deleted; and the sweep
+//! only hides it, keeping its sessions and groups, so that the ping reaches it.
 
 use axum::{Json, extract::State, http::StatusCode};
 use jiff::{SignedDuration, Timestamp};
 use serde_json::json;
-use vibetogether_protocol::{Named, TrashKind, Trashed};
+use vibetogether_protocol::{Named, Presence, SYSTEM_NAME, TrashKind, Trashed};
 
 use crate::{
   App,
@@ -342,6 +348,48 @@ pub async fn restore(
     .record(&mut db, "restore", json!({ "id": id }))
     .await?;
   Ok(StatusCode::NO_CONTENT)
+}
+
+/// Puts every agent idle for `TRASH_DAYS`, which neither acted nor waited in a receive, into the
+/// trash, by `SYSTEM_NAME`: hidden, but still in its sessions and groups (`wake_idle`).
+pub async fn sweep_idle(app: &App, db: &mut Db) -> Result<()> {
+  let before = db::from_now(-TRASH_DAYS * 86400);
+  let idle: Vec<String> = sqlx::query_scalar(
+    "SELECT id FROM agent WHERE trashed IS NULL AND coalesce(seen, created) < ?",
+  )
+  .bind(&before)
+  .fetch_all(&mut *db)
+  .await?;
+  for id in idle {
+    if app.live.presence(&id) != Presence::Offline {
+      continue;
+    }
+    sqlx::query("UPDATE agent SET trashed = ?, trashed_by = ? WHERE id = ? AND trashed IS NULL")
+      .bind(db::now())
+      .bind(SYSTEM_NAME)
+      .bind(&id)
+      .execute(&mut *db)
+      .await?;
+  }
+  Ok(())
+}
+
+/// Brings back the agent where the idle sweep put it into the trash, its name is free and its
+/// account below `MAX_AGENTS`, seen now, so that the next sweep leaves it. Returns whether it did.
+pub async fn wake_idle(db: &mut Db, id: &str) -> Result<bool> {
+  let woken = sqlx::query(
+    "UPDATE agent SET trashed = NULL, trashed_by = NULL, seen = ?4 WHERE id = ?1 AND trashed_by = ?2
+     AND NOT EXISTS (SELECT 1 FROM agent o
+       WHERE o.account = agent.account AND o.name = agent.name AND o.trashed IS NULL)
+     AND (SELECT count(*) FROM agent o WHERE o.account = agent.account AND o.trashed IS NULL) < ?3",
+  )
+  .bind(id)
+  .bind(SYSTEM_NAME)
+  .bind(MAX_AGENTS)
+  .bind(db::now())
+  .execute(&mut *db)
+  .await?;
+  Ok(woken.rows_affected() == 1)
 }
 
 /// Purges what has been in the trash for `TRASH_DAYS`, with everything in it: a group, project or

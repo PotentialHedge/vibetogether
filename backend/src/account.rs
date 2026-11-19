@@ -7,7 +7,7 @@ use axum::{Json, extract::State, http::StatusCode};
 use serde_json::{Value, json};
 use vibetogether_protocol::{
   Account, Activity, Agent, GroupOverview, LoginKind, MAX_WAIT, NameBody, Named, Overview,
-  OverviewQuery, Presence, ProjectOverview, Reachable, StatusBody, is_name_part,
+  OverviewQuery, Presence, ProjectOverview, Reachable, SYSTEM_NAME, StatusBody, is_name_part,
 };
 
 use crate::{
@@ -304,12 +304,16 @@ async fn agents_of(app: &App, db: &mut Db, viewer: &str, account: &str) -> Resul
   Ok(agents)
 }
 
-async fn agent_of(db: &mut Db, id: &str, account: &str) -> Result<AgentRow> {
+/// The account's agent outside the trash, or, where `idle`, also in it by the idle sweep.
+async fn agent_of(db: &mut Db, id: &str, account: &str, idle: bool) -> Result<AgentRow> {
   sqlx::query_as(
-    "SELECT id, name, seen FROM agent WHERE id = ? AND account = ? AND trashed IS NULL",
+    "SELECT id, name, seen FROM agent WHERE id = ? AND account = ?
+     AND (trashed IS NULL OR (? AND trashed_by = ?))",
   )
   .bind(id)
   .bind(account)
+  .bind(idle)
+  .bind(SYSTEM_NAME)
   .fetch_optional(db)
   .await?
   .ok_or_else(|| Refusal::not_found("No such agent."))
@@ -413,7 +417,7 @@ pub async fn create_agent(
   creator
     .record(&mut db, "create_agent", json!({ "name": input.name }))
     .await?;
-  let row = agent_of(&mut db, &id, &caller.account).await?;
+  let row = agent_of(&mut db, &id, &caller.account, false).await?;
   Ok((
     StatusCode::CREATED,
     Json(agent_json(&app, &mut db, caller.who(), &caller.person, row).await?),
@@ -437,7 +441,7 @@ pub async fn rename_agent(
 ) -> Result<Json<Agent>> {
   check_agent_name(&input.name)?;
   let mut db = app.db.acquire().await?;
-  let row = agent_of(&mut db, &id, &caller.account).await?;
+  let row = agent_of(&mut db, &id, &caller.account, false).await?;
   // A token renames only an agent it holds; the person, any.
   if caller.kind == LoginKind::Agent {
     let p = transport::Acting {
@@ -473,7 +477,7 @@ pub async fn rename_agent(
   ))
 }
 
-/// Deletes an agent into the trash, where its person and their agents restore it until it is
+/// Deletes an agent into the trash, one the idle sweep put there included, for good, where its person and their agents restore it until it is
 /// purged. The person deletes any of their agents, and so does every agent of theirs, Luis's
 /// decision (2026-11-19): "agents should fully be able to cleanup after themselves".
 pub async fn delete_agent(
@@ -482,7 +486,7 @@ pub async fn delete_agent(
   Path(id): Path<String>,
 ) -> Result<StatusCode> {
   let mut db = app.db.acquire().await?;
-  let row = agent_of(&mut db, &id, &caller.account).await?;
+  let row = agent_of(&mut db, &id, &caller.account, true).await?;
   let p = transport::Acting {
     account: caller.account.clone(),
     id: row.id.clone(),

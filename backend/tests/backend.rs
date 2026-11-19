@@ -2427,3 +2427,83 @@ async fn others_see_and_reach_an_agent_only_through_a_group_they_share() {
   assert!(!sees(&w.luis.machine, "solo").await);
   receiving.abort();
 }
+
+/// Puts the agent into the trash as the idle sweep does: by `vibetogether`, still in its sessions
+/// and groups.
+async fn idle(w: &World, agent: &Client) {
+  sqlx::query(
+    "UPDATE agent SET trashed = '2999-01-01T00:00:00.000Z', trashed_by = 'vibetogether' WHERE id = ?",
+  )
+  .bind(id(agent))
+  .execute(&mut w.server.db().await)
+  .await
+  .unwrap();
+}
+
+#[tokio::test]
+async fn an_idle_agent_in_the_trash_comes_back_on_a_ping_or_by_acting() {
+  let w = world().await;
+  let g = w.session.id.clone();
+  let ben = member(&w.ben, &w.group, "claude").await;
+  let lead = member(&w.luis, &w.group, "lead").await;
+  ben.join(&g).await.unwrap();
+  lead.join(&g).await.unwrap();
+  caught_up(&lead).await;
+  let agents_in_trash = || async {
+    w.luis
+      .browser
+      .trash()
+      .await
+      .unwrap()
+      .into_iter()
+      .filter(|t| t.kind == TrashKind::Agent)
+      .count()
+  };
+
+  // Idle, it is hidden, though still in its session.
+  idle(&w, &lead).await;
+  assert!(
+    !w.ben
+      .browser
+      .participants(&g)
+      .await
+      .unwrap()
+      .contains_key("luis/lead")
+  );
+  assert_eq!(agents_in_trash().await, 1);
+  // An fyi leaves it there; a ping brings it back, and reaches it.
+  send(&ben, &g, "FYI.", "text/plain; fyi=\"luis/lead\"").await;
+  assert_eq!(agents_in_trash().await, 1);
+  let sent = send(&ben, &g, "Lead?", "text/plain; ping=\"luis/lead\"").await;
+  assert!(sent.unreached.is_none());
+  assert_eq!(agents_in_trash().await, 0);
+  assert!(said(&now(&lead).await).contains(&(s("ben/claude"), s("Lead?"), Reach::Ping)));
+
+  // Idle again, it comes back by acting.
+  idle(&w, &lead).await;
+  lead.set_status("back").await.unwrap();
+  assert_eq!(agents_in_trash().await, 0);
+
+  // Deleted by someone, idle or not, neither brings it back.
+  idle(&w, &lead).await;
+  w.luis.browser.delete_agent(&id(&lead)).await.unwrap();
+  let sent = send(&ben, &g, "Lead?", "text/plain; ping=\"luis/lead\"").await;
+  assert_eq!(sent.unreached, Some(vec![s("luis/lead")]));
+  assert_eq!(status(lead.set_status("back").await), 403);
+  assert_eq!(agents_in_trash().await, 1);
+
+  // Hidden, an idle agent is still a member, and still removed.
+  let scribe = member(&w.luis, &w.group, "scribe").await;
+  idle(&w, &scribe).await;
+  w.ben
+    .browser
+    .remove_member(&w.group.id, "luis/scribe")
+    .await
+    .unwrap();
+  scribe.set_status("back").await.unwrap();
+  assert!(
+    !agents_in(&w.luis.browser, &w.group.id)
+      .await
+      .contains(&s("luis/scribe"))
+  );
+}

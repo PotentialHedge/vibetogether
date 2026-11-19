@@ -468,7 +468,15 @@ pub async fn remove_member(
 ) -> Result<StatusCode> {
   let mut db = app.db.acquire().await?;
   let group = group_for(&mut db, &id, caller.who()).await?;
-  let found = member_named(&mut db, &caller, &name).await?;
+  let mut found = member_named(&mut db, &caller, &name).await?;
+  // An agent the idle sweep hid is still a member, and still removed.
+  for full in [format!("{}/{name}", caller.person), name.clone()] {
+    if found.is_none() {
+      found = transport::idle_by_name(&mut db, &full)
+        .await?
+        .map(|(account, id)| (account, id, full));
+    }
+  }
   let Some((person, member, login)) = found else {
     return Err(Refusal::not_found("No such member."));
   };
