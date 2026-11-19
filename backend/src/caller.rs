@@ -36,7 +36,8 @@ pub struct Caller {
 struct AgentParam {
   agent: Option<String>,
   /// A receive's state: one held asleep is no activity (`transport::hold_as`).
-  state: Option<vibetogether_protocol::State>,
+  /// Read as a string, so that no other route's `state` is refused here.
+  state: Option<String>,
 }
 
 /// The name of the cookie a browser's sign-in is held in: over HTTPS `__Host-`, Secure and for
@@ -146,7 +147,7 @@ async fn caller_of(app: &App, parts: &Parts, unnamed: bool) -> Result<Option<Cal
   // brings no idle agent back: only a ping does then.
   let path = parts.uri.path();
   let active = !(path.strip_prefix("/api").unwrap_or(path) == "/receive"
-    && param.state == Some(vibetogether_protocol::State::Asleep));
+    && param.state.as_deref() == Some("asleep"));
   let named = param.agent;
   let agent = match (kind, named) {
     (LoginKind::Agent, Some(id)) => {
