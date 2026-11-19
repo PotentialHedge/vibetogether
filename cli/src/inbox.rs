@@ -66,8 +66,11 @@ impl Agents {
           Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(found),
           Err(e) => return Err(e),
         };
+        // An inbox is a directory of its own, never a link to another.
         let mut roots: Vec<PathBuf> = entries
-          .filter_map(|entry| entry.ok().map(|entry| entry.path()))
+          .filter_map(|entry| entry.ok())
+          .filter(|entry| entry.file_type().is_ok_and(|t| t.is_dir()))
+          .map(|entry| entry.path())
           .collect();
         roots.sort();
         for root in roots {

@@ -1431,8 +1431,10 @@ async fn wait_on(
     return Ok(now.into_iter().map(Ok).collect());
   }
   let (tx, mut rx) = mpsc::unbounded_channel();
-  {
-    let inner = app.live.0.lock().unwrap();
+  // The limit is checked and the receivers inserted under one lock, so that two requests can't
+  // both pass it.
+  let (keys, changed) = {
+    let mut inner = app.live.0.lock().unwrap();
     let mut requests: Vec<u64> = inner
       .receivers
       .values()
@@ -1448,11 +1450,13 @@ async fn wait_on(
         10,
       ));
     }
-  }
-  let mut request = None;
-  let mut waiting = Vec::with_capacity(parts.len());
-  for part in parts {
-    let key = change(app, &part.p.id, |inner| {
+    let was: Vec<_> = parts
+      .iter()
+      .map(|part| (inner.presence(&part.p.id), inner.dnd(&part.p.id)))
+      .collect();
+    let request = inner.next + 1;
+    let mut keys = Vec::with_capacity(parts.len());
+    for part in parts {
       inner.next += 1;
       let key = inner.next;
       inner.receivers.insert(
@@ -1462,19 +1466,31 @@ async fn wait_on(
           participant: part.p.id.clone(),
           login: login.to_string(),
           held: part.held,
-          request: *request.get_or_insert(key),
+          request,
           end: tx.clone(),
         },
       );
-      key
-    });
-    waiting.push(Waiting {
+      keys.push(key);
+    }
+    let changed = parts
+      .iter()
+      .zip(was)
+      .any(|(part, was)| was != (inner.presence(&part.p.id), inner.dnd(&part.p.id)));
+    (keys, changed)
+  };
+  if changed {
+    app.changes.written();
+  }
+  let waiting: Vec<Waiting> = parts
+    .iter()
+    .zip(&keys)
+    .map(|(part, &key)| Waiting {
       app: app.clone(),
       key,
       p: part.p.clone(),
       held: part.held,
-    });
-  }
+    })
+    .collect();
   drop(tx);
   let timeout = async {
     match wait {
