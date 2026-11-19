@@ -2170,6 +2170,37 @@ async fn agents_delete_into_the_trash_whence_whoever_could_delete_restores() {
   assert_eq!(status(w.ben.browser.session(s_).await), 404);
   assert_eq!(status(machine.delete_project(&w.project.id).await), 404);
   machine.delete_session(s_).await.unwrap_err();
+  // The person hears of it, though their own agent did it.
+  let overview = w
+    .luis
+    .browser
+    .overview(&OverviewQuery::default())
+    .await
+    .unwrap();
+  let inbox = overview
+    .groups
+    .iter()
+    .find(|g| g.group.own)
+    .unwrap()
+    .sessions[0]
+    .id
+    .clone();
+  let mail = w
+    .luis
+    .browser
+    .log(&inbox, &LogQuery::default())
+    .await
+    .unwrap()
+    .entries;
+  assert!(
+    mail
+      .last()
+      .unwrap()
+      .text
+      .as_deref()
+      .unwrap()
+      .starts_with("luis/laptop deleted the group `Potential Hedge`")
+  );
   w.ben.browser.restore(&w.group.id).await.unwrap();
   w.ben.browser.session(s_).await.unwrap();
 
@@ -2197,6 +2228,31 @@ async fn agents_delete_into_the_trash_whence_whoever_could_delete_restores() {
   machine.archive_agent(&id(&lead)).await.unwrap();
   let _other = agent(&w.luis.machine, "lead").await;
   assert_eq!(status(machine.restore(&id(&lead)).await), 409);
+  // Restoring keeps to the limits creating does.
+  let full = w.luis.browser.create_group("full").await.unwrap();
+  let extra = w
+    .luis
+    .browser
+    .create_session(&CreateSession {
+      name: s("extra"),
+      project: None,
+      group: Some(full.id.clone()),
+    })
+    .await
+    .unwrap();
+  w.luis.browser.delete_session(&extra.id).await.unwrap();
+  for i in 0..20 {
+    w.luis
+      .browser
+      .create_session(&CreateSession {
+        name: format!("s{i}"),
+        project: None,
+        group: Some(full.id.clone()),
+      })
+      .await
+      .unwrap();
+  }
+  assert_eq!(status(w.luis.browser.restore(&extra.id).await), 403);
   // An app restores nothing.
   let luis = w.luis.browser.me().await.unwrap().id;
   let app = w.server.token(&luis, LoginKind::App, "voice").await;

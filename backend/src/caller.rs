@@ -291,11 +291,15 @@ impl OptionalFromRequestParts<App> for Caller {
 }
 
 /// The changes limited per account and hour for a token, each on its own, so that an agent
-/// talked into letting someone in can't spread fast.
-const LIMITED: [(&str, i64); 3] = [
+/// talked into letting someone in can't spread fast, nor fill the trash, which keeps what is
+/// deleted for 30 days.
+const LIMITED: [(&str, i64); 6] = [
   ("add_friend", 20),
   ("add_group_member", 20),
   ("create_invite", 20),
+  ("create_group", 20),
+  ("create_project", 50),
+  ("create_session", 100),
 ];
 
 impl Caller {

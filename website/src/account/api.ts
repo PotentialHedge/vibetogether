@@ -187,6 +187,28 @@ function mock(): Api {
 			],
 		},
 	];
+	const daysAgo = (days: number) =>
+		new Date(Date.now() - days * 86400_000).toISOString();
+	let trash: Trashed[] = [
+		{
+			id: "s_old_spike",
+			kind: "session",
+			name: "spike",
+			group: { id: "g_1", name: "Potential Hedge" },
+			project: { id: "p_2", name: "vibetogether" },
+			trashed: daysAgo(1),
+			by: "luiswirth/claude",
+			purged: daysAgo(-29),
+		},
+		{
+			id: "a_r7d2s5qe",
+			kind: "agent",
+			name: "luiswirth/scratch",
+			trashed: daysAgo(3),
+			by: "luiswirth/scratch",
+			purged: daysAgo(-27),
+		},
+	];
 	const named = (id: string) => {
 		const { name } = groups.find((group) => group.id === id) as Group;
 		return { id, name };
@@ -363,21 +385,9 @@ function mock(): Api {
 				a.id === id ? { ...a, presence: "archived" } : a,
 			);
 		},
-		trash: async () =>
-			agents
-				.filter((a) => a.presence === "archived")
-				.map((a) => ({
-					id: a.id,
-					kind: "agent" as const,
-					name: a.name,
-					trashed: new Date(Date.now() - 2 * 86400_000).toISOString(),
-					by: me.name,
-					purged: new Date(Date.now() + 28 * 86400_000).toISOString(),
-				})),
+		trash: async () => trash,
 		restore: async (id) => {
-			agents = agents.map((a) =>
-				a.id === id ? { ...a, presence: "offline" } : a,
-			);
+			trash = trash.filter((item) => item.id !== id);
 		},
 		createGroup: async (name) => {
 			const group = {

@@ -16,10 +16,13 @@ use vibetogether_protocol::{Named, TrashKind, Trashed};
 
 use crate::{
   App,
+  account::MAX_AGENTS,
   caller::Caller,
-  db::{self, Db, TRASH_DAYS, general_of, is_member, own_group_of},
+  db::{self, Db, MAX_GROUPS, TRASH_DAYS, general_of, is_member, own_group_of},
   error::{Refusal, Result},
   extract::Path,
+  groups::{MAX_PROJECTS, groups_besides_own},
+  sessions::MAX_SESSIONS,
   transport::{self, quoted},
 };
 
@@ -196,10 +199,88 @@ pub async fn restore(
   };
   let row = row.into_iter().next().ok_or_else(missing)?;
   let table = match kind {
-    TrashKind::Group => "group",
-    TrashKind::Project => "project",
-    TrashKind::Session => "session",
+    TrashKind::Group => {
+      // Restored, it counts again toward each person's groups, as joining one does.
+      let people: Vec<(String, String)> = sqlx::query_as(
+        r#"SELECT a.id, a.login FROM group_member m JOIN account a ON a.id = m.member
+           WHERE m."group" = ?"#,
+      )
+      .bind(&row.id)
+      .fetch_all(&mut *db)
+      .await?;
+      for (person, login) in people {
+        if groups_besides_own(&mut db, &person).await? >= MAX_GROUPS {
+          return Err(Refusal::forbidden(format!(
+            "{login} is in {MAX_GROUPS} groups besides their own: they leave one first."
+          )));
+        }
+      }
+      "group"
+    }
+    TrashKind::Project => {
+      let group = row.group_id.as_deref().unwrap_or_default();
+      if db::count(
+        &mut db,
+        r#"SELECT count(*) FROM project WHERE "group" = ? AND trashed IS NULL"#,
+        &[group],
+      )
+      .await?
+        >= MAX_PROJECTS
+      {
+        return Err(Refusal::forbidden(format!(
+          "A group has at most {MAX_PROJECTS} projects: delete one first."
+        )));
+      }
+      "project"
+    }
+    TrashKind::Session => {
+      let held = match &row.project_id {
+        Some(project) => {
+          db::count(
+            &mut db,
+            "SELECT count(*) FROM session WHERE project = ? AND trashed IS NULL",
+            &[project],
+          )
+          .await?
+        }
+        None => {
+          db::count(
+            &mut db,
+            r#"SELECT count(*) FROM group_session gs JOIN session s ON s.id = gs.session
+               WHERE gs."group" = ? AND gs.general = 0 AND s.trashed IS NULL"#,
+            &[row.group_id.as_deref().unwrap_or_default()],
+          )
+          .await?
+        }
+      };
+      if held >= MAX_SESSIONS {
+        return Err(Refusal::forbidden(format!(
+          "It has at most {MAX_SESSIONS} sessions of its own: delete one first."
+        )));
+      }
+      "session"
+    }
     TrashKind::Agent => {
+      // Archived before the trash, an agent kept no holder: given back to a token, any of the
+      // account's would take it over, so only the person restores it.
+      let holder: Option<String> = sqlx::query_scalar("SELECT holder FROM agent WHERE id = ?")
+        .bind(&row.id)
+        .fetch_one(&mut *db)
+        .await?;
+      if holder.is_none() {
+        caller.as_person()?;
+      }
+      let live = db::count(
+        &mut db,
+        "SELECT count(*) FROM agent WHERE account = ? AND archived IS NULL",
+        &[&caller.account],
+      )
+      .await?;
+      if live >= MAX_AGENTS {
+        return Err(Refusal::forbidden(format!(
+          "An account has at most {MAX_AGENTS} agents that are not archived: archive one first."
+        )));
+      }
       let restored = sqlx::query(
         "UPDATE agent SET archived = NULL, archived_by = NULL WHERE id = ? AND account = ?",
       )

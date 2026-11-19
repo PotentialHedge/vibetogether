@@ -28,7 +28,7 @@ use crate::{
 };
 
 /// The most sessions one project holds, and one group of its own, besides its general.
-const MAX_SESSIONS: i64 = 20;
+pub const MAX_SESSIONS: i64 = 20;
 
 #[derive(sqlx::FromRow)]
 struct SessionRow {
@@ -188,6 +188,7 @@ pub async fn create(
 ) -> Result<(StatusCode, Json<Session>)> {
   let name = check_name(&input.name)?;
   let mut db = app.db.acquire().await?;
+  caller.limit(&mut db, "create_session").await?;
   let me = &caller.account;
   let (group, project) = match (&input.project, &input.group) {
     (Some(project), None) => {

@@ -14,7 +14,7 @@ use crate::{
   App,
   caller::{Caller, Unnamed},
   changes::revision_of,
-  db::{self, Db, session_for},
+  db::{self, Db, TRASH_DAYS, general_of, own_group_of, session_for},
   error::{Refusal, Result, is_taken},
   extract::{Json as Body, Path, Query},
   friends::{dms_of, friends_of},
@@ -24,7 +24,7 @@ use crate::{
 };
 
 /// The most agents an account has that are not archived.
-const MAX_AGENTS: i64 = 100;
+pub const MAX_AGENTS: i64 = 100;
 /// The most agents an account has ever had, so that archiving cannot make room without end.
 const MAX_AGENTS_EVER: i64 = 1000;
 
@@ -508,6 +508,17 @@ pub async fn archive_agent(
       app: None,
     };
     transport::archive(&app, &mut db, &p, caller.actor()).await?;
+    // The person is told where an agent archived one, so that a hijacked one shows.
+    if caller.agent.is_some() {
+      let own = own_group_of(&mut db, &caller.account).await?;
+      let inbox = general_of(&mut db, &own).await?;
+      let text = format!(
+        "{} archived the agent {}, into the trash, where you and your agents restore it within {TRASH_DAYS} days.",
+        caller.actor(),
+        p.name
+      );
+      transport::announce(&app, &mut db, &inbox, &text, &[], &[]).await?;
+    }
     caller
       .record(&mut db, "archive_agent", json!({ "id": id }))
       .await?;

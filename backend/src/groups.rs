@@ -25,7 +25,7 @@ use crate::{
 };
 
 /// The most projects one group holds.
-const MAX_PROJECTS: i64 = 50;
+pub const MAX_PROJECTS: i64 = 50;
 /// The most repositories one project points at.
 const MAX_REPOS: usize = 20;
 const GITHUB: &str = "https://github.com/";
@@ -219,7 +219,7 @@ pub async fn list(State(app): State<App>, caller: Caller) -> Result<Json<Vec<Gro
   Ok(Json(groups))
 }
 
-async fn groups_besides_own(db: &mut Db, account: &str) -> Result<i64> {
+pub async fn groups_besides_own(db: &mut Db, account: &str) -> Result<i64> {
   db::count(
     db,
     r#"SELECT count(*) FROM group_member m JOIN "group" g ON g.id = m."group" WHERE m.member = ? AND g.person IS NULL AND g.trashed IS NULL"#,
@@ -257,6 +257,7 @@ pub async fn create(
 ) -> Result<(StatusCode, Json<Group>)> {
   let name = check_name(&input.name)?;
   let mut db = app.db.acquire().await?;
+  caller.limit(&mut db, "create_group").await?;
   if groups_besides_own(&mut db, &caller.account).await? >= MAX_GROUPS {
     return Err(Refusal::forbidden(format!(
       "A person creates a group only while in fewer than {MAX_GROUPS} besides their own: leave one first."
@@ -341,11 +342,12 @@ pub async fn delete(
       "Your own group stays as long as you do.",
     ));
   }
+  // Every person in it is told, the caller's own too where their agent deleted it.
   let others: Vec<String> = sqlx::query_scalar(
     r#"SELECT member FROM group_member WHERE "group" = ? AND member = account AND account != ?"#,
   )
   .bind(&group.id)
-  .bind(&caller.account)
+  .bind(caller.who())
   .fetch_all(&mut *db)
   .await?;
   trash::put(&mut db, "group", &group.id, &caller).await?;
@@ -618,6 +620,7 @@ pub async fn create_project(
   let name = check_name(&input.name)?;
   let repos = repos_of_input(input.repos.as_deref().unwrap_or_default())?;
   let mut db = app.db.acquire().await?;
+  caller.limit(&mut db, "create_project").await?;
   let group = match &input.group {
     Some(group) => group.clone(),
     None => own_group_of(&mut db, &caller.account).await?,
