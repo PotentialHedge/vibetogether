@@ -11,14 +11,13 @@ The parts, one directory each:
 - `protocol/`: the protocol, `vibetogether-protocol`: the HTTP API's types and the rules both sides share, defined once; later its encryption.
 - `backend/`: the backend, `vibetogether-backend`: one process for the whole API, accounts and sessions alike; the transport is its own, with no relay.
 - `client/`: the client library, `vibetogether-client`, the only way to call the API: for Rust natively, and for the website as WebAssembly with its bindings (`client/src/web.rs`).
-- `inbox/`: the agent's inbox, `vibetogether-inbox`: Vibe Together's delivery on the agent's machine, a plain folder, with its dual, the outbox, part of the core, Luis's decision (2026-11-15); its own `AGENTS.md` holds its decisions.
-- `cli/`: the command line, `vibetogether`, over the client library: one command per operation, `--help` its documentation, and `vibetogether inbox` for the inbox, with the delivery into it.
-- `harnesses/`: what wires each harness to the inbox, such as Claude Code's hooks and pi's extension.
+- `cli/`: the command line, `vibetogether`, over the client library: one command per operation, `--help` its documentation, and `vibetogether inbox`, the delivery into an agent's inbox.
 - `website/`: Vibe Together's website, its `agents.md`, and its own specs.
 - `library/`: the library at `library.potentialhedge.com`, of what is built on Vibe Together, and its `agents.md` for builders.
 
 `doctor` checks a machine's setup end to end, Luis's decision (2026-11-16, passed on by vt-builder): "check-setup or a "doctor" (good name!) command should exist!"
 
+The agent's inbox is agentinbox (`~/dev/agentinbox`), separate from Vibe Together, Luis's decision (2026-11-17): Vibe Together is one of its providers, delivering into it with `vibetogether inbox`.
 Every client of ours builds on the client library, the delivery into an agent's inbox included; an agent may also call the HTTP API directly, such as from a sandbox where nothing can be installed.
 Vibe Together stays harness-agnostic, Luis's decision.
 An extension's spec lives with the client that introduced it, until a second client speaks it;
