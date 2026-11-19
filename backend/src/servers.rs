@@ -1,4 +1,4 @@
-//! The other servers an owner is on: a server with an owner keeps a person token for each, so
+//! The other servers an owner is on: a server with an owner keeps an app token for each, so
 //! that every client of the owner's, such as the website opened from this server, reaches them
 //! through it. Trust flows from the more trusted side: this server asks the other for an OTP, as
 //! any client does, and the other never learns what asked.
@@ -115,7 +115,7 @@ fn login_name(app: &App) -> String {
   }
 }
 
-/// Adds a server: asks it for an OTP of a person token, which the owner approves at its link,
+/// Adds a server: asks it for an OTP of an app token, which the owner approves at its link,
 /// and keeps the token once approved, redeeming it in the background within the OTP's life.
 pub async fn add(
   State(app): State<App>,
@@ -130,7 +130,10 @@ pub async fn add(
   let client = Client::new(&url, None);
   let otp = client
     .request_otp(&OtpRequest {
-      kind: TokenKind::Person,
+      // An app token sends and reads in the owner's sessions there, and lets no one in: whoever
+      // reaches this server is its owner, the owner's agents too, so a token kept here is
+      // theirs as well, and none of them becomes the person elsewhere through it.
+      kind: TokenKind::App,
       name: login_name(&app),
     })
     .await

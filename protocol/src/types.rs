@@ -629,7 +629,7 @@ wire! {
     Owner,
   }
 
-  /// Another server the owner of this one is on, with the person token this one keeps for it, so
+  /// Another server the owner of this one is on, with the app token this one keeps for it, so
   /// that every client of the owner's reaches it through this one: the client is the union of
   /// its servers. Only a server with an owner keeps them, so that a token sits with no operator
   /// less trusted than the server it is for.
@@ -645,7 +645,7 @@ wire! {
     pub added: String,
   }
 
-  /// Adds another server: this one asks it for an OTP of a person token, which the owner
+  /// Adds another server: this one asks it for an OTP of an app token, which the owner
   /// approves at its link, on that server's website.
   pub struct AddServer {
     pub url: String,

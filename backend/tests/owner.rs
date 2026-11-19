@@ -158,7 +158,7 @@ async fn it_keeps_the_owners_tokens_for_other_servers() {
   let asked = owner.add_server(&public.url).await.unwrap();
   // The public server shows the OTP to the person as any other, by the private server's name.
   let shown = luis.browser.show_otp(&asked.code).await.unwrap();
-  assert_eq!(shown.kind, TokenKind::Person);
+  assert_eq!(shown.kind, TokenKind::App);
   assert_eq!(shown.name, "127");
   luis.browser.approve_otp(&asked.code).await.unwrap();
   let mut servers = Vec::new();
