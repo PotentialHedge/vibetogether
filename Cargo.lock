@@ -2780,6 +2780,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tokio",
+ "url",
  "vibetogether-backend",
  "vibetogether-client",
  "vibetogether-protocol",
@@ -2807,6 +2808,7 @@ dependencies = [
  "tower-http",
  "tracing",
  "tracing-subscriber",
+ "url",
  "vibetogether-client",
  "vibetogether-protocol",
 ]

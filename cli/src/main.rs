@@ -520,6 +520,11 @@ async fn run(cli: Cli) -> Result<(), Exit> {
       .or_else(|| identities.first_host().map(|h| tokens.server_at(h)))
       .unwrap_or_else(|| DEFAULT_SERVER.to_string()),
   };
+  if servers::origin(&server).is_none() {
+    return Err(Exit::Usage(format!(
+      "`{server}` is no server: an https:// origin, or http:// to loopback alone."
+    )));
+  }
   // Logging in sends no token, so it needs none.
   let token = match &cli.command {
     Command::Login { .. } => None,

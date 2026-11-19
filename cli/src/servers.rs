@@ -17,16 +17,39 @@ use crate::doctor::Source;
 
 pub const DEFAULT_SERVER: &str = "https://vibetogether.potentialhedge.com";
 
-/// A server's host, with its port where it names one: its origin without the scheme.
-pub fn host_of(server: &str) -> &str {
-  let server = server.trim_end_matches('/');
-  let host = server.split_once("://").map_or(server, |(_, host)| host);
-  host.split('/').next().unwrap_or(host)
+/// A server's origin, as the HTTP client reads its URL: HTTPS, or plain HTTP to loopback alone,
+/// so that no token goes out in the clear; `None` for anything else.
+pub fn origin(server: &str) -> Option<url::Origin> {
+  let url = url::Url::parse(server).ok()?;
+  let loopback = matches!(
+    url.host(),
+    Some(url::Host::Domain("localhost"))
+      | Some(url::Host::Ipv4(std::net::Ipv4Addr::LOCALHOST))
+      | Some(url::Host::Ipv6(std::net::Ipv6Addr::LOCALHOST))
+  );
+  match url.scheme() {
+    "https" => Some(url.origin()),
+    "http" if loopback => Some(url.origin()),
+    _ => None,
+  }
 }
 
-/// The same server, by its host.
+/// A server's host, with its port where it names one other than its scheme's.
+pub fn host_of(server: &str) -> String {
+  match origin(server) {
+    Some(url::Origin::Tuple(_, host, port)) => {
+      match url::Url::parse(server).ok().and_then(|u| u.port()) {
+        Some(_) => format!("{host}:{port}"),
+        None => host.to_string(),
+      }
+    }
+    _ => String::new(),
+  }
+}
+
+/// The same server, by its origin as the HTTP client reads it.
 pub fn same(a: &str, b: &str) -> bool {
-  host_of(a).eq_ignore_ascii_case(host_of(b))
+  matches!((origin(a), origin(b)), (Some(a), Some(b)) if a == b)
 }
 
 /// An id as it is written: the id on its server, and that server's host where it names one.
@@ -77,6 +100,7 @@ impl Tokens {
       .pairs
       .iter()
       .find(|(_, s)| host_of(s).eq_ignore_ascii_case(host))
+      .filter(|_| !host.is_empty())
       .map_or_else(|| format!("https://{host}"), |(_, s)| s.clone())
   }
 }
@@ -155,7 +179,9 @@ impl Identities {
   /// The identity on `server`, where `base` is what an id without a host is on.
   pub fn on(&self, server: &str, base: &str) -> Option<&str> {
     self.0.iter().find_map(|address| match split(address) {
-      (id, Some(host)) if host_of(server).eq_ignore_ascii_case(host) => Some(id),
+      (id, Some(host)) if !host.is_empty() && host_of(server).eq_ignore_ascii_case(host) => {
+        Some(id)
+      }
       (id, None) if same(server, base) => Some(id),
       _ => None,
     })
@@ -234,5 +260,21 @@ mod tests {
     assert_eq!(ids.first_host(), Some("home.ts.net"));
     assert!(valid("a_k3x9@lwirth-server.taile6c58a.ts.net"));
     assert!(!valid("a_k3x9@evil/x"));
+    // A token's server is compared as the HTTP client reads the URL.
+    assert!(!same(
+      "https:/evil.com/://vibetogether.potentialhedge.com",
+      DEFAULT_SERVER
+    ));
+    assert!(!same(
+      "http://vibetogether.potentialhedge.com",
+      DEFAULT_SERVER
+    ));
+    assert!(same(
+      "https://vibetogether.potentialhedge.com/",
+      DEFAULT_SERVER
+    ));
+    assert!(origin("http://localhost.evil.com").is_none());
+    assert_eq!(host_of("http://127.0.0.1:3000"), "127.0.0.1:3000");
+    assert_eq!(host_of(DEFAULT_SERVER), "vibetogether.potentialhedge.com");
   }
 }

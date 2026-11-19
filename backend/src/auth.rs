@@ -245,6 +245,14 @@ pub async fn sign_in(
     .filter(|c| own_path(c))
     .unwrap_or_else(|| "/account/".into());
   if let Some(owner) = &app.owner {
+    // Only the site itself, or the person typing its address, signs in: a page on another site
+    // that sends its visitors here would make a login at each visit.
+    let site = headers.get("sec-fetch-site").and_then(|v| v.to_str().ok());
+    if site.is_some_and(|site| !matches!(site, "same-origin" | "none")) {
+      return Err(Refusal::forbidden(
+        "Sign in from this server's own website.",
+      ));
+    }
     let jar = signed_in_as(&app, &headers, jar, owner).await?;
     return Ok((jar, Redirect::to(&callback)).into_response());
   }

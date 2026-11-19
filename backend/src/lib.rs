@@ -251,7 +251,9 @@ async fn own_host(State(app): State<App>, request: Request, next: Next) -> Respo
     .get(axum::http::header::HOST)
     .and_then(|v| v.to_str().ok())
     .or_else(|| request.uri().authority().map(|a| a.as_str()));
-  if host.is_some_and(|host| host.eq_ignore_ascii_case(own)) {
+  // Tailscale's Funnel would serve it to the internet, where reaching it makes no one an owner.
+  let funnel = request.headers().contains_key("tailscale-funnel-request");
+  if !funnel && host.is_some_and(|host| host.eq_ignore_ascii_case(own)) {
     next.run(request).await
   } else {
     (

@@ -76,24 +76,26 @@ pub async fn list(State(app): State<App>, caller: Caller) -> Result<Json<Vec<Ser
 
 /// A server's URL as it is kept: its origin, `https://host`, plain HTTP only for loopback.
 fn server_url(given: &str) -> Result<String> {
-  let given = given.trim().trim_end_matches('/');
+  let given = given.trim();
   let given = if given.contains("://") {
     given.to_string()
   } else {
     format!("https://{given}")
   };
-  let origin = origin_of(&given).to_string();
-  let host = origin.split_once("://").map_or("", |(_, host)| host);
-  let loopback = host.starts_with("127.0.0.1") || host.starts_with("localhost");
-  if origin != given
-    || host.is_empty()
-    || !(origin.starts_with("https://") || loopback && origin.starts_with("http://"))
-  {
-    return Err(Refusal::bad(
-      "url: a server's origin, such as https://vibetogether.potentialhedge.com.",
-    ));
+  let bad =
+    || Refusal::bad("url: a server's origin, such as https://vibetogether.potentialhedge.com.");
+  let url = url::Url::parse(&given).map_err(|_| bad())?;
+  let loopback = matches!(
+    url.host(),
+    Some(url::Host::Domain("localhost"))
+      | Some(url::Host::Ipv4(std::net::Ipv4Addr::LOCALHOST))
+      | Some(url::Host::Ipv6(std::net::Ipv6Addr::LOCALHOST))
+  );
+  let scheme = url.scheme() == "https" || url.scheme() == "http" && loopback;
+  if !scheme || url.path() != "/" || url.query().is_some() || !url.username().is_empty() {
+    return Err(bad());
   }
-  Ok(origin)
+  Ok(url.origin().ascii_serialization())
 }
 
 /// This server's name as a login's name elsewhere: its host's first label.
@@ -226,6 +228,8 @@ fn a_server_is_named_by_its_origin() {
     "http://127.0.0.1:3000"
   );
   for bad in [
+    "http://localhost.evil.com",
+    "http://127.0.0.1.evil.com:80",
     "http://a.example",
     "https://a.example/x",
     "ftp://a.example",
