@@ -506,22 +506,6 @@ impl Client {
     self.get(&["server"]).await
   }
 
-  /// The owner's other servers, each with the token this server keeps for it.
-  pub async fn servers(&self) -> Result<Vec<Server>> {
-    self.get(&["servers"]).await
-  }
-
-  /// Adds another server: its OTP, for the owner to approve on that server's website.
-  pub async fn add_server(&self, url: &str) -> Result<ServerOtp> {
-    self
-      .json(Method::POST, &["servers"], &AddServer { url: url.into() })
-      .await
-  }
-
-  pub async fn remove_server(&self, id: &str) -> Result<()> {
-    self.bare(Method::DELETE, &["servers", id]).await
-  }
-
   /// Signs the browser out.
   pub async fn sign_out(&self) -> Result<()> {
     self.bare(Method::POST, &["auth", "sign-out"]).await

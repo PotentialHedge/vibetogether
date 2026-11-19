@@ -37,9 +37,6 @@ type Place = {
 	group?: string | undefined;
 	session?: string | undefined;
 	dm?: string | undefined;
-	/** The host of the server the open session, DM or group is on, where it
-	 * is not the home server. */
-	server?: string | undefined;
 };
 
 function placeOfAddress(): Place {
@@ -49,7 +46,6 @@ function placeOfAddress(): Place {
 		group: query.get("group") ?? undefined,
 		session: query.get("session") ?? undefined,
 		dm: query.get("dm") ?? undefined,
-		server: query.get("server") ?? undefined,
 	};
 }
 
@@ -59,7 +55,6 @@ function go(place: Place) {
 	else if (place.session) query.set("session", place.session);
 	else if (place.dm) query.set("dm", place.dm);
 	else if (place.group) query.set("group", place.group);
-	if (!place.agents && place.server) query.set("server", place.server);
 	const search = query.size ? `?${query}`.replace(/=$/, "") : "";
 	history.pushState(null, "", `${location.pathname}${search}${location.hash}`);
 }
@@ -67,20 +62,8 @@ function go(place: Place) {
 const LAST = "vibetogether last session";
 
 function App({ state, reload }: { state: State; reload: () => Promise<void> }) {
-	const {
-		me,
-		groups,
-		projects,
-		sessions,
-		friends,
-		dms,
-		reachable,
-		agents,
-		servers,
-	} = state;
-	/** The person's name on the server a thing is on. */
-	const nameOn = (server: string | undefined) =>
-		servers.find((s) => s.host === server)?.account ?? me.name;
+	const { me, groups, projects, sessions, friends, dms, reachable, agents } =
+		state;
 	/** Whom a mention in a session of `group` can name: its people, and of its
 	 * agents the awake or asleep ones; a DM holds its two people alone. */
 	const mentionable = (group: Group | undefined, people: string[]) => [
@@ -94,13 +77,10 @@ function App({ state, reload }: { state: State; reload: () => Promise<void> }) {
 	const [place, setPlace] = useState<Place>(() => {
 		const place = placeOfAddress();
 		if (place.agents || place.session || place.dm || place.group) return place;
-		// A session or DM of another server is kept with `@<host>`.
-		const [last, server] = localStorage.getItem(LAST)?.split("@") ?? [];
-		if (last?.startsWith("dm:")) return { dm: last.slice(3), server };
-		const id = last;
-		return id &&
-			sessions.some((session) => session.id === id && session.server === server)
-			? { session: id, server }
+		const last = localStorage.getItem(LAST);
+		if (last?.startsWith("dm:")) return { dm: last.slice(3) };
+		return last && sessions.some((session) => session.id === last)
+			? { session: last }
 			: {};
 	});
 	// On a phone: whether the navigation is shown, rather than the session.
@@ -117,57 +97,37 @@ function App({ state, reload }: { state: State; reload: () => Promise<void> }) {
 		return () => removeEventListener("popstate", back);
 	}, []);
 
-	// Each friend's DM, with their face, in the order friends are listed: a
-	// friend of the same server as the DM.
+	// Each friend's DM, with their face, in the order friends are listed.
 	const dmsOfFriends: DmOfFriend[] = dms.flatMap((dm) => {
-		const friend = friends.find(
-			(friend) => friend.name === dm.friend && friend.server === dm.server,
-		);
+		const friend = friends.find((friend) => friend.name === dm.friend);
 		return friend ? [{ dm, friend }] : [];
 	});
 	const dm = place.agents
 		? undefined
-		: dmsOfFriends.find(
-				({ dm, friend }) =>
-					friend.name === place.dm && dm.server === place.server,
-			);
+		: dmsOfFriends.find(({ friend }) => friend.name === place.dm);
 	const session = dm
 		? undefined
-		: sessions.find(
-				(session) =>
-					session.id === place.session && session.server === place.server,
-			);
+		: sessions.find((session) => session.id === place.session);
 	const group =
 		dm || place.agents
 			? undefined
-			: (groups.find((group) =>
-					session
-						? group.id === session.group?.id && group.server === session.server
-						: group.id === place.group && group.server === place.server,
+			: (groups.find(
+					(group) => group.id === (session?.group?.id ?? place.group),
 				) ??
 				groups.find((group) => group.own) ??
 				groups[0]);
 	useEffect(() => {
-		if (session)
-			localStorage.setItem(
-				LAST,
-				session.server ? `${session.id}@${session.server}` : session.id,
-			);
+		if (session) localStorage.setItem(LAST, session.id);
 	}, [session]);
 	useEffect(() => {
-		if (dm)
-			localStorage.setItem(
-				LAST,
-				`dm:${dm.friend.name}${dm.dm.server ? `@${dm.dm.server}` : ""}`,
-			);
+		if (dm) localStorage.setItem(LAST, `dm:${dm.friend.name}`);
 	}, [dm]);
 
 	// The person's stream marks read what the open session shows.
-	const open_ = navigating ? undefined : (dm?.dm ?? session);
-	const [shown, shownOn] = [open_?.id ?? null, open_?.server];
+	const shown = navigating ? null : (dm?.dm.id ?? session?.id ?? null);
 	useEffect(() => {
-		if (!demo) showSession(shown, shownOn);
-	}, [shown, shownOn]);
+		if (!demo) showSession(shown);
+	}, [shown]);
 
 	const open = (next: Place) => {
 		go(next);
@@ -195,13 +155,14 @@ function App({ state, reload }: { state: State; reload: () => Promise<void> }) {
 					}
 					dms={dmsOfFriends}
 					groups={groups}
-					servers={servers}
 					open={dm?.dm.id ?? group?.id}
-					onOpen={(group) => open({ group: group.id, server: group.server })}
+					onOpen={(id) => open({ group: id })}
 					onAgents={() => open({ agents: true })}
 					agentsOpen={place.agents === true}
-					onDm={({ dm, friend }) =>
-						open({ dm: friend.name, server: dm.server })
+					onDm={(id) =>
+						open({
+							dm: dmsOfFriends.find(({ dm }) => dm.id === id)?.friend.name,
+						})
 					}
 					act={act}
 					reload={reload}
@@ -215,11 +176,10 @@ function App({ state, reload }: { state: State; reload: () => Promise<void> }) {
 						)}
 						sessions={sessions}
 						friends={friends}
-						reachable={reachable.filter((r) => r.server === group.server)}
+						reachable={reachable}
 						agents={agents}
 						current={session?.id}
-						// The sidebar's sessions are its group's, on its server.
-						onSession={(id) => open({ session: id, server: group.server })}
+						onSession={(id) => open({ session: id })}
 						act={act}
 						reload={reload}
 					/>
@@ -234,8 +194,7 @@ function App({ state, reload }: { state: State; reload: () => Promise<void> }) {
 				{place.agents ? (
 					<Agents
 						live={agents}
-						// The person's agents are on the home server, as its groups are.
-						groups={groups.filter((group) => !group.server)}
+						groups={groups}
 						act={act}
 						reload={reload}
 						back={<Back onClick={() => setNavigating(true)} />}
@@ -243,11 +202,8 @@ function App({ state, reload }: { state: State; reload: () => Promise<void> }) {
 				) : dm ? (
 					<Transcript
 						key={dm.dm.id}
-						as={nameOn(dm.dm.server)}
-						mentionable={mentionable(undefined, [
-							nameOn(dm.dm.server),
-							dm.friend.name,
-						])}
+						as={me.name}
+						mentionable={mentionable(undefined, [me.name, dm.friend.name])}
 						session={{
 							id: dm.dm.id,
 							name: dm.friend.displayName || dm.friend.name,
@@ -266,20 +222,11 @@ function App({ state, reload }: { state: State; reload: () => Promise<void> }) {
 					/>
 				) : session ? (
 					<Transcript
-						key={`${session.server} ${session.id}`}
-						as={nameOn(session.server)}
+						key={session.id}
+						as={me.name}
 						mentionable={(() => {
-							const group = groups.find(
-								(g) =>
-									g.id === session.group?.id && g.server === session.server,
-							);
-							// A group seen in part names no members.
-							return mentionable(
-								group,
-								group?.members.length
-									? group.members
-									: [nameOn(session.server)],
-							);
+							const group = groups.find((g) => g.id === session.group?.id);
+							return mentionable(group, group?.members ?? [me.name]);
 						})()}
 						session={session}
 						back={
@@ -295,16 +242,16 @@ function App({ state, reload }: { state: State; reload: () => Promise<void> }) {
 						}
 						actions={
 							<>
-								{session.group && !session.partial && !group?.own && (
-									<InviteToSession session={session} />
-								)}
+								{session.group &&
+									!groups.find((g) => g.id === session.group?.id)?.own && (
+										<InviteToSession session={session} />
+									)}
 								<CopySessionPrompt session={session} />
 							</>
 						}
 						menu={
 							// A group's general goes only with the group.
-							!session.general &&
-							!session.partial && (
+							!session.general && (
 								<DropdownMenuItem
 									variant="destructive"
 									onClick={() => setDeletingSession(true)}
@@ -335,8 +282,8 @@ function App({ state, reload }: { state: State; reload: () => Promise<void> }) {
 					description="Its transcript goes with it, for everyone in the group, into the trash, where any member restores it within 30 days."
 					label="Delete session"
 					onConfirm={act(async () => {
-						await api.deleteSession(session.id, session.server);
-						open({ group: session.group?.id, server: session.server });
+						await api.deleteSession(session.id);
+						open({ group: session.group?.id });
 					})}
 				/>
 			)}

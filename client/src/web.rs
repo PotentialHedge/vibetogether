@@ -351,21 +351,6 @@ impl WebClient {
     done(self.0.server_info()).await
   }
 
-  #[wasm_bindgen(unchecked_return_type = "Server[]")]
-  pub async fn servers(&self) -> Result<JsValue, JsValue> {
-    done(self.0.servers()).await
-  }
-
-  #[wasm_bindgen(js_name = addServer, unchecked_return_type = "ServerOtp")]
-  pub async fn add_server(&self, url: String) -> Result<JsValue, JsValue> {
-    done(self.0.add_server(&url)).await
-  }
-
-  #[wasm_bindgen(js_name = removeServer)]
-  pub async fn remove_server(&self, id: String) -> Result<(), JsValue> {
-    self.0.remove_server(&id).await.map_err(js_error)
-  }
-
   #[wasm_bindgen(js_name = signOut)]
   pub async fn sign_out(&self) -> Result<(), JsValue> {
     self.0.sign_out().await.map_err(js_error)

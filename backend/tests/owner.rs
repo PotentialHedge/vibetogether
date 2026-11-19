@@ -1,15 +1,12 @@
-//! A server with an owner, as one runs privately: whoever reaches it is its owner, and it keeps
-//! the owner's tokens for other servers.
+//! A server with an owner, as one runs privately: whoever reaches it is its owner.
 
 mod common;
-
-use std::time::Duration;
 
 use common::*;
 use reqwest::{StatusCode, header};
 use vibetogether_backend::Identity;
 use vibetogether_client::Client;
-use vibetogether_protocol::{LoginKind, Otp, OtpRedeem, OtpRequest, OverviewQuery, TokenKind};
+use vibetogether_protocol::{Otp, OtpRedeem, OtpRequest, OverviewQuery, TokenKind};
 
 async fn owned() -> common::Server {
   let identity = Identity::Owner {
@@ -131,64 +128,4 @@ async fn it_serves_the_website() {
     page("/nothing").await.unwrap().status(),
     StatusCode::NOT_FOUND
   );
-}
-
-#[tokio::test]
-async fn it_keeps_the_owners_tokens_for_other_servers() {
-  let public = server().await;
-  let luis = public.person("luiswirth").await;
-  let private = owned().await;
-  let otp = Client::new(&private.url, None)
-    .request_otp(&OtpRequest {
-      kind: TokenKind::Person,
-      name: "phone".into(),
-    })
-    .await
-    .unwrap();
-  let owner = Client::new(
-    &private.url,
-    Some(
-      Client::new(&private.url, None)
-        .redeem_otp(&otp.secret)
-        .await
-        .unwrap()
-        .token,
-    ),
-  );
-  let asked = owner.add_server(&public.url).await.unwrap();
-  // The public server shows the OTP to the person as any other, by the private server's name.
-  let shown = luis.browser.show_otp(&asked.code).await.unwrap();
-  assert_eq!(shown.kind, TokenKind::App);
-  assert_eq!(shown.name, "127");
-  luis.browser.approve_otp(&asked.code).await.unwrap();
-  let mut servers = Vec::new();
-  for _ in 0..100 {
-    servers = owner.servers().await.unwrap();
-    if !servers.is_empty() {
-      break;
-    }
-    tokio::time::sleep(Duration::from_millis(50)).await;
-  }
-  assert_eq!(servers.len(), 1);
-  assert_eq!(servers[0].url, public.url);
-  assert_eq!(servers[0].account, "luiswirth");
-  let there = Client::new(&servers[0].url, Some(servers[0].token.clone()));
-  assert_eq!(there.me().await.unwrap().name, "luiswirth");
-  // An agent of the owner's sees no token.
-  let agents = Client::new(
-    &private.url,
-    Some(
-      private
-        .app
-        .new_login(&owner.me().await.unwrap().id, LoginKind::Agent, "m")
-        .await
-        .unwrap(),
-    ),
-  );
-  assert_eq!(status(agents.servers().await), 400);
-  // Removing it revokes the token there.
-  owner.remove_server(&servers[0].id).await.unwrap();
-  assert_eq!(status(there.me().await), 401);
-  // A server with no owner keeps none.
-  assert_eq!(status(luis.own.servers().await), 404);
 }

@@ -1,8 +1,8 @@
 /** A session as the page observes it, and the person's own stream, which the
  * page receives while it is open: the same operations every client makes. */
 
-import { client, clientAt, nudge, others } from "@/account/api";
-import type { Client, Entry, Participant } from "@/client/vibetogether_client";
+import { client } from "@/account/api";
+import type { Entry, Participant } from "@/client/vibetogether_client";
 
 export type { Entry };
 
@@ -34,25 +34,22 @@ export class Seat {
 	log: Entry[] = [];
 	participants: Participants = {};
 	#session: string;
-	/** The host of the server the session is on; none for the home one. */
-	#server: string | undefined;
 	#subscribers = new Set<Subscriber>();
 	#stop: AbortController | null = null;
 
-	constructor(session: string, server?: string) {
+	constructor(session: string) {
 		this.#session = session;
-		this.#server = server;
 	}
 
 	/** Joins, or does nothing where the person is in already. */
 	async join(): Promise<void> {
-		await (await clientAt(this.#server)).join(this.#session);
+		await (await client()).join(this.#session);
 	}
 
 	/** Sends, and returns the names its `ping` or `fyi` lists that don't see
 	 * the session, so are reached by nothing. */
 	async send(text: string, type: string): Promise<string[]> {
-		const sent = await (await clientAt(this.#server)).send(
+		const sent = await (await client()).send(
 			this.#session,
 			type,
 			new TextEncoder().encode(text),
@@ -62,7 +59,7 @@ export class Seat {
 
 	/** Entry `n`'s payload. */
 	async payload(n: number): Promise<Blob> {
-		return (await clientAt(this.#server)).fetch(this.#session, n);
+		return (await client()).fetch(this.#session, n);
 	}
 
 	subscribe(subscriber: Subscriber): () => void {
@@ -81,7 +78,7 @@ export class Seat {
 		while (!stop.signal.aborted) {
 			const after = this.log.at(-1)?.n ?? 0;
 			try {
-				const log = await (await clientAt(this.#server)).log(
+				const log = await (await client()).log(
 					this.#session,
 					revision === undefined ? { after } : { after, revision },
 					stop.signal,
@@ -113,27 +110,22 @@ export class Seat {
 	}
 }
 
-/** The person's own stream on one server, received while the page is open,
- * which shows them awake while they look at it and asleep otherwise: its
- * unread items, by their session, and its positions, once the first answer
- * gave them. Each of the person's servers has its own. */
-type Stream = {
-	unread: { n: number; session: string }[];
-	received: number | undefined;
-	read: number;
+/** The person's own stream, received while the page is open, which shows
+ * them awake while they look at it and asleep otherwise: its unread items, by
+ * their session, and its positions, once the first answer gave them. */
+const stream = {
+	unread: [] as { n: number; session: string }[],
+	received: undefined as number | undefined,
+	read: 0,
+	/** The session open and visible, whose items are read. */
+	shown: null as string | null,
 	/** The state the waiting receive holds. */
-	state: "awake" | "asleep";
+	state: "awake" as "awake" | "asleep",
 	/** Whether the waiting receive holds do not disturb. */
-	dnd: boolean;
+	dnd: false,
 	/** The receive waiting, which a change of `read` or the state issues again. */
-	request: AbortController | null;
+	request: null as AbortController | null,
 };
-
-/** Each server's stream, by its host, the home one's as "". */
-const streams = new Map<string, Stream>();
-/** The session open and visible, whose items are read, by its id and the
- * host of its server, "" for the home one. */
-let shown: { id: string; server: string } | null = null;
 
 /** Awake while the person looks at the page: it is visible and has focus, as
  * an agent is awake while a turn runs; asleep while it is open but not looked
@@ -145,12 +137,9 @@ const stateNow = () =>
 
 /** The highest item with every one before it read: the unread ones of the
  * session shown go. */
-function readNow(stream: Stream, host: string): number {
-	const open =
-		document.visibilityState === "visible" && shown?.server === host
-			? shown.id
-			: null;
-	stream.unread = stream.unread.filter((item) => item.session !== open);
+function readNow(): number {
+	const shown = document.visibilityState === "visible" ? stream.shown : null;
+	stream.unread = stream.unread.filter((item) => item.session !== shown);
 	return (stream.unread[0]?.n ?? (stream.received ?? 0) + 1) - 1;
 }
 
@@ -179,31 +168,33 @@ export function setDoNotDisturb(on: boolean) {
 	reread();
 }
 
-/** Issues each receive again where its read position, the state or do not
+/** Issues the receive again where the read position, the state or do not
  * disturb moved. */
 function reread() {
-	for (const [host, stream] of streams)
-		if (
-			stream.received !== undefined &&
-			(readNow(stream, host) !== stream.read ||
-				stateNow() !== stream.state ||
-				dndChosen !== stream.dnd)
-		)
-			stream.request?.abort();
+	if (
+		stream.received !== undefined &&
+		(readNow() !== stream.read ||
+			stateNow() !== stream.state ||
+			dndChosen !== stream.dnd)
+	)
+		stream.request?.abort();
 }
 
-async function receiving(stream: Stream, host: string, client: Client) {
+async function receiving() {
+	document.addEventListener("visibilitychange", reread);
+	addEventListener("focus", reread);
+	addEventListener("blur", reread);
 	let failures = 0;
 	for (;;) {
 		const request = new AbortController();
 		stream.request = request;
 		// The first receive gets every unread item.
-		if (stream.received !== undefined) stream.read = readNow(stream, host);
+		if (stream.received !== undefined) stream.read = readNow();
 		stream.state = stateNow();
 		stream.dnd = dndChosen;
 		const { state, dnd } = stream;
 		try {
-			const answer = await client.receive(
+			const answer = await (await client()).receive(
 				stream.received === undefined
 					? { received: 0, state, dnd }
 					: { received: stream.received, read: stream.read, state, dnd },
@@ -217,9 +208,6 @@ async function receiving(stream: Stream, host: string, client: Client) {
 				})),
 			);
 			stream.received = Math.max(answer.received, answer.items.at(-1)?.n ?? 0);
-			// What another server's stream brings may be a session the page
-			// sees only by reading again.
-			if (host && answer.items.length) nudge(host);
 		} catch (error) {
 			if (request.signal.aborted) continue;
 			if (refused(error)) return;
@@ -229,45 +217,11 @@ async function receiving(stream: Stream, host: string, client: Client) {
 	}
 }
 
-/** Starts receiving on each of the person's servers that isn't yet. */
-async function receiveEverywhere() {
-	const servers: [string, Client][] = [
-		["", await client()],
-		...(await others()).map(({ host, client }): [string, typeof client] => [
-			host,
-			client,
-		]),
-	];
-	for (const [host, client] of servers) {
-		if (streams.has(host)) continue;
-		const stream: Stream = {
-			unread: [],
-			received: undefined,
-			read: 0,
-			state: "awake",
-			dnd: false,
-			request: null,
-		};
-		streams.set(host, stream);
-		receiving(stream, host, client);
-	}
-}
-
-let listening = false;
-
-/** Shows the session `id` in the page, on the server at `server`, the home
- * one where none is given, or no session: while the page is visible, its
- * items in the person's stream there are read. The first call starts
- * receiving the streams, and each call starts any server's that was added
- * since. */
-export function showSession(id: string | null, server?: string) {
-	if (!listening) {
-		listening = true;
-		document.addEventListener("visibilitychange", reread);
-		addEventListener("focus", reread);
-		addEventListener("blur", reread);
-	}
-	receiveEverywhere();
-	shown = id === null ? null : { id, server: server ?? "" };
+/** Shows the session `id` in the page, or none: while the page is visible,
+ * its items in the person's stream are read. The first call starts receiving
+ * the stream. */
+export function showSession(id: string | null) {
+	if (stream.request === null) receiving();
+	stream.shown = id;
 	reread();
 }

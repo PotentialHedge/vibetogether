@@ -11,7 +11,6 @@ import {
 	KeyRound,
 	LogOut,
 	Monitor,
-	Server as ServerIcon,
 	Trash2,
 	Users,
 } from "lucide-react";
@@ -22,8 +21,6 @@ import {
 	demo,
 	type Login,
 	type Seen,
-	type Server,
-	type ServerOtp,
 	signedOut,
 	type Trashed,
 } from "@/account/api";
@@ -45,20 +42,16 @@ type State = Seen & {
 	logins: Login[];
 	activity: Activity[];
 	trash: Trashed[];
-	/** The other servers the home server keeps tokens for; null on a server
-	 * without an owner, which keeps none. */
-	others: Server[] | null;
 };
 
 async function load(given?: Seen): Promise<State> {
-	const [seen, logins, activity, trash, others] = await Promise.all([
+	const [seen, logins, activity, trash] = await Promise.all([
 		given ?? api.seen(),
 		api.logins(),
 		api.activity(),
 		api.trash(),
-		api.servers().catch(() => null),
 	]);
-	return { ...seen, logins, activity, trash, others };
+	return { ...seen, logins, activity, trash };
 }
 
 /** What each kind of login is, in plain words. */
@@ -84,15 +77,6 @@ const argumentsOf = (args: Record<string, unknown>) =>
 		)
 		.join(" · ");
 
-/** A place in the app as its query: what it opens, with the host of the
- * server it is on where that is not the home one. */
-const placeQuery = (place: Record<string, string | undefined>) =>
-	new URLSearchParams(
-		Object.entries(place).filter((entry): entry is [string, string] =>
-			Boolean(entry[1]),
-		),
-	).toString();
-
 /** The app, with what the query opens. */
 const app = (query = "") => page(`account/${query}${demo ? "#demo" : ""}`);
 
@@ -102,7 +86,6 @@ const TABS = [
 	{ id: "logins", label: "Logins", icon: KeyRound },
 	{ id: "activity", label: "Activity", icon: History },
 	{ id: "trash", label: "Trash", icon: Trash2 },
-	{ id: "servers", label: "Servers", icon: ServerIcon },
 	{ id: "account", label: "Account", icon: CircleUser },
 ] as const;
 type Tab = (typeof TABS)[number]["id"];
@@ -167,9 +150,7 @@ function Settings({
 	state: State;
 	reload: () => Promise<void>;
 }) {
-	const { me, logins, activity, trash, others } = state;
-	// The home server's friends: another server's are that server's.
-	const friends = state.friends.filter((friend) => !friend.server);
+	const { me, friends, logins, activity, trash } = state;
 	const { problem, act } = useActions(reload);
 	const [tab, setTab] = useState<Tab>(tabOfAddress);
 	useEffect(() => {
@@ -214,28 +195,26 @@ function Settings({
 					aria-label="Settings"
 					className="-mx-6 flex gap-1 overflow-x-auto px-6 md:mx-0 md:flex-col md:px-0"
 				>
-					{TABS.filter(({ id }) => id !== "servers" || others).map(
-						({ id, label, icon: Icon }) => (
-							<button
-								key={id}
-								type="button"
-								aria-current={id === tab ? "page" : undefined}
-								onClick={() => open(id)}
-								className={cn(
-									"flex h-9 shrink-0 items-center gap-2.5 rounded-md px-3 text-sm whitespace-nowrap text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground",
-									id === tab && "bg-muted text-foreground",
-								)}
-							>
-								<Icon className="size-4" />
-								{label}
-								{id === "friends" && asking > 0 && (
-									<span className="ml-auto rounded-full bg-primary px-1.5 text-xs text-primary-foreground">
-										{asking}
-									</span>
-								)}
-							</button>
-						),
-					)}
+					{TABS.map(({ id, label, icon: Icon }) => (
+						<button
+							key={id}
+							type="button"
+							aria-current={id === tab ? "page" : undefined}
+							onClick={() => open(id)}
+							className={cn(
+								"flex h-9 shrink-0 items-center gap-2.5 rounded-md px-3 text-sm whitespace-nowrap text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground",
+								id === tab && "bg-muted text-foreground",
+							)}
+						>
+							<Icon className="size-4" />
+							{label}
+							{id === "friends" && asking > 0 && (
+								<span className="ml-auto rounded-full bg-primary px-1.5 text-xs text-primary-foreground">
+									{asking}
+								</span>
+							)}
+						</button>
+					))}
 				</nav>
 			</aside>
 
@@ -406,97 +385,9 @@ function Settings({
 					</Pane>
 				)}
 
-				{tab === "servers" && others && (
-					<ServersPane servers={others} reload={reload} />
-				)}
-
 				{tab === "account" && <AccountPane />}
 			</main>
 		</div>
-	);
-}
-
-/** How long an OTP of another server waits for the person. */
-const OTP_LIFETIME = 15 * 60_000;
-
-/** The person's other servers, which this one keeps a token for each, so that
- * the app shows their groups and sessions beside this one's. Adding one asks
- * it for an OTP, which the person approves on that server's website. */
-function ServersPane({
-	servers,
-	reload,
-}: {
-	servers: Server[];
-	reload: () => Promise<void>;
-}) {
-	const [asked, setAsked] = useState<ServerOtp | null>(null);
-	const { problem, act } = useActions(async () => {
-		api.reachAgain();
-		await reload();
-	});
-	return (
-		<Pane
-			title="Servers"
-			line="Your other Vibe Together servers, such as the public one, whose groups and sessions show beside this one's. This server keeps a token for each."
-			action={
-				<AddByName
-					placeholder="https://server"
-					label="Add"
-					onAdd={async (url) => {
-						const otp = await api.addServer(url);
-						setAsked(otp);
-						const end = Date.now() + OTP_LIFETIME;
-						const host = new URL(otp.link).host;
-						while (Date.now() < end) {
-							await new Promise((r) => setTimeout(r, 3000));
-							const now = await api.servers();
-							if (now.some((s) => new URL(s.url).host === host)) break;
-						}
-						setAsked(null);
-						api.reachAgain();
-						await reload();
-					}}
-				/>
-			}
-		>
-			{problem && <p className="text-sm text-destructive">{problem}</p>}
-			{asked && (
-				<p className="text-sm text-pretty">
-					Approve the OTP <code className="font-mono">{asked.code}</code> on{" "}
-					<a
-						href={asked.link}
-						target="_blank"
-						rel="noreferrer"
-						className="underline underline-offset-4"
-					>
-						{new URL(asked.link).host}
-					</a>
-					, signed in there. This page waits for it.
-				</p>
-			)}
-			<Rows empty="No other servers.">
-				{servers.map((server) => (
-					<Row
-						key={server.id}
-						actions={
-							<Button
-								variant="ghost"
-								size="sm"
-								onClick={act(() => api.removeServer(server.id))}
-							>
-								Remove
-							</Button>
-						}
-					>
-						<ServerIcon className="size-4 shrink-0 text-muted-foreground" />
-						<Titled
-							title={new URL(server.url).host}
-							detail={`as ${server.account} · since ${date.format(new Date(server.added))}`}
-						/>
-					</Row>
-				))}
-			</Rows>
-		</Pane>
 	);
 }
 
@@ -565,12 +456,10 @@ function InApp({
 	state: State;
 	reload: () => Promise<void>;
 }) {
-	const { me, friends, groups, sessions, dms, servers } = state;
+	const { me, friends, groups, sessions, dms } = state;
 	const { act } = useActions(reload);
 	const dmsOfFriends: DmOfFriend[] = dms.flatMap((dm) => {
-		const friend = friends.find(
-			(friend) => friend.name === dm.friend && friend.server === dm.server,
-		);
+		const friend = friends.find((friend) => friend.name === dm.friend);
 		return friend ? [{ dm, friend }] : [];
 	});
 	return (
@@ -588,20 +477,17 @@ function InApp({
 					}
 					dms={dmsOfFriends}
 					groups={groups}
-					servers={servers}
 					open={undefined}
-					onOpen={(group) => {
-						location.href = app(
-							`?${placeQuery({ group: group.id, server: group.server })}`,
-						);
+					onOpen={(id) => {
+						location.href = app(`?group=${encodeURIComponent(id)}`);
 					}}
 					onAgents={() => {
 						location.href = app("?agents");
 					}}
-					onDm={({ dm, friend }) => {
-						location.href = app(
-							`?${placeQuery({ dm: friend.name, server: dm.server })}`,
-						);
+					onDm={(id) => {
+						const friend = dmsOfFriends.find(({ dm }) => dm.id === id)?.friend;
+						if (friend)
+							location.href = app(`?dm=${encodeURIComponent(friend.name)}`);
 					}}
 					act={act}
 					reload={reload}

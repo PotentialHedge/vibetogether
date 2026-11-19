@@ -2,55 +2,36 @@
  * `src/client` (`just client`): the same operations every client makes. The
  * page is the person by its sign-in's cookie. With `#demo` in the address, it
  * answers from made-up data instead, so the page can be looked at without an
- * account.
- *
- * The page is the union of the person's servers: on a server with an owner,
- * the home server keeps the person's tokens for their other servers, and the
- * page reaches each with its own client. What the person sees is merged, each
- * thing of another server marked with its host, and every call on a thing
- * goes to the server it is marked with; what is new goes to the home server.
- * A token that is an app's reads no overview, so that server's part is made
- * of the person's sessions and DMs there: groups and projects as its
- * sessions name them, without members or agents, and nothing to let anyone
- * in or delete. */
+ * account. */
 
 import init, {
 	type Account,
 	type Activity,
 	type Agent,
 	Client,
+	type Friend,
+	type Group,
 	type GroupAgent,
 	type Login,
 	type Overview,
-	type Server,
-	type ServerOtp,
+	type Project,
+	type Reachable,
+	type Session,
 	type Trashed,
-	type Friend as WireFriend,
-	type Group as WireGroup,
-	type Project as WireProject,
-	type Reachable as WireReachable,
-	type Session as WireSession,
 } from "@/client/vibetogether_client";
 import { page } from "@/site";
-
-/** Where a thing is: the host of the server it is on, where that is not the
- * home server, the one the page is served from; and whether it is seen only
- * in part there, through an app's token, which reads and sends alone. */
-type Where = { server?: string; partial?: boolean };
-export type Group = WireGroup & Where;
-export type Project = WireProject & Where;
-export type Session = WireSession & Where;
-export type Friend = WireFriend & Where;
-export type Reachable = WireReachable & Where;
 
 export type {
 	Account,
 	Activity,
 	Agent,
+	Friend,
+	Group,
 	GroupAgent,
 	Login,
-	Server,
-	ServerOtp,
+	Project,
+	Reachable,
+	Session,
 	Trashed,
 };
 
@@ -64,52 +45,13 @@ export function client(): Promise<Client> {
 	return ready;
 }
 
-/** A server's host, with its port where it names one. */
-const hostOf = (url: string) => new URL(url).host;
-
-/** Another server the person is on, with the person's name there. */
-export type Remote = {
-	host: string;
-	url: string;
-	account: string;
-	client: Client;
-};
-
-let remotes: Promise<Remote[]> | undefined;
-
-/** The person's other servers, as the home server keeps them; none on a
- * server without an owner. */
-export function others(): Promise<Remote[]> {
-	remotes ??= client().then(async (home) => {
-		try {
-			return (await home.servers()).map((server) => ({
-				host: hostOf(server.url),
-				url: server.url,
-				account: server.account,
-				client: new Client(server.url, server.token),
-			}));
-		} catch {
-			return [];
-		}
-	});
-	return remotes;
-}
-
-/** The client of the server at `host`, the home one's where none is given. */
-export async function clientAt(host?: string): Promise<Client> {
-	if (host === undefined) return client();
-	const remote = (await others()).find((r) => r.host === host);
-	if (!remote) throw new Error(`${host} is none of your servers.`);
-	return remote.client;
-}
-
 /** Whether a call was refused for want of a sign-in. */
 export function signedOut(error: unknown): boolean {
 	return (error as { status?: unknown } | null)?.status === 401;
 }
 
 /** What the account sees at once, its groups' projects and sessions each as
- * one list, across all its servers. */
+ * one list. */
 export type Seen = {
 	revision: string;
 	me: Account;
@@ -119,266 +61,40 @@ export type Seen = {
 	dms: Session[];
 	friends: Friend[];
 	reachable: Reachable[];
-	/** The person's agents outside the trash, on the home server. */
+	/** The person's agents outside the trash. */
 	agents: Agent[];
-	/** The other servers, each with the person's name there, and whether the
-	 * page reaches it now. */
-	servers: { host: string; account: string; reached: boolean }[];
 };
 
-/** A server's overview, as the page has it: in part where it was made of
- * the person's sessions and DMs alone. */
-type Seeing = Overview & { partial?: boolean };
-
-function seen(overview: Seeing, server?: string): Omit<Seen, "servers"> {
+function seen(overview: Overview): Seen {
 	const { account, groups, dms, friends, reachable, agents, revision } =
 		overview;
-	const where: Where =
-		server === undefined
-			? {}
-			: { server, ...(overview.partial && { partial: true }) };
-	const at = <T>(thing: T): T & Where => ({ ...thing, ...where });
 	return {
 		revision,
 		me: account,
-		groups: groups.map(at),
-		projects: groups.flatMap((group) => group.projects.map(at)),
+		groups,
+		projects: groups.flatMap((group) => group.projects),
 		sessions: groups.flatMap((group) => [
-			...group.sessions.map(at),
-			...group.projects.flatMap((project) => project.sessions.map(at)),
+			...group.sessions,
+			...group.projects.flatMap((project) => project.sessions),
 		]),
-		dms: dms.map(at),
-		friends: friends.map(at),
-		reachable: reachable.map(at),
+		dms,
+		friends,
+		reachable,
 		agents,
 	};
-}
-
-/** What an app's token reads, as an overview: the person, their sessions,
- * whose groups and projects they name, and their DMs, each DM's other person
- * as a friend. */
-async function partly(client: Client, signal?: AbortSignal): Promise<Seeing> {
-	const [account, sessions, dms] = await Promise.all([
-		client.me(),
-		client.sessions(),
-		client.dms(),
-	]);
-	signal?.throwIfAborted();
-	const groups = new Map<string, Overview["groups"][number]>();
-	for (const session of sessions) {
-		if (!session.group) continue;
-		const group = groups.get(session.group.id) ?? {
-			...session.group,
-			own: session.own ?? false,
-			members: [],
-			agents: [],
-			sessions: [],
-			projects: [],
-		};
-		groups.set(group.id, group);
-		if (!session.project) {
-			group.sessions.push(session);
-			continue;
-		}
-		const { id, name, repos } = session.project;
-		let project = group.projects.find((p) => p.id === id);
-		if (!project) {
-			project = { id, name, repos, group: session.group, sessions: [] };
-			group.projects.push(project);
-		}
-		project.sessions.push(session);
-	}
-	return {
-		account,
-		groups: [...groups.values()],
-		dms,
-		friends: dms.flatMap((dm) =>
-			dm.friend
-				? [
-						{
-							name: dm.friend,
-							displayName: dm.friend,
-							image: undefined,
-							state: "friends" as const,
-						},
-					]
-				: [],
-		),
-		agents: [],
-		reachable: [],
-		revision: JSON.stringify([account, sessions, dms]),
-		partial: true,
-	};
-}
-
-/** The servers whose token is an app's, which reads no overview. */
-const appOnly = new Set<string>();
-
-/** A server's overview; for one whose token is an app's, made of what it
- * reads. */
-async function overviewAt(
-	host: string,
-	client: Client,
-	signal?: AbortSignal,
-): Promise<Seeing> {
-	if (!appOnly.has(host))
-		try {
-			return await client.overview({}, signal);
-		} catch (error) {
-			if ((error as { status?: unknown }).status !== 403) throw error;
-			appOnly.add(host);
-		}
-	return partly(client, signal);
-}
-
-/** How often a server read only in part is read again, unless its stream
- * brings something first. */
-const PARTIAL_PAUSE = 45_000;
-
-/** What waits for each server's stream to bring something, by its host. */
-const nudges = new Map<string, Set<() => void>>();
-
-/** Says that the stream of the server at `host` brought something, so that a
- * part read without an overview is read again. */
-export function nudge(host: string) {
-	for (const wake of nudges.get(host) ?? []) wake();
-}
-
-/** Waits `ms`, until `signal` aborts, or until the stream of `host` brings
- * something. */
-const pauseOrNudge = (host: string, ms: number, signal: AbortSignal) =>
-	new Promise<void>((resolve) => {
-		const waiting = nudges.get(host) ?? new Set();
-		nudges.set(host, waiting);
-		const done = () => {
-			clearTimeout(timer);
-			waiting.delete(done);
-			resolve();
-		};
-		const timer = setTimeout(done, ms);
-		waiting.add(done);
-		signal.addEventListener("abort", done);
-	});
-
-/** Each server's overview as last seen, by its host, the home one's as "";
- * null where it was not reached. */
-const known = new Map<string, Seeing | null>();
-
-/** Waits `ms`, or until `signal` aborts. */
-const pause = (ms: number, signal: AbortSignal) =>
-	new Promise<void>((resolve) => {
-		const timer = setTimeout(resolve, ms);
-		signal.addEventListener("abort", () => {
-			clearTimeout(timer);
-			resolve();
-		});
-	});
-
-/** How long a server out of reach is left before it is asked again. */
-const UNREACHED_PAUSE = 30_000;
-
-/** Everything as last seen, merged. */
-function merged(remote: Remote[]): Seen {
-	const home = seen(known.get("") as Overview);
-	const servers = remote.map(({ host, account }) => ({
-		host,
-		account,
-		reached: Boolean(known.get(host)),
-	}));
-	const there = remote.flatMap(({ host }) => {
-		const overview = known.get(host);
-		return overview ? [seen(overview, host)] : [];
-	});
-	return {
-		...home,
-		revision: JSON.stringify([...known].map(([h, o]) => [h, o?.revision])),
-		groups: [...home.groups, ...there.flatMap((s) => s.groups)],
-		projects: [...home.projects, ...there.flatMap((s) => s.projects)],
-		sessions: [...home.sessions, ...there.flatMap((s) => s.sessions)],
-		dms: [...home.dms, ...there.flatMap((s) => s.dms)],
-		friends: [...home.friends, ...there.flatMap((s) => s.friends)],
-		reachable: [...home.reachable, ...there.flatMap((s) => s.reachable)],
-		servers,
-	};
-}
-
-/** Everything the account sees, on every server; with `revision`, once
- * anything differs from what was seen last, or after four minutes. The home
- * server's refusal is the page's; another server's makes it unreached, and it
- * is asked again only after a pause. */
-async function seenEverywhere(
-	revision?: string,
-	signal?: AbortSignal,
-): Promise<Seen> {
-	const home = await client();
-	const remote = await others();
-	if (revision === undefined || !known.has("")) {
-		const [overview, ...rest] = await Promise.all([
-			home.overview({}, signal),
-			...remote.map(({ host, client }) =>
-				overviewAt(host, client, signal).catch(() => null),
-			),
-		]);
-		known.set("", overview);
-		remote.forEach(({ host }, i) => {
-			known.set(host, rest[i] ?? null);
-		});
-		return merged(remote);
-	}
-	const stop = new AbortController();
-	signal?.addEventListener("abort", () => stop.abort());
-	const servers: [string, Client, boolean][] = [
-		["", home, true],
-		...remote.map(({ host, client }): [string, Client, boolean] => [
-			host,
-			client,
-			false,
-		]),
-	];
-	try {
-		const [host, overview] = await Promise.race(
-			servers.map(async ([host, client, own]) => {
-				const was = known.get(host);
-				if (!was) {
-					await pause(UNREACHED_PAUSE, stop.signal);
-					if (stop.signal.aborted) return new Promise<never>(() => {});
-					try {
-						return [host, await overviewAt(host, client, stop.signal)] as const;
-					} catch {
-						return new Promise<never>(() => {});
-					}
-				}
-				try {
-					if (was.partial)
-						for (;;) {
-							await pauseOrNudge(host, PARTIAL_PAUSE, stop.signal);
-							if (stop.signal.aborted) return new Promise<never>(() => {});
-							const now = await partly(client, stop.signal);
-							if (now.revision !== was.revision) return [host, now] as const;
-						}
-					const overview = await client.overview(
-						{ revision: was.revision, wait: 240 },
-						stop.signal,
-					);
-					return [host, overview] as const;
-				} catch (error) {
-					if (own || stop.signal.aborted) throw error;
-					return [host, null] as const;
-				}
-			}),
-		);
-		known.set(host, overview);
-		return merged(remote);
-	} finally {
-		stop.abort();
-	}
 }
 
 const live = {
 	me: async () => (await client()).me(),
 	/** Everything the account sees; with `revision`, once that differs, or
 	 * after four minutes. */
-	seen: seenEverywhere,
+	seen: async (revision?: string, signal?: AbortSignal) =>
+		seen(
+			await (await client()).overview(
+				revision === undefined ? {} : { revision, wait: 240 },
+				signal,
+			),
+		),
 	/** The account's agents outside the trash. */
 	agents: async () => (await client()).agents(),
 	createAgent: async (name: string) => (await client()).createAgent(name),
@@ -389,44 +105,38 @@ const live = {
 	trash: async () => (await client()).trash(),
 	restore: async (id: string) => (await client()).restore(id),
 	createGroup: async (name: string) => (await client()).createGroup(name),
-	// Each call on a thing names the host of the server it is on, as it is
-	// marked; none is the home server.
-	deleteGroup: async (id: string, server?: string) =>
-		(await clientAt(server)).deleteGroup(id),
-	addMember: async (group: string, name: string, server?: string) =>
-		(await clientAt(server)).addMember(group, name),
-	removeMember: async (group: string, name: string, server?: string) =>
-		(await clientAt(server)).removeMember(group, name),
-	createProject: async (group: string, name: string, server?: string) =>
-		(await clientAt(server)).createProject({ group, name }),
+	deleteGroup: async (id: string) => (await client()).deleteGroup(id),
+	addMember: async (group: string, name: string) =>
+		(await client()).addMember(group, name),
+	removeMember: async (group: string, name: string) =>
+		(await client()).removeMember(group, name),
+	createProject: async (group: string, name: string) =>
+		(await client()).createProject({ group, name }),
 	changeProject: async (
 		id: string,
 		change: { name?: string; repos?: string[] },
-		server?: string,
-	) => (await clientAt(server)).changeProject(id, change),
-	deleteProject: async (id: string, server?: string) =>
-		(await clientAt(server)).deleteProject(id),
+	) => (await client()).changeProject(id, change),
+	deleteProject: async (id: string) => (await client()).deleteProject(id),
 	/** A session in a project, or directly in a group. */
 	createSession: async (
 		place: { project: string } | { group: string },
 		name: string,
-		server?: string,
-	) => (await clientAt(server)).createSession({ ...place, name }),
-	deleteSession: async (id: string, server?: string) =>
-		(await clientAt(server)).deleteSession(id),
+	) => (await client()).createSession({ ...place, name }),
+	deleteSession: async (id: string) => (await client()).deleteSession(id),
 	activity: async () => (await client()).activity(),
 	/** Deletes the account: only the person, signed in, may. */
 	deleteAccount: async () => (await client()).deleteAccount(),
 	/** An invite to be friends and join the session's group, landing in it. */
-	inviteToSession: async (session: string, server?: string) =>
-		(await clientAt(server)).createInvite({ session }),
+	inviteToSession: async (session: string) =>
+		(await client()).createInvite({ session }),
 	addFriend: async (name: string) => (await client()).addFriend(name),
 	removeFriend: async (name: string) => (await client()).removeFriend(name),
 	logins: async () => (await client()).logins(),
 	revokeLogin: async (id: string) => (await client()).revokeLogin(id),
+	/** Where to go to sign in with GitHub, coming back to the site's page
+	 * `back`. */
 	/** Whether the server has an owner, who is signed in at once. */
 	owned: async () => (await (await client()).serverInfo()).identity === "owner",
-	/** Where to go to sign in, coming back to the site's page `back`. */
 	signIn: async (back: string) => {
 		const { pathname, search } = new URL(back, location.href);
 		return (await client()).signInUrl(pathname + search);
@@ -435,17 +145,6 @@ const live = {
 	showOtp: async (code: string) => (await client()).showOtp(code),
 	approveOtp: async (code: string) => (await client()).approveOtp(code),
 	denyOtp: async (code: string) => (await client()).denyOtp(code),
-	/** The other servers the home server keeps tokens for, on a server with an
-	 * owner. */
-	servers: async () => (await client()).servers(),
-	/** Adds a server: its OTP, for the person to approve on its website. */
-	addServer: async (url: string) => (await client()).addServer(url),
-	removeServer: async (id: string) => (await client()).removeServer(id),
-	/** Forgets the other servers, so that the next call asks for them again. */
-	reachAgain: () => {
-		remotes = undefined;
-		for (const host of known.keys()) if (host) known.delete(host);
-	},
 };
 
 export type Api = typeof live;
@@ -659,7 +358,6 @@ function mock(): Api {
 						friends,
 						reachable,
 						agents,
-						servers: [],
 					})
 				: new Promise<Seen>((_, reject) =>
 						signal?.addEventListener("abort", () =>
@@ -863,12 +561,6 @@ function mock(): Api {
 		showOtp: otp,
 		approveOtp: done,
 		denyOtp: done,
-		servers: async () => [],
-		addServer: async (url) => {
-			throw new Error(`No servers in the demo, not ${url}.`);
-		},
-		removeServer: done,
-		reachAgain: () => {},
 	};
 }
 

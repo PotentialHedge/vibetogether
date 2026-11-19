@@ -171,8 +171,6 @@ impl App {
         get(invites::show).delete(invites::revoke),
       )
       .route("/invites/{code}/accept", post(invites::accept))
-      .route("/servers", get(servers::list).post(servers::add))
-      .route("/servers/{id}", axum::routing::delete(servers::remove))
       .route("/auth/sign-in", get(auth::sign_in))
       // Its first name, which websites built before servers with an owner still call.
       .route("/auth/github", get(auth::sign_in))

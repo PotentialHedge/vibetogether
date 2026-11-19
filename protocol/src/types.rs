@@ -629,34 +629,6 @@ wire! {
     Owner,
   }
 
-  /// Another server the owner of this one is on, with the app token this one keeps for it, so
-  /// that every client of the owner's reaches it through this one: the client is the union of
-  /// its servers. Only a server with an owner keeps them, so that a token sits with no operator
-  /// less trusted than the server it is for.
-  pub struct Server {
-    pub id: String,
-    /// The server, as `https://host`.
-    pub url: String,
-    /// The owner's name there.
-    pub account: String,
-    pub token: String,
-    /// The token's login there, by its id.
-    pub login: String,
-    pub added: String,
-  }
-
-  /// Adds another server: this one asks it for an OTP of an app token, which the owner
-  /// approves at its link, on that server's website.
-  pub struct AddServer {
-    pub url: String,
-  }
-
-  /// The OTP a server asked another for, to approve at `link`: once approved, the other server is
-  /// among `servers`, within its 15 minutes.
-  pub struct ServerOtp {
-    pub code: String,
-    pub link: String,
-  }
 }
 
 impl Item {

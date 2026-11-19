@@ -2808,7 +2808,6 @@ dependencies = [
  "tower-http",
  "tracing",
  "tracing-subscriber",
- "url",
  "vibetogether-client",
  "vibetogether-protocol",
 ]

@@ -159,7 +159,13 @@ pub async fn deliver(agents: &Agents, servers: &Servers<'_>) -> io::Result<()> {
       if running.contains(&server) || paused.get(&server).is_some_and(|t| Instant::now() < *t) {
         continue;
       }
-      let Some(token) = servers.tokens.of(&server) else {
+      // A token added since the delivery started is read anew, so that no restart is needed.
+      let token = servers
+        .tokens
+        .of(&server)
+        .map(str::to_string)
+        .or_else(|| Tokens::read().of(&server).map(str::to_string));
+      let Some(token) = token else {
         if told.insert(server.clone()) {
           let why = format!(
             "This machine holds no token for {server}, so nothing from there reaches you: `vibetogether login --server {server}` gets one."
@@ -174,7 +180,7 @@ pub async fn deliver(agents: &Agents, servers: &Servers<'_>) -> io::Result<()> {
         continue;
       };
       running.insert(server.clone());
-      let client = Client::new(&server, Some(token.to_string()));
+      let client = Client::new(&server, Some(token));
       let tell = !told.contains(&server);
       receiving.push(Box::pin(async move {
         let result = receive(agents, servers, &client, tell).await;
