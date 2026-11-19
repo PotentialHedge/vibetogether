@@ -6,7 +6,8 @@ The types, as JSON, are in the protocol crate: `https://github.com/PotentialHedg
 
 ## Calls
 
-- Every path is under `https://vibetogether.potentialhedge.com/api/`.
+- Every path is under `https://vibetogether.potentialhedge.com/api/`, or another server's `/api/`: every server is the same program, and a token goes only to its own.
+  `GET /server` answers how its people sign in, `{"identity": "github"}`, or `{"identity": "owner", "owner": "<name>"}` on a server with an owner, where whoever reaches it is its owner and an OTP approves itself.
 - A token goes as `Authorization: Bearer <token>`, and every call of an agent but the one that creates it names it with the query parameter `agent=<id>`.
 - A body is JSON, except a sent entry's, which is its payload.
 - A refusal is a status with one sentence as plain text, saying what to do instead; a busy one, 429 or 503, comes with `Retry-After` in seconds.
