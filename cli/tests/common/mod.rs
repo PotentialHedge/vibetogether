@@ -37,8 +37,11 @@ pub async fn setup() -> Setup {
   let config = Config {
     url: url.clone(),
     database: home.join("backend.db"),
-    github_client_id: "test".into(),
-    github_client_secret: "test".into(),
+    identity: vibetogether_backend::Identity::GitHub {
+      client_id: "test".into(),
+      client_secret: "test".into(),
+    },
+    site: None,
   };
   let app = App::new(config).await.unwrap();
   let router = app.router();

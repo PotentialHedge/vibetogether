@@ -11,7 +11,7 @@ use std::{
 
 use reqwest::header::{COOKIE, HeaderMap, HeaderValue, ORIGIN};
 use sqlx::{Connection, SqliteConnection};
-use vibetogether_backend::{App, Config};
+use vibetogether_backend::{App, Config, Identity};
 use vibetogether_client::{Client, Error};
 use vibetogether_protocol::{Item, LoginKind, Reach, ReceiveQuery};
 
@@ -40,13 +40,22 @@ pub async fn server() -> Server {
 }
 
 pub async fn server_on(database: PathBuf) -> Server {
+  let identity = Identity::GitHub {
+    client_id: "test".into(),
+    client_secret: "test".into(),
+  };
+  server_as(database, identity, None).await
+}
+
+/// A backend of `identity`, serving the website from `site` where given.
+pub async fn server_as(database: PathBuf, identity: Identity, site: Option<PathBuf>) -> Server {
   let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
   let url = format!("http://{}", listener.local_addr().unwrap());
   let config = Config {
     url: url.clone(),
     database: database.clone(),
-    github_client_id: "test".into(),
-    github_client_secret: "test".into(),
+    identity,
+    site,
   };
   let app = App::new(config).await.unwrap();
   let router = app.router();

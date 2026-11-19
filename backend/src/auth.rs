@@ -34,6 +34,7 @@ use vibetogether_protocol::{
 use crate::{
   App,
   caller::{Caller, cookie_name, kind_of, origin_of},
+  config::Identity,
   db::{self, Db},
   error::{Refusal, Result},
   extract::{Path, Query},
@@ -192,9 +193,18 @@ type GitHub = BasicClient<EndpointSet, EndpointNotSet, EndpointNotSet, EndpointN
 
 fn github(app: &App) -> Result<GitHub> {
   let url = |e: oauth2::url::ParseError| Refusal::bad(e.to_string());
+  let Identity::GitHub {
+    client_id,
+    client_secret,
+  } = &app.config.identity
+  else {
+    return Err(Refusal::not_found(
+      "This server has an owner, and no sign-in with GitHub.",
+    ));
+  };
   Ok(
-    BasicClient::new(ClientId::new(app.config.github_client_id.clone()))
-      .set_client_secret(ClientSecret::new(app.config.github_client_secret.clone()))
+    BasicClient::new(ClientId::new(client_id.clone()))
+      .set_client_secret(ClientSecret::new(client_secret.clone()))
       .set_auth_uri(AuthUrl::new("https://github.com/login/oauth/authorize".into()).map_err(url)?)
       .set_token_uri(
         TokenUrl::new("https://github.com/login/oauth/access_token".into()).map_err(url)?,
@@ -221,7 +231,8 @@ fn own_path(path: &str) -> bool {
     && path.bytes().all(|b| b.is_ascii_graphic())
 }
 
-/// Starts signing in: sends the browser to GitHub, which sends it back to `signed_in`.
+/// Starts signing in: sends the browser to GitHub, which sends it back to `signed_in`; on a
+/// server with an owner, signs the browser in as its owner at once.
 pub async fn sign_in(
   State(app): State<App>,
   headers: HeaderMap,
@@ -233,6 +244,10 @@ pub async fn sign_in(
     .callback
     .filter(|c| own_path(c))
     .unwrap_or_else(|| "/account/".into());
+  if let Some(owner) = &app.owner {
+    let jar = signed_in_as(&app, &headers, jar, owner).await?;
+    return Ok((jar, Redirect::to(&callback)).into_response());
+  }
   let (challenge, verifier) = PkceCodeChallenge::new_random_sha256();
   let (url, state) = github(&app)?
     .authorize_url(CsrfToken::new_random)
@@ -333,24 +348,43 @@ pub async fn signed_in(
     user.avatar_url.as_deref(),
   )
   .await?;
+  let jar = signed_in_as(
+    &app,
+    &headers,
+    jar.remove(removal(&app, pending_cookie(&app))),
+    &account,
+  )
+  .await?;
+  Ok((jar, Redirect::to(callback)).into_response())
+}
+
+/// The browser signed in as `account`: a new sign-in, held in its cookie.
+async fn signed_in_as(
+  app: &App,
+  headers: &HeaderMap,
+  jar: CookieJar,
+  account: &str,
+) -> Result<CookieJar> {
   let user_agent = headers
     .get(axum::http::header::USER_AGENT)
     .and_then(|v| v.to_str().ok())
     .unwrap_or("");
-  let secret = new_login(
-    &app,
-    &account,
-    LoginKind::Browser,
-    &browser_name(user_agent),
-  )
-  .await?;
-  let jar = jar.remove(removal(&app, pending_cookie(&app))).add(cookie(
-    &app,
-    cookie_name(&app),
+  let secret = new_login(app, account, LoginKind::Browser, &browser_name(user_agent)).await?;
+  Ok(jar.add(cookie(
+    app,
+    cookie_name(app),
     secret,
     time::Duration::days(400),
-  ));
-  Ok((jar, Redirect::to(callback)).into_response())
+  )))
+}
+
+/// The owner's account, made with its own group at the first start: a server with an owner has
+/// this one account alone. It is keyed as GitHub's user 0, which no one on GitHub is.
+pub async fn owner_of(app_db: &sqlx::SqlitePool, name: &str) -> Result<String> {
+  let mut tx = app_db.begin().await?;
+  let id = account_of(&mut tx, 0, name, name, None).await?;
+  tx.commit().await?;
+  Ok(id)
 }
 
 /// A browser login's name, its browser and device as its User-Agent tells them, such as
@@ -572,6 +606,12 @@ pub async fn request_otp(
   }
   let code = db::random_code(OTP_ALPHABET, 8);
   let secret = URL_SAFE_NO_PAD.encode(rand::random::<[u8; 32]>());
+  // Whoever reaches a server with an owner is its owner, so its OTP approves itself, but not one
+  // a page on another site asked for from the owner's browser: that page is not the owner.
+  let decision = match (&app.owner, &origin, app.config.owner()) {
+    (Some(account), None, Some(name)) => Decision::Approved(account.clone(), name.to_string()),
+    _ => Decision::Waiting,
+  };
   otps.insert(
     code.clone(),
     Pending {
@@ -582,7 +622,7 @@ pub async fn request_otp(
       from,
       origin,
       expires: Instant::now() + OTP_LIFETIME,
-      decision: watch::Sender::new(Decision::Waiting),
+      decision: watch::Sender::new(decision),
       redeem: None,
     },
   );

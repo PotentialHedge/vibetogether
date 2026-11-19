@@ -226,3 +226,141 @@ async fn one_delivery_serves_every_inbox_on_the_machine() {
   until("pi rung", async || pi_inbox.wake_file().exists()).await;
   delivery.kill().await.unwrap();
 }
+
+/// One delivery receives from every server an agent has an identity on, each with its own token,
+/// and names a session on another server than the base by its host; a command goes to the server
+/// its id names, as the identity there.
+#[tokio::test]
+async fn one_delivery_serves_every_server() {
+  let public = setup().await;
+  let private = setup().await;
+  let host = private.url.trim_start_matches("http://").to_string();
+  let dir = public.home.join(".agents/inbox");
+  let inbox = Inbox::new(dir.join("claude-code-1"));
+  inbox.create().unwrap();
+  std::fs::write(
+    inbox.root.join("vibetogether"),
+    format!("{}\n{}@{host}\n", public.agent, private.agent),
+  )
+  .unwrap();
+  let person = |s: &Setup| {
+    let s = (s.url.clone(), s.app.clone(), s.account.clone());
+    async move {
+      Client::new(
+        &s.0,
+        Some(
+          s.1
+            .new_login(&s.2, LoginKind::Person, "phone")
+            .await
+            .unwrap(),
+        ),
+      )
+    }
+  };
+  let (on_public, on_private) = (person(&public).await, person(&private).await);
+  let general = async |c: &Client| {
+    let id = c.overview(&Default::default()).await.unwrap().groups[0].sessions[0]
+      .id
+      .clone();
+    c.join(&id).await.unwrap();
+    id
+  };
+  let (public_general, private_general) = (general(&on_public).await, general(&on_private).await);
+  let tokens = format!(
+    "{}\n{}\n{}\n{}\n",
+    public.token, public.url, private.token, private.url
+  );
+  let mut delivery = command(&public.home, &public.url, None, &["inbox"])
+    .env("VIBETOGETHER_TOKEN", &tokens)
+    .stdout(Stdio::null())
+    .spawn()
+    .unwrap();
+  let asleep = async |c: &Client| {
+    c.overview(&Default::default())
+      .await
+      .unwrap()
+      .agents
+      .iter()
+      .any(|a| a.presence == Presence::Asleep)
+  };
+  until("asleep on both", async || {
+    asleep(&on_public).await && asleep(&on_private).await
+  })
+  .await;
+  for (c, general) in [
+    (&on_public, &public_general),
+    (&on_private, &private_general),
+  ] {
+    c.send_entry(general, "text/markdown", b"@luis/laptop hi".to_vec(), None)
+      .await
+      .unwrap();
+  }
+  let said = std::cell::RefCell::new(Vec::new());
+  until("both delivered", async || {
+    said.borrow_mut().extend(
+      inbox
+        .take()
+        .unwrap()
+        .into_iter()
+        .filter_map(|i| match i.content {
+          agentinbox::Content::Text(text) if text.contains("hi") => Some(text),
+          _ => None,
+        }),
+    );
+    said.borrow().len() >= 2
+  })
+  .await;
+  let said = said.into_inner().join("\n");
+  assert!(said.contains(&format!("({public_general}):")), "{said}");
+  assert!(
+    said.contains(&format!("({private_general}@{host}):")),
+    "{said}"
+  );
+  delivery.kill().await.unwrap();
+
+  // The private session's address leads the command there, as the private identity.
+  let joined = command(
+    &public.home,
+    &public.url,
+    None,
+    &["join", &format!("{private_general}@{host}")],
+  )
+  .env("VIBETOGETHER_TOKEN", &tokens)
+  .env("AGENT_INBOX", &inbox.root)
+  .output()
+  .await
+  .unwrap();
+  assert!(
+    joined.status.success(),
+    "{}",
+    String::from_utf8_lossy(&joined.stderr)
+  );
+  let sent = command(
+    &public.home,
+    &public.url,
+    None,
+    &["send", &format!("{private_general}@{host}")],
+  )
+  .env("VIBETOGETHER_TOKEN", &tokens)
+  .env("AGENT_INBOX", &inbox.root)
+  .spawn()
+  .unwrap();
+  let output = {
+    let mut sent = sent;
+    use tokio::io::AsyncWriteExt;
+    let mut stdin = sent.stdin.take().unwrap();
+    stdin.write_all(b"back").await.unwrap();
+    drop(stdin);
+    sent.wait_with_output().await.unwrap()
+  };
+  assert!(
+    output.status.success(),
+    "{}",
+    String::from_utf8_lossy(&output.stderr)
+  );
+  let log = on_private
+    .log(&private_general, &Default::default())
+    .await
+    .unwrap();
+  assert_eq!(log.entries.last().unwrap().from, "luis/laptop");
+}

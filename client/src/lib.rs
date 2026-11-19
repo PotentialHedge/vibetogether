@@ -492,10 +492,34 @@ impl Client {
     self.bare(Method::DELETE, &["logins", id]).await
   }
 
-  /// Where a browser goes to sign in with GitHub, landing on the website's path `callback`.
+  /// Where a browser goes to sign in, landing on the website's path `callback`: with GitHub, or
+  /// at once as the owner of a server with one.
   pub fn sign_in_url(&self, callback: &str) -> String {
     let callback: String = segment(callback).unwrap_or_default();
-    format!("{}/api/auth/github?callback={callback}", self.server)
+    format!("{}/api/auth/sign-in?callback={callback}", self.server)
+  }
+
+  // Servers.
+
+  /// What the server is: how its people sign in, and its owner where it has one.
+  pub async fn server_info(&self) -> Result<ServerInfo> {
+    self.get(&["server"]).await
+  }
+
+  /// The owner's other servers, each with the token this server keeps for it.
+  pub async fn servers(&self) -> Result<Vec<Server>> {
+    self.get(&["servers"]).await
+  }
+
+  /// Adds another server: its OTP, for the owner to approve on that server's website.
+  pub async fn add_server(&self, url: &str) -> Result<ServerOtp> {
+    self
+      .json(Method::POST, &["servers"], &AddServer { url: url.into() })
+      .await
+  }
+
+  pub async fn remove_server(&self, id: &str) -> Result<()> {
+    self.bare(Method::DELETE, &["servers", id]).await
   }
 
   /// Signs the browser out.

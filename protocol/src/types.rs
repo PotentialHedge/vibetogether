@@ -611,6 +611,54 @@ wire! {
   }
 }
 
+wire! {
+  /// What a server is, which anyone may ask: every server is the same program, and its identity
+  /// alone differs.
+  pub struct ServerInfo {
+    /// Where its people come from: `github`, signing in with GitHub, or `owner`, where whoever
+    /// reaches the server is its one person, its owner.
+    pub identity: Identity,
+    /// The owner's name, on a server with an owner.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub owner: Option<String>,
+  }
+
+  #[serde(rename_all = "lowercase")]
+  pub enum Identity {
+    Github,
+    Owner,
+  }
+
+  /// Another server the owner of this one is on, with the person token this one keeps for it, so
+  /// that every client of the owner's reaches it through this one: the client is the union of
+  /// its servers. Only a server with an owner keeps them, so that a token sits with no operator
+  /// less trusted than the server it is for.
+  pub struct Server {
+    pub id: String,
+    /// The server, as `https://host`.
+    pub url: String,
+    /// The owner's name there.
+    pub account: String,
+    pub token: String,
+    /// The token's login there, by its id.
+    pub login: String,
+    pub added: String,
+  }
+
+  /// Adds another server: this one asks it for an OTP of a person token, which the owner
+  /// approves at its link, on that server's website.
+  pub struct AddServer {
+    pub url: String,
+  }
+
+  /// The OTP a server asked another for, to approve at `link`: once approved, the other server is
+  /// among `servers`, within its 15 minutes.
+  pub struct ServerOtp {
+    pub code: String,
+    pub link: String,
+  }
+}
+
 impl Item {
   /// Whether it wakes its receiver by default: a ping, or a message said to a session the
   /// receiver is in, its `ping` left out, where the receiver's notify setting there is `all`; a

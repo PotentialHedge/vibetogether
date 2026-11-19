@@ -1,16 +1,20 @@
-//! Vibe Together's delivery into agents' inboxes (`agentinbox`): one receive kept open always,
-//! for one agent or for every agent whose inbox is on the machine, each item delivered into its
-//! agent's inbox, received once it is there and read once it has left `new/`.
+//! Vibe Together's delivery into agents' inboxes (`agentinbox`): one receive kept open always
+//! per server, for one agent or for every agent whose inbox is on the machine, each item
+//! delivered into its agent's inbox, received once it is there and read once it has left
+//! `new/`. Each server is received from on its own, so that one refusing, such as one that
+//! speaks another version, leaves the others delivering.
 
 use std::{
-  collections::BTreeMap,
+  collections::{BTreeMap, BTreeSet, HashMap},
   ffi::OsString,
   fs, io,
-  path::{Path, PathBuf},
+  path::PathBuf,
   pin::Pin,
   time::Duration,
 };
 
+use crate::servers;
+use crate::servers::{Tokens, host_of, same, split};
 use agentinbox::{Inbox, extension};
 use tokio::time::Instant;
 use vibetogether_client::{
@@ -29,6 +33,10 @@ const MAX_BACKOFF: Duration = Duration::from_secs(60);
 /// How long an agent the server refused is left out of the receive before it is tried again,
 /// such as one the idle sweep put in the trash, which a ping brings back.
 const REFUSED_PAUSE: Duration = Duration::from_secs(60);
+/// How long a server that refused the whole receive, such as one that speaks another version, is
+/// left before it is tried again; how often the servers the inboxes name are looked for.
+const SERVER_PAUSE: Duration = Duration::from_secs(300);
+const LOOK: Duration = Duration::from_secs(5);
 
 /// The file in an inbox that names its agent in Vibe Together, by its id.
 pub const AGENT_FILE: &str = "vibetogether";
@@ -45,53 +53,171 @@ impl From<io::Error> for Failure {
   }
 }
 
-/// Whom the delivery serves: one agent's inbox, or every inbox in a directory that names its
-/// agent in its file `vibetogether`.
+/// Whom the delivery serves: one agent's inbox, with its identities, or every inbox in a
+/// directory that names its agent's identities in its file `vibetogether`.
 pub enum Agents {
-  One { agent: String, inbox: PathBuf },
+  One {
+    identities: Vec<String>,
+    inbox: PathBuf,
+  },
   Machine(PathBuf),
 }
 
+/// Where the servers are: the tokens, and the base server, which an id without a host is on.
+pub struct Servers<'a> {
+  pub tokens: &'a Tokens,
+  pub base: &'a str,
+}
+
+impl Servers<'_> {
+  /// The server an identity is on, with its id there.
+  fn of<'b>(&self, address: &'b str) -> (&'b str, String) {
+    match split(address) {
+      (id, Some(host)) => (id, self.tokens.server_at(host)),
+      (id, None) => (id, self.base.to_string()),
+    }
+  }
+}
+
 impl Agents {
-  /// The agents served now, by their ids, each with its inbox.
-  fn now(&self) -> io::Result<BTreeMap<String, PathBuf>> {
-    let mut found = BTreeMap::new();
+  /// Every identity served now, each with its inbox.
+  fn identities(&self) -> io::Result<Vec<(String, PathBuf)>> {
     match self {
-      Agents::One { agent, inbox } => {
-        found.insert(agent.clone(), inbox.clone());
-      }
-      Agents::Machine(dir) => {
-        let entries = match fs::read_dir(dir) {
-          Ok(entries) => entries,
-          Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(found),
-          Err(e) => return Err(e),
-        };
-        // An inbox is a directory of its own, never a link to another.
-        let mut roots: Vec<PathBuf> = entries
-          .filter_map(|entry| entry.ok())
-          .filter(|entry| entry.file_type().is_ok_and(|t| t.is_dir()))
-          .map(|entry| entry.path())
-          .collect();
-        roots.sort();
-        for root in roots {
-          if let Some(agent) = named(&root) {
-            found.entry(agent).or_insert(root);
-          }
-        }
+      Agents::One { identities, inbox } => Ok(
+        identities
+          .iter()
+          .map(|address| (address.clone(), inbox.clone()))
+          .collect(),
+      ),
+      Agents::Machine(_) => Ok(
+        self
+          .roots()?
+          .into_iter()
+          .flat_map(|root| {
+            servers::named(&root)
+              .into_iter()
+              .map(move |address| (address, root.clone()))
+          })
+          .collect(),
+      ),
+    }
+  }
+
+  /// The agents served now on `server`, by their ids there, each with its inbox.
+  fn now(&self, servers: &Servers, server: &str) -> io::Result<BTreeMap<String, PathBuf>> {
+    let mut found = BTreeMap::new();
+    for (address, root) in self.identities()? {
+      let (id, on) = servers.of(&address);
+      if same(&on, server) {
+        found.entry(id.to_string()).or_insert(root);
       }
     }
     Ok(found)
   }
+
+  /// The inboxes in the machine's directory, each a directory of its own.
+  fn roots(&self) -> io::Result<Vec<PathBuf>> {
+    let mut roots = Vec::new();
+    match self {
+      Agents::One { inbox, .. } => roots.push(inbox.clone()),
+      Agents::Machine(dir) => {
+        let entries = match fs::read_dir(dir) {
+          Ok(entries) => entries,
+          Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(roots),
+          Err(e) => return Err(e),
+        };
+        // An inbox is a directory of its own, never a link to another.
+        roots.extend(
+          entries
+            .filter_map(|entry| entry.ok())
+            .filter(|entry| entry.file_type().is_ok_and(|t| t.is_dir()))
+            .map(|entry| entry.path()),
+        );
+        roots.sort();
+      }
+    }
+    Ok(roots)
+  }
 }
 
-/// The agent an inbox names in its file `vibetogether`, where it names one.
-fn named(root: &Path) -> Option<String> {
-  let id = fs::read_to_string(root.join(AGENT_FILE)).ok()?;
-  let id = id.trim();
-  (id.starts_with("a_")
-    && id.len() > 2
-    && id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_'))
-  .then(|| id.to_string())
+/// Keeps the agents' inboxes filled from every server an identity of theirs is on, each with its
+/// own receive, until an inbox fails. A server that refuses the receive, or that this machine
+/// holds no token for, is told to the agents on it, once, and tried again later.
+pub async fn deliver(agents: &Agents, servers: &Servers<'_>) -> io::Result<()> {
+  let mut running: BTreeSet<String> = BTreeSet::new();
+  let mut paused: HashMap<String, Instant> = HashMap::new();
+  // The servers whose agents were told why nothing comes, so that each is told once.
+  let mut told: BTreeSet<String> = BTreeSet::new();
+  let mut receiving: Vec<Pin<Box<dyn Future<Output = (String, Result<(), Failure>)> + '_>>> =
+    Vec::new();
+  loop {
+    let mut wanted: BTreeMap<String, Vec<PathBuf>> = BTreeMap::new();
+    for (address, root) in agents.identities()? {
+      let (_, server) = servers.of(&address);
+      wanted.entry(server).or_default().push(root);
+    }
+    for (server, roots) in wanted {
+      if running.contains(&server) || paused.get(&server).is_some_and(|t| Instant::now() < *t) {
+        continue;
+      }
+      let Some(token) = servers.tokens.of(&server) else {
+        if told.insert(server.clone()) {
+          let why = format!(
+            "This machine holds no token for {server}, so nothing from there reaches you: `vibetogether login --server {server}` gets one."
+          );
+          eprintln!("vibetogether: {why}");
+          for root in roots {
+            let inbox = Inbox::new(root);
+            inbox.create()?;
+            stopped(&inbox, &why)?;
+          }
+        }
+        continue;
+      };
+      running.insert(server.clone());
+      let client = Client::new(&server, Some(token.to_string()));
+      let tell = !told.contains(&server);
+      receiving.push(Box::pin(async move {
+        let result = receive(agents, servers, &client, tell).await;
+        (server, result)
+      }));
+    }
+    // Every receive, and a look for new servers.
+    let look = Box::pin(tokio::time::sleep(LOOK));
+    let next = futures_first(&mut receiving);
+    tokio::select! {
+      (i, (server, result)) = next => {
+        drop(receiving.remove(i));
+        running.remove(&server);
+        match result {
+          Err(Failure::Inbox(error)) => return Err(error),
+          Err(Failure::Refused(error)) => {
+            eprintln!("vibetogether: {server} refused the receive, again in {SERVER_PAUSE:?}: {error}");
+            told.insert(server.clone());
+          }
+          Ok(()) => {}
+        }
+        paused.insert(server, Instant::now() + SERVER_PAUSE);
+      }
+      () = look => {}
+    }
+  }
+}
+
+/// The first of `futures` to finish, by its index, or never where there is none.
+async fn futures_first<T>(futures: &mut [Pin<Box<dyn Future<Output = T> + '_>>]) -> (usize, T) {
+  if futures.is_empty() {
+    return std::future::pending().await;
+  }
+  std::future::poll_fn(|cx| {
+    for (i, future) in futures.iter_mut().enumerate() {
+      if let std::task::Poll::Ready(value) = future.as_mut().poll(cx) {
+        return std::task::Poll::Ready((i, value));
+      }
+    }
+    std::task::Poll::Pending
+  })
+  .await
 }
 
 /// The agent's positions in its stream, as the delivery knows them; `None` leaves the stored one.
@@ -120,8 +246,14 @@ type Named = Vec<(String, Option<u64>, State, bool)>;
 
 type Receiving<'a> = Pin<Box<dyn Future<Output = Result<AgentsReceived, Error>> + 'a>>;
 
-/// Keeps the agents' inboxes filled from their streams, until refused.
-pub async fn receive(agents: &Agents, client: &Client) -> Result<(), Failure> {
+/// Keeps the agents' inboxes filled from their streams on one server, until refused; where
+/// `tell`, the inboxes are told why it stopped.
+async fn receive(
+  agents: &Agents,
+  servers: &Servers<'_>,
+  client: &Client,
+  tell: bool,
+) -> Result<(), Failure> {
   let mut served: BTreeMap<String, Served> = BTreeMap::new();
   // The receive out, with what it named.
   let mut out: Option<(Receiving, Named)> = None;
@@ -136,7 +268,7 @@ pub async fn receive(agents: &Agents, client: &Client) -> Result<(), Failure> {
               for agent in answer.agents {
                 let Some(s) = served.get_mut(&agent.agent) else { continue };
                 if let Some(received) = agent.received {
-                  accept(&s.inbox, client, &mut s.stream, received)?;
+                  accept(&s.inbox, client, servers.base, &mut s.stream, received)?;
                   s.told = false;
                 } else if let Some(why) = agent.refused {
                   eprintln!("vibetogether: {}: {why}", s.inbox.root.display());
@@ -159,8 +291,9 @@ pub async fn receive(agents: &Agents, client: &Client) -> Result<(), Failure> {
             Err(error) => {
               // No agent sees this command's stderr: each reads in its inbox why the delivery
               // stopped, such as that its client is out of date, and how to fix it.
-              let said: String = error.to_string().chars().take(2000).collect();
-              for s in served.values() {
+              let said = format!("{}: {error}", client.server());
+              let said: String = said.chars().take(2000).collect();
+              for s in served.values().filter(|_| tell) {
                 stopped(&s.inbox, &said)?;
               }
               return Err(Failure::Refused(error));
@@ -172,7 +305,7 @@ pub async fn receive(agents: &Agents, client: &Client) -> Result<(), Failure> {
     } else {
       tokio::time::sleep_until(next.max(Instant::now())).await;
     }
-    let now = agents.now()?;
+    let now = agents.now(servers, client.server())?;
     served.retain(|agent, s| now.get(agent) == Some(&s.inbox.root));
     for (agent, root) in now {
       if let std::collections::btree_map::Entry::Vacant(entry) = served.entry(agent) {
@@ -237,10 +370,16 @@ pub async fn receive(agents: &Agents, client: &Client) -> Result<(), Failure> {
 }
 
 /// Takes in an answer: delivers each item, and rings the bell for a ping or a session's item.
-fn accept(inbox: &Inbox, client: &Client, stream: &mut Stream, answer: Received) -> io::Result<()> {
+fn accept(
+  inbox: &Inbox,
+  client: &Client,
+  base: &str,
+  stream: &mut Stream,
+  answer: Received,
+) -> io::Result<()> {
   let mut ring = false;
   for item in &answer.items {
-    let (content, ext) = render(item, client.server());
+    let (content, ext) = render(item, client.server(), base);
     let path = inbox.deliver(content.as_bytes(), &item.entry.from, &ext)?;
     ring |= settled(
       inbox.rings(
@@ -331,16 +470,21 @@ fn field(text: &str) -> String {
 
 /// An item as the agent reads it, with its extension: a first line that says where it is from,
 /// the sender as the backend names it, a fixed line that it is a participant's, then its text.
-/// A payload without inline text is described with where to fetch it, never fetched.
-fn render(item: &Item, server: &str) -> (String, String) {
+/// The session is named by its address, with its server's host where it is not on `base`. A
+/// payload without inline text is described with where to fetch it, never fetched.
+fn render(item: &Item, server: &str, base: &str) -> (String, String) {
   let entry = &item.entry;
   let from = field(&entry.from);
+  let session = if same(server, base) {
+    item.session.id.clone()
+  } else {
+    format!("{}@{}", item.session.id, host_of(server))
+  };
   let header = format!(
-    "Vibe Together item {} ({}) from {from}, session {} ({}):\n{PROVENANCE}",
+    "Vibe Together item {} ({}) from {from}, session {} ({session}):\n{PROVENANCE}",
     item.n,
     reach_name(item.reach),
     field(&item.session.name),
-    item.session.id,
   );
   let text = |text: String| (text, "txt".to_string());
   match (entry.ty.as_str(), &entry.text) {
@@ -360,10 +504,9 @@ fn render(item: &Item, server: &str) -> (String, String) {
         .map(|name| format!(", named {}", field(name)))
         .unwrap_or_default();
       text(format!(
-        "{header}\nA payload of type {}{filename}, {} bytes, not fetched: `vibetogether fetch {} {}` (at {server}).\n",
+        "{header}\nA payload of type {}{filename}, {} bytes, not fetched: `vibetogether fetch {session} {}`.\n",
         field(ty),
         entry.size,
-        item.session.id,
         entry.n,
       ))
     }
@@ -398,7 +541,7 @@ mod tests {
         app: None,
       },
     };
-    let (text, _) = render(&item, "https://example.org");
+    let (text, _) = render(&item, "https://example.org", "https://example.org");
     let mut lines = text.lines();
     let header = lines.next().unwrap();
     assert!(

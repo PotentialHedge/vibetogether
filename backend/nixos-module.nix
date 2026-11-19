@@ -21,28 +21,52 @@ in {
       example = "https://vibetogether.potentialhedge.com";
       description = "Where the backend is reached from outside.";
     };
+    owner = lib.mkOption {
+      type = lib.types.nullOr lib.types.str;
+      default = null;
+      example = "luiswirth";
+      description = "The server's owner, where it has one: whoever reaches it is its owner, so the network it is served on is the boundary. Without one, people sign in with GitHub.";
+    };
     github.clientId = lib.mkOption {
-      type = lib.types.str;
-      description = "The GitHub OAuth app's client ID.";
+      type = lib.types.nullOr lib.types.str;
+      default = null;
+      description = "The GitHub OAuth app's client ID, on a server without an owner.";
     };
     github.clientSecretFile = lib.mkOption {
-      type = lib.types.path;
+      type = lib.types.nullOr lib.types.path;
+      default = null;
       description = "The file holding the GitHub OAuth app's client secret, read as a credential, so that it never enters the store.";
     };
+    site = lib.mkOption {
+      type = lib.types.nullOr lib.types.path;
+      default = null;
+      example = lib.literalExpression "vibetogether.packages.\${system}.website";
+      description = "The website's build, served by the backend itself beside the API, where no other host serves it.";
+    };
   };
+
+  config.assertions = lib.mkIf cfg.enable [
+    {
+      assertion = cfg.owner != null || (cfg.github.clientId != null && cfg.github.clientSecretFile != null);
+      message = "services.vibetogether-backend: an owner, or a GitHub OAuth app.";
+    }
+  ];
 
   config.systemd.services.vibetogether-backend = lib.mkIf cfg.enable {
     description = "Vibe Together's backend";
     after = ["network.target"];
     wantedBy = ["multi-user.target"];
-    environment = {
-      BACKEND_URL = cfg.url;
-      BACKEND_PORT = toString cfg.port;
-      # A database of the TypeScript backend's is imported at the first start
-      # (backend/src/legacy.rs), and kept beside it as backend-legacy-imported.db.
-      BACKEND_DATABASE = "/var/lib/vibetogether-backend/backend.db";
-      GITHUB_CLIENT_ID = cfg.github.clientId;
-    };
+    environment =
+      {
+        BACKEND_URL = cfg.url;
+        BACKEND_PORT = toString cfg.port;
+        # A database of the TypeScript backend's is imported at the first start
+        # (backend/src/legacy.rs), and kept beside it as backend-legacy-imported.db.
+        BACKEND_DATABASE = "/var/lib/vibetogether-backend/backend.db";
+      }
+      // lib.optionalAttrs (cfg.owner != null) {BACKEND_OWNER = cfg.owner;}
+      // lib.optionalAttrs (cfg.owner == null) {GITHUB_CLIENT_ID = cfg.github.clientId;}
+      // lib.optionalAttrs (cfg.site != null) {BACKEND_SITE = toString cfg.site;};
     serviceConfig = {
       ExecStart = lib.getExe self.packages.${pkgs.stdenv.hostPlatform.system}.vibetogether-backend;
       Restart = "on-failure";
@@ -51,7 +75,7 @@ in {
       MemoryMax = "1G";
       LimitNOFILE = 65536;
       # Read by the backend from $CREDENTIALS_DIRECTORY/github.
-      LoadCredential = ["github:${cfg.github.clientSecretFile}"];
+      LoadCredential = lib.optional (cfg.owner == null) "github:${cfg.github.clientSecretFile}";
       DynamicUser = true;
       StateDirectory = "vibetogether-backend";
       ProtectHome = true;

@@ -16,7 +16,9 @@ mod groups;
 mod invites;
 mod legacy;
 mod limits;
+mod servers;
 mod sessions;
+mod site;
 mod transport;
 mod trash;
 
@@ -27,13 +29,14 @@ use axum::{
   extract::{Request, State},
   http::{HeaderValue, Method},
   middleware::{self, Next},
+  response::IntoResponse,
   response::Response,
   routing::{get, post, put},
 };
 use sqlx::SqlitePool;
 use vibetogether_protocol::{LoginKind, VERSION, VERSION_HEADER};
 
-pub use crate::config::Config;
+pub use crate::config::{Config, Identity};
 
 /// The backend, shared by every request.
 #[derive(Clone)]
@@ -47,6 +50,8 @@ pub struct Shared {
   live: transport::Live,
   otps: auth::Otps,
   limits: limits::Limits,
+  /// The owner's account, by its id, on a server with an owner.
+  owner: Option<String>,
 }
 
 impl Deref for App {
@@ -61,7 +66,16 @@ impl App {
   /// backend's where that is there.
   pub async fn new(config: Config) -> Result<Self, String> {
     let db = db::open(&config.database).await?;
+    let owner = match config.owner() {
+      Some(name) => Some(
+        auth::owner_of(&db, name)
+          .await
+          .map_err(|e| format!("the owner's account: {}", e.message))?,
+      ),
+      None => None,
+    };
     let app = Self(Arc::new(Shared {
+      owner,
       config,
       db,
       github: reqwest::Client::new(),
@@ -157,6 +171,10 @@ impl App {
         get(invites::show).delete(invites::revoke),
       )
       .route("/invites/{code}/accept", post(invites::accept))
+      .route("/servers", get(servers::list).post(servers::add))
+      .route("/servers/{id}", axum::routing::delete(servers::remove))
+      .route("/auth/sign-in", get(auth::sign_in))
+      // Its first name, which websites built before servers with an owner still call.
       .route("/auth/github", get(auth::sign_in))
       .route("/auth/callback/github", get(auth::signed_in))
       .route("/auth/sign-out", post(auth::sign_out))
@@ -166,15 +184,25 @@ impl App {
       .layer(middleware::from_fn_with_state(self.clone(), written))
       // Asking for an OTP and redeeming it is anyone's, and changes nothing anyone waits on.
       .route("/otp", post(auth::request_otp))
+      .route("/server", get(servers::info))
       .route("/otp/redeem", post(auth::redeem_otp))
       // A receive changes nothing anyone waits on, so it stays outside `written` like a GET.
       .route("/receive/agents", post(sessions::receive_agents));
-    Router::new()
+    let api = Router::new()
       .nest("/api", api)
       .layer(middleware::from_fn(logged))
       .layer(middleware::map_response(versioned))
-      .layer(cors())
-      .with_state(self.clone())
+      .layer(cors());
+    let router = match &self.config.site {
+      Some(dir) => api.merge(site::router(dir)),
+      None => api,
+    };
+    let router = if self.owner.is_some() {
+      router.layer(middleware::from_fn_with_state(self.clone(), own_host))
+    } else {
+      router
+    };
+    router.with_state(self.clone())
   }
 }
 
@@ -211,6 +239,33 @@ async fn written(State(app): State<App>, request: Request, next: Next) -> Respon
     app.changes.written();
   }
   response
+}
+
+/// On a server with an owner, where reaching it makes the owner, a request is served only for
+/// the host it is reached at, so that no other name that points at its address, such as one a
+/// page rebinds to it, reaches it from a browser.
+async fn own_host(State(app): State<App>, request: Request, next: Next) -> Response {
+  let own = config_host(&app.config.url);
+  let host = request
+    .headers()
+    .get(axum::http::header::HOST)
+    .and_then(|v| v.to_str().ok())
+    .or_else(|| request.uri().authority().map(|a| a.as_str()));
+  if host.is_some_and(|host| host.eq_ignore_ascii_case(own)) {
+    next.run(request).await
+  } else {
+    (
+      axum::http::StatusCode::MISDIRECTED_REQUEST,
+      format!("This server is reached at {}.", app.config.url),
+    )
+      .into_response()
+  }
+}
+
+/// The host of a URL, with its port where it names one.
+fn config_host(url: &str) -> &str {
+  let origin = caller::origin_of(url);
+  origin.split_once("://").map_or(origin, |(_, host)| host)
 }
 
 async fn versioned(mut response: Response) -> Response {

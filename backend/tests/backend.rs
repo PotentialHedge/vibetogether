@@ -11,7 +11,7 @@ use vibetogether_protocol::*;
 /// Luis, Ben and Eve; Luis and Ben friends, in the group Potential Hedge with the project
 /// vibetogether and its session build.
 struct World {
-  server: Server,
+  server: common::Server,
   luis: Person,
   ben: Person,
   eve: Person,
