@@ -154,7 +154,7 @@ async fn the_trash_is_purged_after_30_days() {
     INSERT INTO project (id, name, "group", created) VALUES ('p_in', 'in', 'g_old', '2026-01-01T00:00:00.000Z');
     INSERT INTO session (id, name, project, created) VALUES ('s_in', 'in', 'p_in', '2026-01-01T00:00:00.000Z');
     INSERT INTO entry (session, n, time, sender, type, size, text) VALUES ('s_in', 1, '2026-01-01T00:00:00.000Z', 'luis', 'text/plain', 2, 'hi');
-    INSERT INTO agent (id, account, name, archived, created) VALUES
+    INSERT INTO agent (id, account, name, trashed, created) VALUES
       ('a_old', 'u_luis', 'old', '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z'),
       ('a_new', 'u_luis', 'new', '2999-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z');
     INSERT INTO group_member VALUES ('g_luis', 'a_old', 'u_luis'), ('g_luis', 'a_new', 'u_luis');

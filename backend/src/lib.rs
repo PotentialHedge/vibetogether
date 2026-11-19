@@ -121,8 +121,10 @@ impl App {
         axum::routing::patch(groups::change_project).delete(groups::delete_project),
       )
       .route("/agents", get(account::agents).post(account::create_agent))
-      .route("/agents/{id}", axum::routing::patch(account::rename_agent))
-      .route("/agents/{id}/archive", post(account::archive_agent))
+      .route(
+        "/agents/{id}",
+        axum::routing::patch(account::rename_agent).delete(account::delete_agent),
+      )
       .route("/trash", get(trash::list))
       .route("/trash/{id}/restore", post(trash::restore))
       .route("/status", put(account::set_status))

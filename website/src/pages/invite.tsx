@@ -42,10 +42,7 @@ function AgentsInto({ group }: { group: { id: string; name: string } }) {
 	const [busy, setBusy] = useState(false);
 	const [problem, setProblem] = useState<string | null>(null);
 	useEffect(() => {
-		api.agents().then(
-			(all) => setAgents(all.filter((a) => a.presence !== "archived")),
-			() => setAgents([]),
-		);
+		api.agents().then(setAgents, () => setAgents([]));
 	}, []);
 	if (agents.length === 0) return null;
 	if (added)

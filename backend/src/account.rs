@@ -23,9 +23,9 @@ use crate::{
   transport,
 };
 
-/// The most agents an account has that are not archived.
+/// The most agents an account has outside the trash.
 pub const MAX_AGENTS: i64 = 100;
-/// The most agents an account has ever had, so that archiving cannot make room without end.
+/// The most agents an account has ever had, so that deleting cannot make room without end.
 const MAX_AGENTS_EVER: i64 = 1000;
 
 async fn status_of(db: &mut Db, participant: &str) -> Result<Option<String>> {
@@ -139,7 +139,7 @@ async fn overview_of(app: &App, db: &mut Db, who: &str, me: &str) -> Result<Over
       false => Vec::new(),
     },
     friends: friends_of(db, me).await?,
-    agents: agents_of(app, db, who, me, false).await?,
+    agents: agents_of(app, db, who, me).await?,
     reachable: reachable_seen_by(app, db, who).await?,
     revision: String::new(),
   })
@@ -244,7 +244,6 @@ struct AgentRow {
   id: String,
   name: String,
   seen: Option<String>,
-  archived: Option<String>,
 }
 
 /// An agent as `viewer` sees it, a participant's id: its sessions only where both see them.
@@ -255,11 +254,7 @@ async fn agent_json(
   login: &str,
   row: AgentRow,
 ) -> Result<Agent> {
-  let presence = if row.archived.is_some() {
-    Presence::Archived
-  } else {
-    app.live.presence(&row.id)
-  };
+  let presence = app.live.presence(&row.id);
   let sessions: Vec<String> = sqlx::query_scalar(
     "SELECT session FROM participant WHERE id = ? AND inside = 1 ORDER BY since",
   )
@@ -279,9 +274,7 @@ async fn agent_json(
   }
   Ok(Agent {
     status: status_of(db, &row.id).await?,
-    seen: row
-      .seen
-      .filter(|_| matches!(presence, Presence::Offline | Presence::Archived)),
+    seen: row.seen.filter(|_| presence == Presence::Offline),
     name: format!("{login}/{}", row.name),
     dnd: app.live.dnd(&row.id),
     id: row.id,
@@ -290,24 +283,16 @@ async fn agent_json(
   })
 }
 
-/// The account's agents, awake or asleep first, then the ones seen last first, and the archived
-/// last.
-async fn agents_of(
-  app: &App,
-  db: &mut Db,
-  viewer: &str,
-  account: &str,
-  archived: bool,
-) -> Result<Vec<Agent>> {
+/// The account's agents outside the trash, awake or asleep first, then the ones seen last first.
+async fn agents_of(app: &App, db: &mut Db, viewer: &str, account: &str) -> Result<Vec<Agent>> {
   let login: String = sqlx::query_scalar("SELECT login FROM account WHERE id = ?")
     .bind(account)
     .fetch_one(&mut *db)
     .await?;
-  let rows: Vec<AgentRow> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
-    "SELECT id, name, seen, archived FROM agent WHERE account = ? {}
-     ORDER BY archived IS NOT NULL, coalesce(seen, created) DESC, name",
-    if archived { "" } else { "AND archived IS NULL" }
-  )))
+  let rows: Vec<AgentRow> = sqlx::query_as(
+    "SELECT id, name, seen FROM agent WHERE account = ? AND trashed IS NULL
+     ORDER BY coalesce(seen, created) DESC, name",
+  )
   .bind(account)
   .fetch_all(&mut *db)
   .await?;
@@ -320,12 +305,14 @@ async fn agents_of(
 }
 
 async fn agent_of(db: &mut Db, id: &str, account: &str) -> Result<AgentRow> {
-  sqlx::query_as("SELECT id, name, seen, archived FROM agent WHERE id = ? AND account = ?")
-    .bind(id)
-    .bind(account)
-    .fetch_optional(db)
-    .await?
-    .ok_or_else(|| Refusal::not_found("No such agent."))
+  sqlx::query_as(
+    "SELECT id, name, seen FROM agent WHERE id = ? AND account = ? AND trashed IS NULL",
+  )
+  .bind(id)
+  .bind(account)
+  .fetch_optional(db)
+  .await?
+  .ok_or_else(|| Refusal::not_found("No such agent."))
 }
 
 fn check_agent_name(name: &str) -> Result<()> {
@@ -362,14 +349,14 @@ pub async fn create_agent(
   let mut db = app.db.acquire().await?;
   if db::count(
     &mut db,
-    "SELECT count(*) FROM agent WHERE account = ? AND archived IS NULL",
+    "SELECT count(*) FROM agent WHERE account = ? AND trashed IS NULL",
     &[&caller.account],
   )
   .await?
     >= MAX_AGENTS
   {
     return Err(Refusal::forbidden(format!(
-      "An account has at most {MAX_AGENTS} agents that are not archived: archive one first."
+      "An account has at most {MAX_AGENTS} agents outside the trash: delete one first."
     )));
   }
   if db::count(
@@ -381,7 +368,7 @@ pub async fn create_agent(
     >= MAX_AGENTS_EVER
   {
     return Err(Refusal::forbidden(format!(
-      "An account has at most {MAX_AGENTS_EVER} agents, archived ones included."
+      "An account has at most {MAX_AGENTS_EVER} agents, the ones in the trash included."
     )));
   }
   let now = db::now();
@@ -433,11 +420,11 @@ pub async fn create_agent(
   ))
 }
 
-/// The account's agents, the archived included.
+/// The account's agents outside the trash.
 pub async fn agents(State(app): State<App>, caller: Caller) -> Result<Json<Vec<Agent>>> {
   let mut db = app.db.acquire().await?;
   Ok(Json(
-    agents_of(&app, &mut db, caller.who(), &caller.account, true).await?,
+    agents_of(&app, &mut db, caller.who(), &caller.account).await?,
   ))
 }
 
@@ -451,9 +438,6 @@ pub async fn rename_agent(
   check_agent_name(&input.name)?;
   let mut db = app.db.acquire().await?;
   let row = agent_of(&mut db, &id, &caller.account).await?;
-  if row.archived.is_some() {
-    return Err(Refusal::forbidden("An archived agent keeps its last name."));
-  }
   // A token renames only an agent it holds; the person, any.
   if caller.kind == LoginKind::Agent {
     let p = transport::Acting {
@@ -489,40 +473,37 @@ pub async fn rename_agent(
   ))
 }
 
-/// Archives an agent, which deletes it into the trash, where its person and their agents restore
-/// it until it is purged. The person archives any of their agents, and so does every agent of
-/// theirs, Luis's decision (2026-11-19): "agents should fully be able to cleanup after
-/// themselves".
-pub async fn archive_agent(
+/// Deletes an agent into the trash, where its person and their agents restore it until it is
+/// purged. The person deletes any of their agents, and so does every agent of theirs, Luis's
+/// decision (2026-11-19): "agents should fully be able to cleanup after themselves".
+pub async fn delete_agent(
   State(app): State<App>,
   caller: Caller,
   Path(id): Path<String>,
 ) -> Result<StatusCode> {
   let mut db = app.db.acquire().await?;
   let row = agent_of(&mut db, &id, &caller.account).await?;
-  if row.archived.is_none() {
-    let p = transport::Acting {
-      account: caller.account.clone(),
-      id: row.id.clone(),
-      name: format!("{}/{}", caller.person, row.name),
-      app: None,
-    };
-    transport::archive(&app, &mut db, &p, caller.actor()).await?;
-    // The person is told where an agent archived one, so that a hijacked one shows.
-    if caller.agent.is_some() {
-      let own = own_group_of(&mut db, &caller.account).await?;
-      let inbox = general_of(&mut db, &own).await?;
-      let text = format!(
-        "{} archived the agent {}, into the trash, where you and your agents restore it within {TRASH_DAYS} days.",
-        caller.actor(),
-        p.name
-      );
-      transport::announce(&app, &mut db, &inbox, &text, &[], &[]).await?;
-    }
-    caller
-      .record(&mut db, "archive_agent", json!({ "id": id }))
-      .await?;
+  let p = transport::Acting {
+    account: caller.account.clone(),
+    id: row.id.clone(),
+    name: format!("{}/{}", caller.person, row.name),
+    app: None,
+  };
+  transport::trash_agent(&app, &mut db, &p, caller.actor()).await?;
+  // The person is told where an agent deleted one, so that a hijacked one shows.
+  if caller.agent.is_some() {
+    let own = own_group_of(&mut db, &caller.account).await?;
+    let inbox = general_of(&mut db, &own).await?;
+    let text = format!(
+      "{} deleted the agent {}, into the trash, where you and your agents restore it within {TRASH_DAYS} days.",
+      caller.actor(),
+      p.name
+    );
+    transport::announce(&app, &mut db, &inbox, &text, &[], &[]).await?;
   }
+  caller
+    .record(&mut db, "delete_agent", json!({ "id": id }))
+    .await?;
   Ok(StatusCode::NO_CONTENT)
 }
 

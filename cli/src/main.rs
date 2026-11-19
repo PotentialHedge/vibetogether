@@ -155,7 +155,7 @@ enum Command {
   /// It goes with everything in it, for everyone, and shows only in the trash, where whoever
   /// could delete it restores it, until it is purged 30 days after. Any member of a group
   /// deletes it, and what is in it; the person and any of their agents delete an agent, which
-  /// leaves every session and acts no more, and is shown as archived.
+  /// leaves every session and acts no more.
   Delete { id: String },
   /// Lists what is in the trash that you restore, newest first.
   Trash,
@@ -560,7 +560,7 @@ async fn run(cli: Cli) -> Result<(), Exit> {
       Kind::Group => c.delete_group(&id).await?,
       Kind::Project => c.delete_project(&id).await?,
       Kind::Session => c.delete_session(&id).await?,
-      Kind::Agent => c.archive_agent(&id).await?,
+      Kind::Agent => c.delete_agent(&id).await?,
     },
     Command::Trash => print(&c.trash().await?),
     Command::Restore { id } => c.restore(&id).await?,

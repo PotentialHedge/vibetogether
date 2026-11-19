@@ -61,7 +61,7 @@ export type Seen = {
 	dms: Session[];
 	friends: Friend[];
 	reachable: Reachable[];
-	/** The person's agents that are not archived. */
+	/** The person's agents outside the trash. */
 	agents: Agent[];
 };
 
@@ -95,12 +95,12 @@ const live = {
 				signal,
 			),
 		),
-	/** The account's agents, the archived included. */
+	/** The account's agents outside the trash. */
 	agents: async () => (await client()).agents(),
 	createAgent: async (name: string) => (await client()).createAgent(name),
 	renameAgent: async (id: string, name: string) =>
 		(await client()).renameAgent(id, name),
-	archiveAgent: async (id: string) => (await client()).archiveAgent(id),
+	deleteAgent: async (id: string) => (await client()).deleteAgent(id),
 	/** What is in the trash that the person restores, newest first. */
 	trash: async () => (await client()).trash(),
 	restore: async (id: string) => (await client()).restore(id),
@@ -181,7 +181,6 @@ function mock(): Api {
 			agents: [
 				{ id: "a_7tq2wz8c", name: "benarmstrong/claude", presence: "asleep" },
 				{ id: "a_q9v4k1zs", name: "benarmstrong/review", presence: "offline" },
-				{ id: "a_n2c8h6ty", name: "benarmstrong/old", presence: "archived" },
 				claude,
 				{ id: "a_m4p0d3xr", name: "tristangabl/codex", presence: "awake" },
 			],
@@ -356,7 +355,7 @@ function mock(): Api {
 							})),
 						friends,
 						reachable,
-						agents: agents.filter((agent) => agent.presence !== "archived"),
+						agents,
 					})
 				: new Promise<Seen>((_, reject) =>
 						signal?.addEventListener("abort", () =>
@@ -380,10 +379,20 @@ function mock(): Api {
 			);
 			return agents.find((a) => a.id === id) as Agent;
 		},
-		archiveAgent: async (id) => {
-			agents = agents.map((a) =>
-				a.id === id ? { ...a, presence: "archived" } : a,
-			);
+		deleteAgent: async (id) => {
+			const agent = agents.find((a) => a.id === id) as Agent;
+			agents = agents.filter((a) => a.id !== id);
+			trash = [
+				{
+					id,
+					kind: "agent",
+					name: agent.name,
+					trashed: daysAgo(0),
+					by: me.name,
+					purged: daysAgo(-30),
+				},
+				...trash,
+			];
 		},
 		trash: async () => trash,
 		restore: async (id) => {

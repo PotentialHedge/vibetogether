@@ -9,7 +9,7 @@ use axum::{Json, extract::State, http::StatusCode};
 use serde_json::json;
 use sqlx::Connection;
 use vibetogether_protocol::{
-  ChangeProject, CreateProject, Group, GroupAgent, NameBody, Named, Presence, Project, is_name_part,
+  ChangeProject, CreateProject, Group, GroupAgent, NameBody, Named, Project, is_name_part,
 };
 
 use crate::{
@@ -152,7 +152,6 @@ pub async fn groups_of(db: &mut Db, who: &str) -> Result<Vec<GroupRow>> {
 struct AgentMember {
   id: String,
   name: String,
-  archived: bool,
 }
 
 pub async fn group_json(app: &App, db: &mut Db, group: &GroupRow) -> Result<Group> {
@@ -163,9 +162,9 @@ pub async fn group_json(app: &App, db: &mut Db, group: &GroupRow) -> Result<Grou
   .fetch_all(&mut *db)
   .await?;
   let agents: Vec<AgentMember> = sqlx::query_as(
-    r#"SELECT ag.id, a.login || '/' || ag.name AS name, ag.archived IS NOT NULL AS archived
+    r#"SELECT ag.id, a.login || '/' || ag.name AS name
        FROM group_member m JOIN agent ag ON ag.id = m.member JOIN account a ON a.id = ag.account
-       WHERE m."group" = ? ORDER BY a.login, ag.name"#,
+       WHERE m."group" = ? AND ag.trashed IS NULL ORDER BY a.login, ag.name"#,
   )
   .bind(&group.id)
   .fetch_all(db)
@@ -178,10 +177,7 @@ pub async fn group_json(app: &App, db: &mut Db, group: &GroupRow) -> Result<Grou
     agents: agents
       .into_iter()
       .map(|agent| GroupAgent {
-        presence: match agent.archived {
-          true => Presence::Archived,
-          false => app.live.presence(&agent.id),
-        },
+        presence: app.live.presence(&agent.id),
         id: agent.id,
         name: agent.name,
       })
@@ -190,7 +186,7 @@ pub async fn group_json(app: &App, db: &mut Db, group: &GroupRow) -> Result<Grou
 }
 
 /// A member to be, or one, as `name` gives it, by the rule a mention follows: `<person>/<agent>`
-/// that agent, which is not archived; a name without `/` the caller's person's agent of that name
+/// that agent, outside the trash; a name without `/` the caller's person's agent of that name
 /// where there is one, else a person. Its person, its id, and its full name.
 async fn member_named(
   db: &mut Db,

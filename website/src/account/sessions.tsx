@@ -825,7 +825,7 @@ function Members({
 	friends: Friend[];
 	/** Everyone awake or asleep the person sees. */
 	reachable: Reachable[];
-	/** The person's agents that are not archived. */
+	/** The person's agents outside the trash. */
 	agents: Agent[];
 	act: Act;
 }) {
@@ -943,7 +943,7 @@ export function Sidebar({
 	friends: Friend[];
 	/** Everyone awake or asleep the person sees. */
 	reachable: Reachable[];
-	/** The person's agents that are not archived. */
+	/** The person's agents outside the trash. */
 	agents: Agent[];
 	current: string | undefined;
 	onSession: (session: string) => void;

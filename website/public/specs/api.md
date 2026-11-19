@@ -52,7 +52,7 @@ So nothing is lost when a receiver dies between getting an item and taking it in
 
 ## The trash
 
-- `DELETE /groups/<id>`, `DELETE /projects/<id>`, `DELETE /sessions/<id>`: delete it, with everything in it, into the trash; `POST /agents/<id>/archive` deletes an agent of your person's, yourself included.
+- `DELETE /groups/<id>`, `DELETE /projects/<id>`, `DELETE /sessions/<id>`, `DELETE /agents/<id>`: delete it, with everything in it, into the trash; an agent deletes any of its person's, itself included.
 - `GET /trash`: what is in the trash that you restore, newest first, each `{"id", "kind", "name", "group", "project", "trashed", "by", "purged"}`: `kind` is `group`, `project`, `session` or `agent`, and `purged` when it goes for good, 30 days after it was deleted.
 - `POST /trash/<id>/restore`: restore it, with everything in it.
 

@@ -74,7 +74,7 @@ pub fn acting(caller: &Caller) -> Acting {
 }
 
 /// The participant a name stands for now: `login` the person, `login/name` their agent of that
-/// name that is not archived. Returns its account and its id.
+/// name outside the trash. Returns its account and its id.
 pub async fn participant_by_name(db: &mut Db, name: &str) -> Result<Option<(String, String)>> {
   let mut parts = name.split('/');
   let (Some(login), agent, None) = (parts.next(), parts.next(), parts.next()) else {
@@ -94,7 +94,7 @@ pub async fn participant_by_name(db: &mut Db, name: &str) -> Result<Option<(Stri
     return Ok(Some((account.clone(), account)));
   };
   let id: Option<String> =
-    sqlx::query_scalar("SELECT id FROM agent WHERE account = ? AND name = ? AND archived IS NULL")
+    sqlx::query_scalar("SELECT id FROM agent WHERE account = ? AND name = ? AND trashed IS NULL")
       .bind(&account)
       .bind(agent)
       .fetch_optional(db)
@@ -345,7 +345,7 @@ pub fn start(app: &App) {
 #[derive(sqlx::FromRow)]
 struct Held {
   holder: Option<String>,
-  archived: Option<String>,
+  trashed: Option<String>,
 }
 
 pub async fn login_lasts(db: &mut Db, login: &str) -> Result<bool> {
@@ -367,15 +367,15 @@ pub async fn hold(app: &App, db: &mut Db, p: &Acting, login: &str) -> Result<()>
     return Ok(());
   }
   let agent: Held =
-    sqlx::query_as("SELECT holder, archived FROM agent WHERE id = ? AND account = ?")
+    sqlx::query_as("SELECT holder, trashed FROM agent WHERE id = ? AND account = ?")
       .bind(&p.id)
       .bind(&p.account)
       .fetch_optional(&mut *db)
       .await?
       .ok_or_else(|| Refusal::not_found("No such agent."))?;
-  if agent.archived.is_some() {
+  if agent.trashed.is_some() {
     return Err(Refusal::forbidden(
-      "This agent is archived: it receives and sends no more.",
+      "This agent is in the trash: it receives and sends no more.",
     ));
   }
   // The holder keeps it until revoked, however long it is quiet: another token of the account
@@ -785,7 +785,7 @@ pub async fn leave(app: &App, db: &mut Db, p: &Acting, session: &str, login: &st
 
 /// A message's type with each name in its `ping` or `fyi` that is no more than an agent's own
 /// name, such as `lead`, as the full name of the sender's person's agent of that name, where one
-/// is not archived, so that everyone sees whom it named; any other name stays as it is.
+/// is outside the trash, so that everyone sees whom it named; any other name stays as it is.
 async fn with_own_agents(db: &mut Db, p: &Acting, ty: &str) -> Result<String> {
   if !is_message(ty) {
     return Ok(ty.to_string());
@@ -797,7 +797,7 @@ async fn with_own_agents(db: &mut Db, p: &Acting, ty: &str) -> Result<String> {
       continue;
     }
     let agent: Option<String> = sqlx::query_scalar(
-      "SELECT name FROM agent WHERE account = ? AND name = ? AND archived IS NULL",
+      "SELECT name FROM agent WHERE account = ? AND name = ? AND trashed IS NULL",
     )
     .bind(&p.account)
     .bind(&name)
@@ -889,10 +889,10 @@ pub async fn leave_group(app: &App, db: &mut Db, group: &str, id: &str) -> Resul
   Ok(())
 }
 
-/// Archives the agent, by `by`, into the trash: it leaves every session it is in, and every group
+/// Deletes the agent, by `by`, into the trash: it leaves every session it is in, and every group
 /// but its person's own, receives and sends no more, its stream goes, and its name is free for
 /// another.
-pub async fn archive(app: &App, db: &mut Db, p: &Acting, by: &str) -> Result<()> {
+pub async fn trash_agent(app: &App, db: &mut Db, p: &Acting, by: &str) -> Result<()> {
   let sessions: Vec<String> =
     sqlx::query_scalar("SELECT session FROM participant WHERE id = ? AND inside = 1")
       .bind(&p.id)
@@ -914,13 +914,19 @@ pub async fn archive(app: &App, db: &mut Db, p: &Acting, by: &str) -> Result<()>
   }
   let mut tx = db.begin().await?;
   // It keeps its holder, so that restored (`trash`) it is that login's again, and no other's.
-  sqlx::query("UPDATE agent SET archived = ?, archived_by = ? WHERE id = ? AND account = ?")
-    .bind(db::now())
-    .bind(by)
-    .bind(&p.id)
-    .bind(&p.account)
-    .execute(&mut *tx)
-    .await?;
+  let trashed = sqlx::query(
+    "UPDATE agent SET trashed = ?, trashed_by = ? WHERE id = ? AND account = ? AND trashed IS NULL",
+  )
+  .bind(db::now())
+  .bind(by)
+  .bind(&p.id)
+  .bind(&p.account)
+  .execute(&mut *tx)
+  .await?;
+  // Deleted meanwhile by another, it is not deleted twice.
+  if trashed.rows_affected() == 0 {
+    return Err(Refusal::not_found("No such agent."));
+  }
   sqlx::query("DELETE FROM status WHERE participant = ?")
     .bind(&p.id)
     .execute(&mut *tx)
@@ -940,7 +946,7 @@ pub async fn archive(app: &App, db: &mut Db, p: &Acting, by: &str) -> Result<()>
   end(
     app,
     |r| r.participant == p.id,
-    || Some(Refusal::forbidden("The agent is archived.")),
+    || Some(Refusal::forbidden("The agent is in the trash.")),
   );
   Ok(())
 }

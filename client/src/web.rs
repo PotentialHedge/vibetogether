@@ -205,9 +205,9 @@ impl WebClient {
     done(self.0.rename_agent(&id, &name)).await
   }
 
-  #[wasm_bindgen(js_name = archiveAgent)]
-  pub async fn archive_agent(&self, id: String) -> Result<(), JsValue> {
-    self.0.archive_agent(&id).await.map_err(js_error)
+  #[wasm_bindgen(js_name = deleteAgent)]
+  pub async fn delete_agent(&self, id: String) -> Result<(), JsValue> {
+    self.0.delete_agent(&id).await.map_err(js_error)
   }
 
   #[wasm_bindgen(unchecked_return_type = "Trashed[]")]

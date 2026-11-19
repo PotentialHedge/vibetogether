@@ -177,7 +177,7 @@ async fn an_agent_token_names_its_agent_and_a_person_is_themselves() {
   assert_eq!(status(named.join(&w.session.id).await), 404);
   let other = w.luis.machine.clone().acting_as(Some(id(&ben)));
   assert_eq!(status(other.join(&w.session.id).await), 404);
-  // A name is unique among the account's agents that are not archived.
+  // A name is unique among the account's agents outside the trash.
   assert_eq!(status(w.luis.browser.create_agent("claude").await), 409);
   assert_eq!(status(w.luis.browser.create_agent("Not A Name").await), 400);
   // The person, by the browser or a person token, takes part as themselves.
@@ -471,7 +471,7 @@ async fn an_agent_is_held_by_one_login_at_a_time() {
     status(server.receive(&query(None, None, Some(0))).await),
     409
   );
-  // However long its holder is quiet, another token never takes it over; nor archives or
+  // However long its holder is quiet, another token never takes it over; nor deletes or
   // renames it.
   sqlx::query("UPDATE agent SET seen = '2000-01-01T00:00:00.000Z' WHERE id = ?")
     .bind(id(&codex))
@@ -479,7 +479,7 @@ async fn an_agent_is_held_by_one_login_at_a_time() {
     .await
     .unwrap();
   assert_eq!(status(server.join(&w.session.id).await), 409);
-  assert_eq!(status(server.archive_agent(&id(&codex)).await), 409);
+  assert_eq!(status(server.delete_agent(&id(&codex)).await), 409);
   assert_eq!(status(server.me().await), 409);
   assert_eq!(status(server.rename_agent(&id(&codex), "taken").await), 409);
   // Once its holder is revoked, another login of the person takes it.
@@ -1448,7 +1448,7 @@ async fn an_agent_gets_what_is_said_in_a_session_from_when_it_is_in_it_and_what_
 }
 
 #[tokio::test]
-async fn an_agent_keeps_its_id_across_a_rename_and_archived_it_is_gone() {
+async fn an_agent_keeps_its_id_across_a_rename_and_deleted_it_is_gone() {
   let w = world().await;
   let s_ = &w.session.id;
   w.ben.browser.join(s_).await.unwrap();
@@ -1499,8 +1499,8 @@ async fn an_agent_keeps_its_id_across_a_rename_and_archived_it_is_gone() {
     (s("luis/historian"), Some(id(&scribe)))
   );
 
-  // Archived, it leaves every session, can't act, and its name is free.
-  w.luis.machine.archive_agent(&id(&scribe)).await.unwrap();
+  // Deleted, it leaves every session, can't act, shows only in the trash, and its name is free.
+  w.luis.machine.delete_agent(&id(&scribe)).await.unwrap();
   assert!(
     !w.ben
       .browser
@@ -1529,14 +1529,7 @@ async fn an_agent_keeps_its_id_across_a_rename_and_archived_it_is_gone() {
     .unwrap();
   assert_eq!(left, 0);
   let listed = w.luis.browser.agents().await.unwrap();
-  assert_eq!(
-    listed
-      .iter()
-      .find(|a| a.id == id(&scribe))
-      .unwrap()
-      .presence,
-    Presence::Archived
-  );
+  assert!(listed.iter().all(|a| a.id != id(&scribe)));
   let overview = w
     .luis
     .browser
@@ -1980,7 +1973,7 @@ async fn a_client_says_plainly_when_the_server_speaks_another_version() {
   tokio::spawn(async move { axum::serve(listener, other).await.unwrap() });
   let error = Client::new(&url, None).me().await.unwrap_err();
   assert!(matches!(error, vibetogether_client::Error::Mismatch { .. }));
-  assert!(error.to_string().contains("version"));
+  assert!(error.to_string().contains(&format!("{url}/agents.md")));
 }
 
 #[tokio::test]
@@ -2204,9 +2197,9 @@ async fn agents_delete_into_the_trash_whence_whoever_could_delete_restores() {
   w.ben.browser.restore(&w.group.id).await.unwrap();
   w.ben.browser.session(s_).await.unwrap();
 
-  // An agent archives another of its person's, into the trash, which only they see.
+  // An agent deletes another of its person's, into the trash, which only they see.
   let lead = agent(&w.luis.machine, "lead").await;
-  machine.archive_agent(&id(&lead)).await.unwrap();
+  machine.delete_agent(&id(&lead)).await.unwrap();
   assert_eq!(status(lead.set_status("back").await), 403);
   let trash = w.luis.browser.trash().await.unwrap();
   assert_eq!(
@@ -2225,7 +2218,7 @@ async fn agents_delete_into_the_trash_whence_whoever_could_delete_restores() {
   // Restored, it is its holder's again; its name taken meanwhile, it waits for a rename.
   machine.restore(&id(&lead)).await.unwrap();
   lead.set_status("back").await.unwrap();
-  machine.archive_agent(&id(&lead)).await.unwrap();
+  machine.delete_agent(&id(&lead)).await.unwrap();
   let _other = agent(&w.luis.machine, "lead").await;
   assert_eq!(status(machine.restore(&id(&lead)).await), 409);
   // Restoring keeps to the limits creating does.
@@ -2370,12 +2363,11 @@ async fn an_agent_sees_and_acts_only_in_the_groups_its_person_lets_it_into() {
   assert_eq!(made.members, [s("luis")]);
   assert_eq!(made.agents.len(), 1);
   assert_eq!(made.agents[0].id, id(&lead));
-  // Archived, it is in its person's own group alone.
-  w.luis.browser.archive_agent(&id(&lead)).await.unwrap();
+  // Deleted, it shows in no group, its person's own included.
+  w.luis.browser.delete_agent(&id(&lead)).await.unwrap();
   assert!(agents_in(&w.luis.browser, &made.id).await.is_empty());
   let own_group = w.luis.browser.groups().await.unwrap().remove(0);
-  let archived = own_group.agents.iter().find(|a| a.id == id(&lead));
-  assert_eq!(archived.unwrap().presence, Presence::Archived);
+  assert!(own_group.agents.iter().all(|a| a.id != id(&lead)));
 }
 
 #[tokio::test]

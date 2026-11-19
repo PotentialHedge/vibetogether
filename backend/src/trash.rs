@@ -1,4 +1,4 @@
-//! The trash: what is deleted, a group, project or session, or an archived agent, stays in it,
+//! The trash: what is deleted, a group, project, session or agent, stays in it,
 //! shown to no one but in it, until it is restored or purged, `TRASH_DAYS` after it was deleted.
 //! Agents delete too, Luis's decision (2026-11-19), so the trash is what makes a hijacked agent's
 //! deleting undone.
@@ -134,15 +134,15 @@ async fn sessions(db: &mut Db, who: &str, only: Option<&str>) -> Result<Vec<Row>
   )
 }
 
-/// The archived agents of the account.
+/// The deleted agents of the account.
 async fn agents(db: &mut Db, account: &str, only: Option<&str>) -> Result<Vec<Row>> {
   Ok(
     sqlx::query_as(
-      r#"SELECT ag.id, a.login || '/' || ag.name AS name, ag.archived AS trashed,
-         ag.archived_by AS by, NULL AS group_id, NULL AS group_name, NULL AS project_id,
+      r#"SELECT ag.id, a.login || '/' || ag.name AS name, ag.trashed,
+         ag.trashed_by AS by, NULL AS group_id, NULL AS group_name, NULL AS project_id,
          NULL AS project_name
          FROM agent ag JOIN account a ON a.id = ag.account
-         WHERE ag.account = ?1 AND ag.archived IS NOT NULL AND (?2 IS NULL OR ag.id = ?2)"#,
+         WHERE ag.account = ?1 AND ag.trashed IS NOT NULL AND (?2 IS NULL OR ag.id = ?2)"#,
     )
     .bind(account)
     .bind(only)
@@ -261,7 +261,7 @@ pub async fn restore(
       "session"
     }
     TrashKind::Agent => {
-      // Archived before the trash, an agent kept no holder: given back to a token, any of the
+      // Deleted before the trash, an agent kept no holder: given back to a token, any of the
       // account's would take it over, so only the person restores it.
       let holder: Option<String> = sqlx::query_scalar("SELECT holder FROM agent WHERE id = ?")
         .bind(&row.id)
@@ -272,17 +272,17 @@ pub async fn restore(
       }
       let live = db::count(
         &mut db,
-        "SELECT count(*) FROM agent WHERE account = ? AND archived IS NULL",
+        "SELECT count(*) FROM agent WHERE account = ? AND trashed IS NULL",
         &[&caller.account],
       )
       .await?;
       if live >= MAX_AGENTS {
         return Err(Refusal::forbidden(format!(
-          "An account has at most {MAX_AGENTS} agents that are not archived: archive one first."
+          "An account has at most {MAX_AGENTS} agents outside the trash: delete one first."
         )));
       }
       let restored = sqlx::query(
-        "UPDATE agent SET archived = NULL, archived_by = NULL WHERE id = ? AND account = ?",
+        "UPDATE agent SET trashed = NULL, trashed_by = NULL WHERE id = ? AND account = ?",
       )
       .bind(&row.id)
       .bind(&caller.account)
@@ -356,7 +356,7 @@ pub async fn purge(db: &mut Db) -> Result<()> {
     .execute(&mut *db)
     .await?;
   }
-  let agents: Vec<String> = sqlx::query_scalar("SELECT id FROM agent WHERE archived < ?")
+  let agents: Vec<String> = sqlx::query_scalar("SELECT id FROM agent WHERE trashed < ?")
     .bind(&before)
     .fetch_all(&mut *db)
     .await?;

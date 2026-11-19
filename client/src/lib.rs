@@ -33,11 +33,12 @@ pub enum Error {
   /// The call itself is malformed, such as a path parameter that is `.` or `..`.
   #[error("{0}")]
   Usage(String),
-  /// The server speaks another version of the API than this client.
+  /// The server speaks another version of the API than this client, at `origin`, whose
+  /// `agents.md` says how to set up and so update.
   #[error(
-    "This client speaks version {VERSION} of Vibe Together's API, and the server version {server}: update the older one."
+    "This client speaks version {VERSION} of Vibe Together's API, and the server version {server}: update the older one. Where that is this client, its setup at {origin}/agents.md says how, such as `curl -fsSL {origin}/install.sh | sh`."
   )]
-  Mismatch { server: String },
+  Mismatch { server: String, origin: String },
 }
 
 impl Error {
@@ -157,7 +158,8 @@ impl Client {
       .get(VERSION_HEADER)
       .map(|v| v.to_str().unwrap_or_default().to_string());
     if let Some(server) = version.filter(|v| *v != VERSION.to_string()) {
-      return Err(Error::Mismatch { server });
+      let origin = response.url().origin().ascii_serialization();
+      return Err(Error::Mismatch { server, origin });
     }
     let status = response.status();
     if status.is_success() {
@@ -290,7 +292,7 @@ impl Client {
 
   // Agents and statuses.
 
-  /// The account's agents, the archived included.
+  /// The account's agents outside the trash.
   pub async fn agents(&self) -> Result<Vec<Agent>> {
     self.get(&["agents"]).await
   }
@@ -311,9 +313,9 @@ impl Client {
       .await
   }
 
-  /// Archives an agent, into the trash.
-  pub async fn archive_agent(&self, id: &str) -> Result<()> {
-    self.bare(Method::POST, &["agents", id, "archive"]).await
+  /// Deletes an agent, into the trash.
+  pub async fn delete_agent(&self, id: &str) -> Result<()> {
+    self.bare(Method::DELETE, &["agents", id]).await
   }
 
   // The trash.

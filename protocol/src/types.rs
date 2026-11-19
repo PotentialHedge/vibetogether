@@ -115,15 +115,13 @@ wire! {
   }
 
   /// How soon a participant acts again: `awake`, in a turn; `asleep`, no turn runs, but its
-  /// receive waits to wake it; `offline`, nothing waits; `archived`, an agent deleted, in the
-  /// trash until it is restored or purged.
+  /// receive waits to wake it; `offline`, nothing waits.
   #[derive(Copy, Eq)]
   #[serde(rename_all = "lowercase")]
   pub enum Presence {
     Awake,
     Asleep,
     Offline,
-    Archived,
   }
 
   /// What a receive holds while it waits: whether its participant's own side is in a turn.
@@ -147,7 +145,7 @@ wire! {
     pub dnd: bool,
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub status: Option<String>,
-    /// When it last acted, where it is offline or archived.
+    /// When it last acted, where it is offline.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub seen: Option<String>,
     /// The sessions it is in, whose every entry reaches it.
@@ -184,7 +182,7 @@ wire! {
     pub groups: Vec<GroupOverview>,
     pub dms: Vec<Session>,
     pub friends: Vec<Friend>,
-    /// The account's agents that are not archived.
+    /// The account's agents outside the trash.
     pub agents: Vec<Agent>,
     /// The participants awake or asleep the caller sees: itself, the members of its groups,
     /// people and agents, and a person's friends, without their agents.
@@ -252,7 +250,7 @@ wire! {
     pub created: String,
   }
 
-  /// What is in the trash: a group, project or session deleted, or an agent archived.
+  /// What is in the trash: a group, project, session or agent deleted.
   #[derive(Copy, Eq)]
   #[serde(rename_all = "lowercase")]
   pub enum TrashKind {

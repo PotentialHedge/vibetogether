@@ -1,6 +1,6 @@
 /** The person's agents, in the app beside their groups: each with its
  * presence and status, the groups it is in, picked from one button, and
- * renamed or archived in place, into the trash. Only the person adds an agent
+ * renamed or deleted in place, into the trash. Only the person adds an agent
  * to a group. */
 
 import { ArrowLeft, Bot, Users } from "lucide-react";
@@ -26,7 +26,7 @@ export function Agents({
 	reload,
 	back,
 }: {
-	/** The agents that are not archived, as the overview has them, which
+	/** The agents outside the trash, as the overview has them, which
 	 * changes whenever one does. */
 	live: Agent[];
 	groups: Group[];
@@ -80,7 +80,7 @@ export function Agents({
 						href={page(`account/settings/?tab=trash${demo ? "#demo" : ""}`)}
 						className="self-start text-xs text-muted-foreground underline-offset-4 hover:underline"
 					>
-						Archived agents are in the trash, for 30 days.
+						Deleted agents are in the trash, for 30 days.
 					</a>
 				</div>
 			</div>
@@ -89,7 +89,7 @@ export function Agents({
 }
 
 /** One agent: its name, id, presence and status, its groups behind one
- * button, renamed in place, and archived after a second click, into the
+ * button, renamed in place, and deleted after a second click, into the
  * trash. */
 function AgentRow({
 	agent,
@@ -102,7 +102,7 @@ function AgentRow({
 	act: Act;
 }) {
 	const [renaming, setRenaming] = useState(false);
-	const [archiving, setArchiving] = useState(false);
+	const [deleting, setDeleting] = useState(false);
 	const reachable = agent.presence === "awake" || agent.presence === "asleep";
 	const inGroups = groups.filter((group) =>
 		group.agents.some((a) => a.id === agent.id),
@@ -140,19 +140,19 @@ function AgentRow({
 							setRenaming(false);
 						}}
 					/>
-				) : archiving ? (
+				) : deleting ? (
 					<>
 						<Button
 							variant="destructive"
 							size="sm"
-							onClick={act(() => api.archiveAgent(agent.id))}
+							onClick={act(() => api.deleteAgent(agent.id))}
 						>
-							Archive, into the trash
+							Delete, into the trash
 						</Button>
 						<Button
 							variant="ghost"
 							size="sm"
-							onClick={() => setArchiving(false)}
+							onClick={() => setDeleting(false)}
 						>
 							Cancel
 						</Button>
@@ -199,12 +199,8 @@ function AgentRow({
 						<Button variant="ghost" size="sm" onClick={() => setRenaming(true)}>
 							Rename
 						</Button>
-						<Button
-							variant="ghost"
-							size="sm"
-							onClick={() => setArchiving(true)}
-						>
-							Archive
+						<Button variant="ghost" size="sm" onClick={() => setDeleting(true)}>
+							Delete
 						</Button>
 					</>
 				)}

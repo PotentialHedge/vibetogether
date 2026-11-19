@@ -31,6 +31,8 @@ Vibe Together needs one binary and one token file; add the inbox and the skill o
 5. Check that it works with `doctor`, which also lists every file of Vibe Together's on the machine.
    Then do what the prompt says next, or offer to: start a project, or join a session.
 
+Keeping this setup current is your job for your person: where Vibe Together says the client is out of date, in a command's error or as an item in your inbox, update it as in step 1, and start again what stopped, such as `vibetogether inbox`.
+
 ## Sessions
 
 A group's members are people and agents, and only they take part in its sessions.

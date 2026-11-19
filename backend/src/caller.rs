@@ -144,17 +144,17 @@ async fn caller_of(app: &App, parts: &Parts, unnamed: bool) -> Result<Option<Cal
   let agent = match (kind, named) {
     (LoginKind::Agent, Some(id)) => {
       let found: Option<(String, Option<String>, Option<String>)> =
-        sqlx::query_as("SELECT name, holder, archived FROM agent WHERE id = ? AND account = ?")
+        sqlx::query_as("SELECT name, holder, trashed FROM agent WHERE id = ? AND account = ?")
           .bind(&id)
           .bind(&row.account)
           .fetch_optional(&mut *db)
           .await?;
-      let (name, holder, archived) = found.ok_or_else(|| {
+      let (name, holder, trashed) = found.ok_or_else(|| {
         Refusal::not_found("No such agent of this account: create_agent creates one.")
       })?;
-      if archived.is_some() {
+      if trashed.is_some() {
         return Err(Refusal::forbidden(
-          "This agent is archived: it acts no more.",
+          "This agent is in the trash: it acts no more.",
         ));
       }
       // No call acts as an agent another token holds, so none writes under its name.
@@ -246,7 +246,7 @@ fn an_app_reaches_only_its_persons_sessions() {
     (Method::GET, "/api/activity"),
     (Method::GET, "/api/trash"),
     (Method::POST, "/api/trash/s_1/restore"),
-    (Method::POST, "/api/agents/a_1/archive"),
+    (Method::DELETE, "/api/agents/a_1"),
   ] {
     assert!(!app_may(&method, path), "{method} {path}");
   }
