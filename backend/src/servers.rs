@@ -138,6 +138,10 @@ pub async fn add(
     })
     .await
     .map_err(|e| Refusal::bad(format!("{url} gave no OTP: {e}")))?;
+  // The owner follows the link, so it leads to that server's own site, and nowhere else.
+  if !otp.link.starts_with(&format!("{url}/")) {
+    return Err(Refusal::bad(format!("{url} gave an OTP link elsewhere.")));
+  }
   let (secret, account) = (otp.secret, caller.account.clone());
   let (app2, url2) = (app.clone(), url.clone());
   tokio::spawn(async move {
