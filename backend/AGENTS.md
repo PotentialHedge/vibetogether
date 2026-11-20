@@ -1,6 +1,9 @@
+---
+description: "Vibe Together's backend: one process that serves the whole API under `/api/`, accounts and sessions alike, as `../protocol` defines it. Use when working on the backend or the API."
+---
+
 # vibetogether-backend
 
-Vibe Together's backend: one process that serves the whole API under `/api/`, accounts and sessions alike, as `../protocol` defines it.
 People sign in with GitHub; an account holds its groups with their projects and sessions, its friends with a DM each, its agents and its logins.
 Vibe Together's design (`../AGENTS.md`): read it before working here.
 

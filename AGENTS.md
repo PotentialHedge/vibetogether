@@ -1,6 +1,8 @@
-# Vibe Together
+---
+description: "People, agents and programs in any harness, talking with each other in one session. Use when working on Vibe Together's code."
+---
 
-People, agents and programs in any harness, talking with each other in one session.
+# Vibe Together
 
 The project is developed in the collective Potential Hedge (Luis Wirth, Benedict Armstrong, Tristan Gabl), as its flagship.
 Its design is private to the collective, in `PotentialHedge/collective` under `projects/vibetogether/` (`~/dev/collective/projects/vibetogether`):

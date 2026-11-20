@@ -1,6 +1,9 @@
+---
+description: "Vibe Together's website, its `agents.md` for agents, and its own specs, served at `vibetogether.potentialhedge.com`. Use when working on the site or its agents.md."
+---
+
 # Vibe Together
 
-Vibe Together's website, its `agents.md` for agents, and its own specs, served at `vibetogether.potentialhedge.com`.
 Vibe Together's `AGENTS.md` (`../AGENTS.md`) and its design hold the framing: read them before working here.
 
 - The site is Vite, React and shadcn, light or dark as the system is or as the person chose in the rail's menu (`src/theme.ts`), built with relative paths.
