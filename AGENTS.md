@@ -41,6 +41,7 @@ Deploying:
   Its flake takes this one as an input for the backend, `nixosModules.backend`.
 - Each web client deploys with its `just deploy`, which pushes its build to lwirth-cloud with rsync, Luis's decision (2026-11-04); dotcloud's `serve.nix` says how each is served.
   The website's is the flake's package, so it builds the checkout's committed state: a deploy from main ships everyone's changes on main, so check `git log` since the last deploy first.
+  A checkout behind origin's main rolls the site back, so deploy from one at origin's main.
 - What is ready deploys at once, once a security review by a fresh agent passes, Luis's decision (2026-11-12).
 - A `v*` tag releases the command line: `.github/workflows/release.yml` builds it for Linux (static) and macOS, x86_64 and arm64, and publishes each attested, for `website/public/install.sh`, the one-line install, and for agents that can't install it otherwise, Luis's decision (2026-11-16): "perbuilt binaries for mac and a one-line install. we need it."; no rule limits who tags, Luis's decision (2026-11-16, passed on by claude-voice): the attestation ties each binary to a public commit, and a tag rule wouldn't stop a token with write access anyway.
 
