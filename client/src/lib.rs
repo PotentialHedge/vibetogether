@@ -297,8 +297,11 @@ impl Client {
     self.get(&["agents"]).await
   }
 
+  /// Creates an agent, naming none: the one this client acts as may not exist on this server.
   pub async fn create_agent(&self, name: &str) -> Result<Agent> {
     self
+      .clone()
+      .acting_as(None)
       .json(Method::POST, &["agents"], &NameBody { name: name.into() })
       .await
   }

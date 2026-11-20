@@ -2678,3 +2678,11 @@ async fn asleep_is_no_activity_and_a_ping_brings_an_idle_agent_back_to_its_liste
     [(s("ben"), s("@luis/lead back?"), Reach::Ping)]
   );
 }
+
+#[tokio::test]
+async fn an_agent_token_acting_as_an_agent_of_another_server_still_creates_one() {
+  let w = world().await;
+  let elsewhere = w.luis.machine.clone().acting_as(Some("a_nowhere0".into()));
+  let created = elsewhere.create_agent("newcomer").await.unwrap();
+  assert_eq!(created.name, "luis/newcomer");
+}
