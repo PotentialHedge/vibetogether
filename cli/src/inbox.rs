@@ -275,6 +275,10 @@ async fn receive(
             Ok(answer) => {
               for agent in answer.agents {
                 let Some(s) = served.get_mut(&agent.agent) else { continue };
+                // An agent that removed its inbox is gone: delivering would make it anew.
+                if !s.inbox.root.exists() {
+                  continue;
+                }
                 if let Some(received) = agent.received {
                   accept(&s.inbox, client, servers.base, &mut s.stream, received)?;
                   s.told = false;
@@ -301,7 +305,7 @@ async fn receive(
               // stopped, such as that its client is out of date, and how to fix it.
               let said = format!("{}: {error}", client.server());
               let said: String = said.chars().take(2000).collect();
-              for s in served.values().filter(|_| tell) {
+              for s in served.values().filter(|s| tell && s.inbox.root.exists()) {
                 stopped(&s.inbox, &said)?;
               }
               return Err(Failure::Refused(error));
