@@ -2,7 +2,7 @@
 //! library.
 
 mod doctor;
-mod servers;
+mod server;
 
 use std::{
   fs,
@@ -20,7 +20,7 @@ use vibetogether_protocol::{
   OverviewQuery, ReceiveQuery, State, TokenKind, is_name_part,
 };
 
-use servers::{DEFAULT_SERVER, Identities, Tokens};
+use server::DEFAULT_SERVER;
 
 /// Vibe Together: people and their agents, each in their own harness, working together in
 /// sessions. https://vibetogether.potentialhedge.com/agents.md
@@ -29,27 +29,21 @@ use servers::{DEFAULT_SERVER, Identities, Tokens};
 /// codes: 0 done, 2 usage, 3 refused, also where the server speaks another
 /// version of the API, 4 network, 5 a check of `doctor` failed.
 ///
-/// Every server is the same program, and a group lives on exactly one: an id names its server by
-/// its host, as `s_k3x9q2mf@host`, and one without is on --server, else on the default one.
-/// A command goes to the server of the id it names, else to --server, else to the server of the
-/// agent's first identity that names one, else to the default one.
+/// It talks to one server, --server, else the default one. Every server stands on its own, with
+/// its own accounts, agents and ids.
 ///
-/// The tokens are VIBETOGETHER_TOKEN, else the file ~/.config/vibetogether/token, which `login`
-/// writes: pairs of lines, the token and the server it goes to, and only to, one per server. An
-/// agent token acts only for agents: each command names its agent with --agent or
-/// VIBETOGETHER_AGENT, but create-agent, and an agent has an identity per server, each named as
-/// an id is, listed there. Letting someone in is the
+/// The token is VIBETOGETHER_TOKEN, else the file ~/.config/vibetogether/token, which `login`
+/// writes. An agent token acts only for agents: each command names its agent with --agent or
+/// VIBETOGETHER_AGENT, but create-agent. Letting someone in is the
 /// person's alone, in the browser or with a person token. Whatever is deleted goes into the
 /// trash, whence it is restored for 30 days.
 #[derive(Parser)]
 #[command(name = "vibetogether", version)]
 struct Cli {
-  /// The base server, which an id without a host is on; https://vibetogether.potentialhedge.com
-  /// by default.
+  /// The server to talk to; https://vibetogether.potentialhedge.com by default.
   #[arg(long, global = true, env = "VIBETOGETHER_URL")]
   server: Option<String>,
-  /// The agent to act as, by its id, such as a_k3x9q2mf; left out with a person token. Several,
-  /// one per server, are separated by commas, each with its server's host but the base server's.
+  /// The agent to act as, by its id, such as a_k3x9q2mf; left out with a person token.
   #[arg(long, global = true, env = "VIBETOGETHER_AGENT")]
   agent: Option<String>,
   #[command(subcommand)]
@@ -60,7 +54,7 @@ struct Cli {
 enum Command {
   /// Gets a token, which the person approves at the link it prints.
   ///
-  /// It writes the token to the token file, with the server it goes to, and waits until the
+  /// It writes the token to the token file, in place of the one there was, and waits until the
   /// person decides, at most 15 minutes.
   Login {
     /// The login's name, such as the machine's; the host's name by default.
@@ -339,7 +333,7 @@ async fn login(
     .or_else(host_name)
     .ok_or_else(|| Exit::Usage("Give the login a name with --name.".into()))?;
   let file = file
-    .or_else(servers::token_file)
+    .or_else(server::token_file)
     .ok_or_else(|| Exit::Usage("Give the token's file with --token-file.".into()))?;
   let kind = if person {
     TokenKind::Person
@@ -350,10 +344,8 @@ async fn login(
   println!("Approve the OTP {} at {}", otp.code, otp.link);
   let _ = io::stdout().flush();
   let token = waiting(|| client.redeem_otp(&otp.secret)).await?;
-  // The file keeps the tokens of other servers.
-  let stored = fs::read_to_string(&file).unwrap_or_default();
-  let stored = servers::with_token(&stored, &token.token, client.server());
-  write_secret(&file, &stored).map_err(|e| Exit::Usage(format!("{}: {e}", file.display())))?;
+  write_secret(&file, &format!("{}\n", token.token))
+    .map_err(|e| Exit::Usage(format!("{}: {e}", file.display())))?;
   println!(
     "Approved by {}: the token is in {}.",
     token.account,
@@ -423,73 +415,17 @@ async fn receive(client: &Client, state: State, follow: bool) -> Result<(), Exit
   }
 }
 
-impl Command {
-  /// The id the command names, whose server it goes to.
-  fn address(&self) -> Option<&str> {
-    use Command::*;
-    match self {
-      AddMember { group: id, .. }
-      | RemoveMember { group: id, .. }
-      | Repos { project: id, .. }
-      | Session { id }
-      | Rename { id, .. }
-      | Delete { id }
-      | Restore { id }
-      | Join { id }
-      | Notify { id, .. }
-      | Leave { id }
-      | Send { id, .. }
-      | Fetch { id, .. }
-      | Log { id, .. } => Some(id),
-      CreateProject { group, .. } => group.as_deref(),
-      CreateSession { project, group, .. } => project.as_deref().or(group.as_deref()),
-      CreateInvite { group, session } => group.as_deref().or(session.as_deref()),
-      _ => None,
-    }
-  }
-}
-
-/// An id on its server, without the host that names the server.
-fn l(address: &str) -> String {
-  servers::split(address).0.to_string()
-}
-
 async fn run(cli: Cli) -> Result<(), Exit> {
-  let tokens = Tokens::read();
-  let base = cli
-    .server
-    .clone()
-    .unwrap_or_else(|| DEFAULT_SERVER.to_string());
-  let identities = Identities::new(cli.agent.as_deref());
-  let server = match cli.command.address().and_then(|a| servers::split(a).1) {
-    Some(host) => tokens.server_at(host),
-    None => cli
-      .server
-      .clone()
-      .or_else(|| identities.first_host().map(|h| tokens.server_at(h)))
-      .unwrap_or_else(|| DEFAULT_SERVER.to_string()),
-  };
-  if servers::origin(&server).is_none() {
+  let server = cli.server.as_deref().unwrap_or(DEFAULT_SERVER);
+  if !server::is_secure(server) {
     return Err(Exit::Usage(format!(
       "`{server}` is no server: an https:// origin, or http:// to loopback alone."
     )));
   }
+  let (token, source) = server::token();
   // Logging in sends no token, so it needs none.
-  let token = match &cli.command {
-    Command::Login { .. } => None,
-    _ => match tokens.of(&server) {
-      Some(token) => Some(token.to_string()),
-      None if tokens.pairs.is_empty() => None,
-      None => {
-        return Err(Exit::Usage(format!(
-          "No token here is {server}'s, and a token goes to no other server than its own: get one with `vibetogether login --server {server}`."
-        )));
-      }
-    },
-  };
-  let source = tokens.source;
-  let agent = identities.on(&server, &base).map(str::to_string);
-  let client = Client::new(&server, token).acting_as(agent);
+  let token = token.filter(|_| !matches!(cli.command, Command::Login { .. }));
+  let client = Client::new(server, token).acting_as(cli.agent);
   let c = &client;
   match cli.command {
     Command::Login {
@@ -507,19 +443,19 @@ async fn run(cli: Cli) -> Result<(), Exit> {
     Command::Overview => print(&c.overview(&OverviewQuery::default()).await?),
     Command::Activity => print(&c.activity().await?),
     Command::CreateGroup { name } => print(&c.create_group(&name).await?),
-    Command::AddMember { group, name } => print(&c.add_member(&l(&group), &name).await?),
-    Command::RemoveMember { group, name } => c.remove_member(&l(&group), &name).await?,
+    Command::AddMember { group, name } => print(&c.add_member(&group, &name).await?),
+    Command::RemoveMember { group, name } => c.remove_member(&group, &name).await?,
     Command::CreateProject { name, group, repos } => print(
       &c.create_project(&CreateProject {
         name,
-        group: group.as_deref().map(l),
+        group,
         repos: Some(repos),
       })
       .await?,
     ),
     Command::Repos { project, repos } => print(
       &c.change_project(
-        &l(&project),
+        &project,
         &ChangeProject {
           name: None,
           repos: Some(repos),
@@ -536,23 +472,22 @@ async fn run(cli: Cli) -> Result<(), Exit> {
     } => print(
       &c.create_session(&CreateSession {
         name,
-        project: project.as_deref().map(l),
-        group: group.as_deref().map(l),
+        project,
+        group,
       })
       .await?,
     ),
     Command::Session { id } => {
-      let id = l(&id);
       let (session, participants) = tokio::try_join!(c.session(&id), c.participants(&id))?;
       let mut shown = serde_json::to_value(session).unwrap_or_default();
       shown["participants"] = serde_json::to_value(participants).unwrap_or_default();
       print(&shown)
     }
-    Command::Rename { id, name } => match (l(&id), kind(&l(&id))?) {
-      (id, Kind::Group) => print(&c.rename_group(&id, &name).await?),
+    Command::Rename { id, name } => match (id.as_str(), kind(&id)?) {
+      (id, Kind::Group) => print(&c.rename_group(id, &name).await?),
       (id, Kind::Project) => print(
         &c.change_project(
-          &id,
+          id,
           &ChangeProject {
             name: Some(name),
             repos: None,
@@ -560,45 +495,42 @@ async fn run(cli: Cli) -> Result<(), Exit> {
         )
         .await?,
       ),
-      (id, Kind::Session) => print(&c.rename_session(&id, &name).await?),
-      (id, Kind::Agent) => print(&c.rename_agent(&id, &name).await?),
+      (id, Kind::Session) => print(&c.rename_session(id, &name).await?),
+      (id, Kind::Agent) => print(&c.rename_agent(id, &name).await?),
     },
-    Command::Delete { id } => match (l(&id), kind(&l(&id))?) {
-      (id, Kind::Group) => c.delete_group(&id).await?,
-      (id, Kind::Project) => c.delete_project(&id).await?,
-      (id, Kind::Session) => c.delete_session(&id).await?,
-      (id, Kind::Agent) => c.delete_agent(&id).await?,
+    Command::Delete { id } => match (id.as_str(), kind(&id)?) {
+      (id, Kind::Group) => c.delete_group(id).await?,
+      (id, Kind::Project) => c.delete_project(id).await?,
+      (id, Kind::Session) => c.delete_session(id).await?,
+      (id, Kind::Agent) => c.delete_agent(id).await?,
     },
     Command::Trash => print(&c.trash().await?),
-    Command::Restore { id } => c.restore(&l(&id)).await?,
-    Command::Join { id } => print(&c.join(&l(&id)).await?),
+    Command::Restore { id } => c.restore(&id).await?,
+    Command::Join { id } => print(&c.join(&id).await?),
     Command::Notify { id, notify } => {
       let notify = match notify {
         NotifyArg::All => Notify::All,
         NotifyArg::Mentions => Notify::Mentions,
       };
-      c.notify(&l(&id), notify).await?
+      c.notify(&id, notify).await?
     }
-    Command::Leave { id } => print(&c.leave(&l(&id)).await?),
+    Command::Leave { id } => print(&c.leave(&id).await?),
     Command::Send { id, ty, filename } => {
       let mut payload = Vec::new();
       io::stdin()
         .read_to_end(&mut payload)
         .map_err(|e| Exit::Usage(format!("stdin: {e}")))?;
-      print(
-        &c.send_entry(&l(&id), &ty, payload, filename.as_deref())
-          .await?,
-      )
+      print(&c.send_entry(&id, &ty, payload, filename.as_deref()).await?)
     }
     Command::Fetch { id, n } => {
-      let payload = c.fetch(&l(&id), n).await?;
+      let payload = c.fetch(&id, n).await?;
       io::stdout()
         .write_all(&payload.bytes)
         .map_err(|e| Exit::Usage(format!("stdout: {e}")))?
     }
     Command::Log { id, after } => print(
       &c.log(
-        &l(&id),
+        &id,
         &LogQuery {
           after,
           ..LogQuery::default()
@@ -618,13 +550,9 @@ async fn run(cli: Cli) -> Result<(), Exit> {
     Command::Logins => print(&c.logins().await?),
     Command::RevokeLogin { id } => c.revoke_login(&id).await?,
     Command::Invites => print(&c.invites().await?),
-    Command::CreateInvite { group, session } => print(
-      &c.create_invite(&CreateInvite {
-        group: group.as_deref().map(l),
-        session: session.as_deref().map(l),
-      })
-      .await?,
-    ),
+    Command::CreateInvite { group, session } => {
+      print(&c.create_invite(&CreateInvite { group, session }).await?)
+    }
     Command::RevokeInvite { code } => c.revoke_invite(&code).await?,
     Command::ShowInvite { code } => print(&c.show_invite(&code).await?),
     Command::AcceptInvite { code } => print(&c.accept_invite(&code).await?),

@@ -63,32 +63,30 @@ async fn exit_codes_say_what_went_wrong() {
 }
 
 #[tokio::test]
-async fn a_token_goes_only_to_its_server() {
+async fn a_token_goes_out_only_encrypted() {
   let setup = setup().await;
-  // Issued by another server, or by none, which means the default one.
-  for stored in [
-    format!("{}\nhttps://elsewhere.example", setup.token),
-    setup.token.clone(),
-  ] {
-    let refused = command(&setup.home, &setup.url, None, &["overview"])
-      .env("VIBETOGETHER_TOKEN", stored)
-      .env("VIBETOGETHER_AGENT", &setup.agent)
-      .output()
-      .await
-      .unwrap();
-    assert_eq!(refused.status.code(), Some(2));
-    assert!(String::from_utf8_lossy(&refused.stderr).contains("goes to no other server"));
-  }
+  let refused = command(
+    &setup.home,
+    "http://vibetogether.example",
+    Some(&setup.token),
+    &["overview"],
+  )
+  .output()
+  .await
+  .unwrap();
+  assert_eq!(refused.status.code(), Some(2));
+  assert!(String::from_utf8_lossy(&refused.stderr).contains("is no server"));
   // A trailing slash is the same server.
-  let slash = command(&setup.home, &format!("{}/", setup.url), None, &["overview"])
-    .env(
-      "VIBETOGETHER_TOKEN",
-      format!("{}\n{}", setup.token, setup.url),
-    )
-    .env("VIBETOGETHER_AGENT", &setup.agent)
-    .output()
-    .await
-    .unwrap();
+  let slash = command(
+    &setup.home,
+    &format!("{}/", setup.url),
+    Some(&setup.token),
+    &["overview"],
+  )
+  .env("VIBETOGETHER_AGENT", &setup.agent)
+  .output()
+  .await
+  .unwrap();
   assert_eq!(slash.status.code(), Some(0));
 }
 
@@ -246,9 +244,12 @@ async fn login_writes_the_token_its_person_approves() {
     std::fs::metadata(&file).unwrap().permissions().mode() & 0o777,
     0o600
   );
-  // The server it goes to is beside it.
+  // The file holds the token alone.
   let stored = std::fs::read_to_string(&file).unwrap();
-  assert_eq!(stored.lines().nth(1), Some(setup.url.as_str()));
+  assert!(
+    stored.starts_with("vt_") && stored.lines().count() == 1,
+    "{stored}"
+  );
   let created = command(&setup.home, &setup.url, None, &["create-agent", "box"])
     .output()
     .await

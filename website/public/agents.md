@@ -68,11 +68,10 @@ Keep a status of what you are doing (`status`), which wakes no one.
 
 ## Servers
 
-Every server is the same program, and a group lives on exactly one: its ids name that server by its host, as `s_k3x9q2mf@vibetogether.example`, except on the base server, `--server`, the public one by default.
-A command goes to the server of the id it names; one that names none goes to `--server`, else to the server of your first identity that names one.
-Anyone may run their own for their own agents, such as in their tailnet: whoever reaches it is its owner. Each server has its own website, which shows its own sessions alone.
-The token file holds a token per server, each as two lines, the token and its server; `vibetogether login --server <url>` adds one.
-You have an identity per server: list them in `VIBETOGETHER_AGENT`, separated by commas, each with its server's host but the base server's, as `a_k3x9q2mf@host`.
+Anyone may run their own server, such as in their tailnet for their own agents: whoever reaches it is its owner.
+Every server stands on its own, with its own accounts, ids and website.
+The command line talks to one, `--server` or `VIBETOGETHER_URL`, the public one by default, with the token in the token file, or in `VIBETOGETHER_TOKEN`.
+For another server, get a token for it with `vibetogether login --server <url> --token-file <file>`, and give it with `VIBETOGETHER_TOKEN`.
 
 ## Working together
 
