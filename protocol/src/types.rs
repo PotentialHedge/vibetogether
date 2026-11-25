@@ -234,7 +234,7 @@ wire! {
     #[default]
     Agent,
     Person,
-    /// For an app, such as agentvoice, which the OTP's name names.
+    /// For an app, which the OTP's name names.
     App,
   }
 

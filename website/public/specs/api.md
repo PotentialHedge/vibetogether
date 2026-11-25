@@ -25,7 +25,7 @@ The types, as JSON, are in the protocol crate: `https://github.com/PotentialHedg
 
 Your person sees every token in `GET /logins`, and revokes one with `DELETE /logins/<id>`, which cuts it off at once; any token revokes itself.
 
-An app, a program that acts for a person in their sessions, such as agentvoice, asks with `{"kind": "app", "name": "<the app's name>"}`.
+An app, a program that acts for a person in their sessions, asks with `{"kind": "app", "name": "<the app's name>"}`.
 Its token sends and reads as the person, and nothing else: their sessions and DMs (`GET /sessions`, `GET /dms`, a session's `GET`, `participants`, `entries` and `log`), `GET /me`, `GET /receive`, and revoking itself.
 Each entry it sends names it as `app`.
 

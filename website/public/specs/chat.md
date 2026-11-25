@@ -40,7 +40,7 @@ Each names whom it pings and tells; for now, it pings no one.
 
 ## Apps
 
-A person's message sent through an app, such as agentvoice, names the app as its entry's `app`, so everyone sees where it came from.
+A person's message sent through an app names the app as its entry's `app`, so everyone sees where it came from.
 
 ## Status
 

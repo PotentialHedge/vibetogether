@@ -204,10 +204,10 @@ impl App {
   }
 }
 
-/// Any web client on any origin, such as agentvoice's page, calls the API with a token, Luis's
-/// decision (2026-11-16): CORS for every origin, without credentials, so a browser sends no
-/// cookie with such a call and gives no page an answer made by one. The cookie stays the
-/// website's own, as `caller` checks.
+/// Any web client on any origin, such as a page served on a person's own machine, calls the API
+/// with a token, Luis's decision (2026-11-16): CORS for every origin, without credentials, so a
+/// browser sends no cookie with such a call and gives no page an answer made by one. The cookie
+/// stays the website's own, as `caller` checks.
 fn cors() -> tower_http::cors::CorsLayer {
   use axum::http::header;
   tower_http::cors::CorsLayer::new()
