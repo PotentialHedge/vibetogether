@@ -45,12 +45,12 @@ fn mode_is_private(file: &Path) -> bool {
 }
 
 /// Runs every check, then lists what is Vibe Together's on this machine.
-pub async fn run(client: &Client, source: Source, inbox: Option<&Path>) -> Vec<Check> {
+pub async fn run(client: &Client, source: Source, mindio: Option<&Path>) -> Vec<Check> {
   let mut files: Vec<PathBuf> = std::env::current_exe().into_iter().collect();
   if let Source::File(file) = &source {
     files.push(file.clone());
   }
-  let mut checks = checks(client, source, inbox).await;
+  let mut checks = checks(client, source, mindio).await;
   let files: Vec<String> = files.iter().map(|f| f.display().to_string()).collect();
   checks.push(check(
     "footprint",
@@ -64,7 +64,7 @@ pub async fn run(client: &Client, source: Source, inbox: Option<&Path>) -> Vec<C
 }
 
 /// Runs every check, in order, each only where the ones before it hold.
-async fn checks(client: &Client, source: Source, inbox: Option<&Path>) -> Vec<Check> {
+async fn checks(client: &Client, source: Source, mindio: Option<&Path>) -> Vec<Check> {
   let mut checks = vec![check(
     "version",
     true,
@@ -169,9 +169,10 @@ async fn checks(client: &Client, source: Source, inbox: Option<&Path>) -> Vec<Ch
     ),
   });
 
-  if let Some(root) = inbox {
-    // Read only: the check makes nothing, where the inbox's own commands would.
-    let new = agentinbox::Inbox::new(root).new_dir();
+  if let Some(root) = mindio {
+    // Read only: the check makes nothing, where MindIO's own commands would.
+    let inbox = mindio::MindIo::new(root).inbox();
+    let new = inbox.new_dir();
     checks.push(match std::fs::read_dir(&new) {
       Ok(entries) => {
         let untaken = entries
@@ -183,7 +184,7 @@ async fn checks(client: &Client, source: Source, inbox: Option<&Path>) -> Vec<Ch
           true,
           format!(
             "The inbox {} holds {untaken} item{} not yet taken in.",
-            root.display(),
+            inbox.root.display(),
             if untaken == 1 { "" } else { "s" }
           ),
         )
@@ -193,7 +194,7 @@ async fn checks(client: &Client, source: Source, inbox: Option<&Path>) -> Vec<Ch
         false,
         format!(
           "There is no inbox at {}: `vibetogether inbox` makes it and delivers into it.",
-          root.display()
+          inbox.root.display()
         ),
       ),
       Err(error) => check("inbox", false, format!("{}: {error}", new.display())),

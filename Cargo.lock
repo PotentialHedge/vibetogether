@@ -3,17 +3,6 @@
 version = 4
 
 [[package]]
-name = "agentinbox"
-version = "0.1.0"
-source = "git+https://github.com/luiswirth/agentinbox#19968382335c22946488204e29e87d92a7d571e9"
-dependencies = [
- "jiff",
- "mime2ext",
- "mime_guess",
- "notify",
-]
-
-[[package]]
 name = "allocator-api2"
 version = "0.2.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1350,6 +1339,18 @@ checksum = "f7c44f8e672c00fe5308fa235f821cb4198414e1c77935c1ab6948d3fd78550e"
 dependencies = [
  "mime",
  "unicase",
+]
+
+[[package]]
+name = "mindio"
+version = "0.1.0"
+source = "git+https://github.com/luiswirth/mindio#667074ee35864ba157a50e8e57def57a6a16b91d"
+dependencies = [
+ "jiff",
+ "libc",
+ "mime2ext",
+ "mime_guess",
+ "notify",
 ]
 
 [[package]]
@@ -2772,9 +2773,9 @@ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 name = "vibetogether"
 version = "0.9.0"
 dependencies = [
- "agentinbox",
  "axum",
  "clap",
+ "mindio",
  "reqwest",
  "rustix",
  "serde",

@@ -7,8 +7,8 @@ use std::{
   time::{Duration, Instant},
 };
 
-use agentinbox::Inbox;
 use common::*;
+use mindio::{Content, MindIo};
 use vibetogether_client::Client;
 use vibetogether_protocol::{LoginKind, Presence};
 
@@ -20,13 +20,17 @@ async fn until(what: &str, check: impl AsyncFn() -> bool) {
   }
 }
 
-/// What reaches the agent lands in its inbox, a ping ringing the bell, and is read once taken;
-/// the agent is awake while the inbox's lock is held.
+/// What reaches the agent lands in its inbox, waking it as its waking rules say, such as only as
+/// Vibe Together's notify settings do, and is read once taken; the agent is awake while its lock
+/// is held.
 #[tokio::test]
 async fn vibe_together_delivers_into_the_inbox() {
   let setup = setup().await;
-  let inbox = Inbox::new(setup.home.join("inbox"));
-  let root = inbox.root.to_string_lossy().to_string();
+  let io = MindIo::new(setup.home.join("scout"));
+  io.create().unwrap();
+  std::fs::write(io.waking_file(), "notified=no quiet\n").unwrap();
+  let inbox = io.inbox();
+  let root = io.root.to_string_lossy().to_string();
   let machine = Client::new(&setup.url, Some(setup.token.clone()));
   let agent = machine.create_agent("scout").await.unwrap().id;
   let scout = machine.clone().acting_as(Some(agent.clone()));
@@ -50,14 +54,14 @@ async fn vibe_together_delivers_into_the_inbox() {
     &setup.home,
     &setup.url,
     Some(&setup.token),
-    &["--agent", &agent, "inbox", "--inbox", &root],
+    &["--agent", &agent, "inbox", "--mindio", &root],
   )
   .stdout(Stdio::null())
   .spawn()
   .unwrap();
   let presence = async || person.participants(&general).await.unwrap()["luis/scout"].presence;
   until("asleep", async || presence().await == Presence::Asleep).await;
-  let _lock = inbox.hold_awake().unwrap();
+  let _lock = io.hold_awake().unwrap();
   until("awake", async || presence().await == Presence::Awake).await;
 
   // The person's join reached it first, as said in the session.
@@ -66,11 +70,9 @@ async fn vibe_together_delivers_into_the_inbox() {
   })
   .await;
   let join = inbox.take().unwrap();
-  assert!(
-    matches!(&join[0].content, agentinbox::Content::Text(t) if t.ends_with("\n\"luis\" joined.\n"))
-  );
-  // A join lands quietly: only a message rings.
-  assert!(!inbox.wake_file().exists());
+  assert!(matches!(&join[0].content, Content::Text(t) if t.ends_with("\n\"luis\" joined.\n")));
+  // A join is not notified, so the rule leaves it quiet.
+  assert!(!io.wake_file().exists());
   person
     .send_entry(
       &general,
@@ -89,7 +91,7 @@ async fn vibe_together_delivers_into_the_inbox() {
     )
     .await
     .unwrap();
-  until("rung", async || inbox.wake_file().exists()).await;
+  until("woken", async || io.wake_file().exists()).await;
   until("both delivered", async || {
     std::fs::read_dir(inbox.new_dir()).unwrap().count() == 2
   })
@@ -110,7 +112,7 @@ async fn vibe_together_delivers_into_the_inbox() {
   let texts: Vec<_> = items
     .iter()
     .map(|i| match &i.content {
-      agentinbox::Content::Text(text) => text.clone(),
+      Content::Text(text) => text.clone(),
       _ => panic!("not text"),
     })
     .collect();
@@ -127,12 +129,12 @@ async fn vibe_together_delivers_into_the_inbox() {
   delivery.kill().await.unwrap();
 }
 
-/// Without an agent named, one delivery serves every inbox on the machine that names its agent,
-/// as inboxes come and go, and tells an agent the server refuses in its own inbox.
+/// Without an agent named, one delivery serves every agent's IO on the machine that names its
+/// agent, as they come and go, and tells an agent the server refuses in its own inbox.
 #[tokio::test]
-async fn one_delivery_serves_every_inbox_on_the_machine() {
+async fn one_delivery_serves_every_agent_on_the_machine() {
   let setup = setup().await;
-  let dir = setup.home.join(".agents/inbox");
+  let dir = setup.home.join(".agents/mindio");
   let machine = Client::new(&setup.url, Some(setup.token.clone()));
   let person = Client::new(
     &setup.url,
@@ -148,14 +150,14 @@ async fn one_delivery_serves_every_inbox_on_the_machine() {
     .id
     .clone();
   person.join(&general).await.unwrap();
-  let inbox_of = |name: &str, agent: &str| {
-    let inbox = Inbox::new(dir.join(name));
-    inbox.create().unwrap();
-    std::fs::write(inbox.root.join("vibetogether"), format!("{agent}\n")).unwrap();
-    inbox
+  let io_of = |name: &str, agent: &str| {
+    let io = MindIo::new(dir.join(name));
+    io.create().unwrap();
+    std::fs::write(io.root.join("vibetogether"), format!("{agent}\n")).unwrap();
+    io
   };
   let scout = machine.create_agent("scout").await.unwrap().id;
-  let scout_inbox = inbox_of("claude-code-1", &scout);
+  let scout_io = io_of("claude-code-1", &scout);
   let gone = machine.create_agent("gone").await.unwrap().id;
   machine
     .clone()
@@ -163,9 +165,9 @@ async fn one_delivery_serves_every_inbox_on_the_machine() {
     .delete_agent(&gone)
     .await
     .unwrap();
-  let gone_inbox = inbox_of("claude-code-2", &gone);
-  // An inbox that names no agent is none of the delivery's.
-  Inbox::new(dir.join("pi-3")).create().unwrap();
+  let gone_io = io_of("claude-code-2", &gone);
+  // An agent that names no identity is none of the delivery's.
+  MindIo::new(dir.join("pi-3")).create().unwrap();
 
   let mut delivery = command(&setup.home, &setup.url, Some(&setup.token), &["inbox"])
     .stdout(Stdio::null())
@@ -186,11 +188,11 @@ async fn one_delivery_serves_every_inbox_on_the_machine() {
   })
   .await;
   until("gone told", async || {
-    gone_inbox.oldest_untaken().unwrap().is_some()
+    gone_io.inbox().oldest_untaken().unwrap().is_some()
   })
   .await;
   assert!(
-    std::fs::read_dir(dir.join("pi-3/new"))
+    std::fs::read_dir(dir.join("pi-3/inbox/new"))
       .unwrap()
       .next()
       .is_none()
@@ -205,11 +207,11 @@ async fn one_delivery_serves_every_inbox_on_the_machine() {
     )
     .await
     .unwrap();
-  until("scout rung", async || scout_inbox.wake_file().exists()).await;
+  until("scout woken", async || scout_io.wake_file().exists()).await;
 
-  // A new inbox is served as it comes.
+  // A new agent is served as it comes.
   let pi = machine.create_agent("pi").await.unwrap().id;
-  let pi_inbox = inbox_of("pi-4", &pi);
+  let pi_io = io_of("pi-4", &pi);
   until("pi asleep", async || {
     presence("pi").await == Some(Presence::Asleep)
   })
@@ -223,7 +225,7 @@ async fn one_delivery_serves_every_inbox_on_the_machine() {
     )
     .await
     .unwrap();
-  until("pi rung", async || pi_inbox.wake_file().exists()).await;
+  until("pi woken", async || pi_io.wake_file().exists()).await;
   delivery.kill().await.unwrap();
 }
 
@@ -235,11 +237,12 @@ async fn one_delivery_serves_every_server() {
   let public = setup().await;
   let private = setup().await;
   let host = private.url.trim_start_matches("http://").to_string();
-  let dir = public.home.join(".agents/inbox");
-  let inbox = Inbox::new(dir.join("claude-code-1"));
-  inbox.create().unwrap();
+  let dir = public.home.join(".agents/mindio");
+  let io = MindIo::new(dir.join("claude-code-1"));
+  io.create().unwrap();
+  let inbox = io.inbox();
   std::fs::write(
-    inbox.root.join("vibetogether"),
+    io.root.join("vibetogether"),
     format!("{}\n{}@{host}\n", public.agent, private.agent),
   )
   .unwrap();
@@ -303,7 +306,7 @@ async fn one_delivery_serves_every_server() {
         .unwrap()
         .into_iter()
         .filter_map(|i| match i.content {
-          agentinbox::Content::Text(text) if text.contains("hi") => Some(text),
+          Content::Text(text) if text.contains("hi") => Some(text),
           _ => None,
         }),
     );
@@ -326,7 +329,7 @@ async fn one_delivery_serves_every_server() {
     &["join", &format!("{private_general}@{host}")],
   )
   .env("VIBETOGETHER_TOKEN", &tokens)
-  .env("AGENT_INBOX", &inbox.root)
+  .env("MINDIO", &io.root)
   .output()
   .await
   .unwrap();
@@ -342,7 +345,7 @@ async fn one_delivery_serves_every_server() {
     &["send", &format!("{private_general}@{host}")],
   )
   .env("VIBETOGETHER_TOKEN", &tokens)
-  .env("AGENT_INBOX", &inbox.root)
+  .env("MINDIO", &io.root)
   .spawn()
   .unwrap();
   let output = {

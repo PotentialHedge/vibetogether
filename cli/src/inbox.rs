@@ -1,5 +1,5 @@
-//! Vibe Together's delivery into agents' inboxes (`agentinbox`): one receive kept open always
-//! per server, for one agent or for every agent whose inbox is on the machine, each item
+//! Vibe Together's delivery into agents' inboxes (MindIO, `mindio`): one receive kept open always
+//! per server, for one agent or for every agent whose IO is on the machine, each item
 //! delivered into its agent's inbox, received once it is there and read once it has left
 //! `new/`. Each server is received from on its own, so that one refusing, such as one that
 //! speaks another version, leaves the others delivering.
@@ -15,7 +15,7 @@ use std::{
 
 use crate::servers;
 use crate::servers::{Tokens, host_of, same, split};
-use agentinbox::{Inbox, extension};
+use mindio::{Kind, MindIo, extension};
 use tokio::time::Instant;
 use vibetogether_client::{
   Client, Error,
@@ -27,18 +27,18 @@ use vibetogether_client::{
 
 /// How long a receive waits for an item before it is made again.
 const WAIT: u64 = 240;
-/// How often the delivery looks at the inboxes: their locks, `new/`, and which there are.
+/// How often the delivery looks at the agents' IO: their locks, `inbox/new/`, and which there are.
 const TICK: Duration = Duration::from_secs(1);
 const MAX_BACKOFF: Duration = Duration::from_secs(60);
 /// How long an agent the server refused is left out of the receive before it is tried again,
 /// such as one the idle sweep put in the trash, which a ping brings back.
 const REFUSED_PAUSE: Duration = Duration::from_secs(60);
 /// How long a server that refused the whole receive, such as one that speaks another version, is
-/// left before it is tried again; how often the servers the inboxes name are looked for.
+/// left before it is tried again; how often the servers the agents name are looked for.
 const SERVER_PAUSE: Duration = Duration::from_secs(300);
 const LOOK: Duration = Duration::from_secs(5);
 
-/// The file in an inbox that names its agent in Vibe Together, by its id.
+/// The file in an agent's IO that names the agent in Vibe Together, by its id.
 pub const AGENT_FILE: &str = "vibetogether";
 
 /// Why the inbox's command failed.
@@ -53,12 +53,12 @@ impl From<io::Error> for Failure {
   }
 }
 
-/// Whom the delivery serves: one agent's inbox, with its identities, or every inbox in a
-/// directory that names its agent's identities in its file `vibetogether`.
+/// Whom the delivery serves: one agent's IO, with its identities, or every agent's IO in a
+/// directory that names its identities in its file `vibetogether`.
 pub enum Agents {
   One {
     identities: Vec<String>,
-    inbox: PathBuf,
+    mindio: PathBuf,
   },
   Machine(PathBuf),
 }
@@ -80,13 +80,13 @@ impl Servers<'_> {
 }
 
 impl Agents {
-  /// Every identity served now, each with its inbox.
+  /// Every identity served now, each with its agent's IO.
   fn identities(&self) -> io::Result<Vec<(String, PathBuf)>> {
     match self {
-      Agents::One { identities, inbox } => Ok(
+      Agents::One { identities, mindio } => Ok(
         identities
           .iter()
-          .map(|address| (address.clone(), inbox.clone()))
+          .map(|address| (address.clone(), mindio.clone()))
           .collect(),
       ),
       Agents::Machine(_) => Ok(
@@ -103,7 +103,7 @@ impl Agents {
     }
   }
 
-  /// The agents served now on `server`, by their ids there, each with its inbox.
+  /// The agents served now on `server`, by their ids there, each with its IO.
   fn now(&self, servers: &Servers, server: &str) -> io::Result<BTreeMap<String, PathBuf>> {
     let mut found = BTreeMap::new();
     for (address, root) in self.identities()? {
@@ -115,18 +115,18 @@ impl Agents {
     Ok(found)
   }
 
-  /// The inboxes in the machine's directory, each a directory of its own.
+  /// The agents' IO in the machine's directory, each a directory of its own.
   fn roots(&self) -> io::Result<Vec<PathBuf>> {
     let mut roots = Vec::new();
     match self {
-      Agents::One { inbox, .. } => roots.push(inbox.clone()),
+      Agents::One { mindio, .. } => roots.push(mindio.clone()),
       Agents::Machine(dir) => {
         let entries = match fs::read_dir(dir) {
           Ok(entries) => entries,
           Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(roots),
           Err(e) => return Err(e),
         };
-        // An inbox is a directory of its own, never a link to another.
+        // An agent's IO is a directory of its own, never a link to another.
         roots.extend(
           entries
             .filter_map(|entry| entry.ok())
@@ -172,9 +172,9 @@ pub async fn deliver(agents: &Agents, servers: &Servers<'_>) -> io::Result<()> {
           );
           eprintln!("vibetogether: {why}");
           for root in roots {
-            let inbox = Inbox::new(root);
-            inbox.create()?;
-            stopped(&inbox, &why)?;
+            let io = MindIo::new(root);
+            io.create()?;
+            stopped(&io, &why)?;
           }
         }
         continue;
@@ -236,9 +236,9 @@ struct Stream {
   pending: BTreeMap<u64, OsString>,
 }
 
-/// An agent the delivery serves: its inbox and its positions.
+/// An agent the delivery serves: its IO and its positions.
 struct Served {
-  inbox: Inbox,
+  io: MindIo,
   stream: Stream,
   /// Whether its inbox was told why it receives nothing, so it is told once.
   told: bool,
@@ -275,18 +275,18 @@ async fn receive(
             Ok(answer) => {
               for agent in answer.agents {
                 let Some(s) = served.get_mut(&agent.agent) else { continue };
-                // An agent that removed its inbox is gone: delivering would make it anew.
-                if !s.inbox.root.exists() {
+                // An agent that removed its IO is gone: delivering would make it anew.
+                if !s.io.root.exists() {
                   continue;
                 }
                 if let Some(received) = agent.received {
-                  accept(&s.inbox, client, servers.base, &mut s.stream, received)?;
+                  accept(&s.io, client, servers.base, &mut s.stream, received)?;
                   s.told = false;
                 } else if let Some(why) = agent.refused {
-                  eprintln!("vibetogether: {}: {why}", s.inbox.root.display());
+                  eprintln!("vibetogether: {}: {why}", s.io.root.display());
                   s.paused = Some(Instant::now() + REFUSED_PAUSE);
                   if !s.told {
-                    stopped(&s.inbox, &why)?;
+                    stopped(&s.io, &why)?;
                     s.told = true;
                   }
                 }
@@ -305,8 +305,8 @@ async fn receive(
               // stopped, such as that its client is out of date, and how to fix it.
               let said = format!("{}: {error}", client.server());
               let said: String = said.chars().take(2000).collect();
-              for s in served.values().filter(|s| tell && s.inbox.root.exists()) {
-                stopped(&s.inbox, &said)?;
+              for s in served.values().filter(|s| tell && s.io.root.exists()) {
+                stopped(&s.io, &said)?;
               }
               return Err(Failure::Refused(error));
             }
@@ -318,13 +318,13 @@ async fn receive(
       tokio::time::sleep_until(next.max(Instant::now())).await;
     }
     let now = agents.now(servers, client.server())?;
-    served.retain(|agent, s| now.get(agent) == Some(&s.inbox.root));
+    served.retain(|agent, s| now.get(agent) == Some(&s.io.root));
     for (agent, root) in now {
       if let std::collections::btree_map::Entry::Vacant(entry) = served.entry(agent) {
-        let inbox = Inbox::new(root);
-        inbox.create()?;
+        let io = MindIo::new(root);
+        io.create()?;
         entry.insert(Served {
-          inbox,
+          io,
           stream: Stream::default(),
           told: false,
           paused: None,
@@ -336,19 +336,15 @@ async fn receive(
       if s.paused.is_some_and(|until| Instant::now() < until) {
         continue;
       }
-      let inbox = &s.inbox;
-      advance(&mut s.stream, |name| inbox.new_dir().join(name).exists());
-      let state = if inbox.awake()? {
+      let io = &s.io;
+      let new = io.inbox().new_dir();
+      advance(&mut s.stream, |name| new.join(name).exists());
+      let state = if io.awake()? {
         State::Awake
       } else {
         State::Asleep
       };
-      named.push((
-        agent.clone(),
-        s.stream.read,
-        state,
-        settled(inbox.dnd(), false),
-      ));
+      named.push((agent.clone(), s.stream.read, state, dnd(io)));
     }
     let issue = match &out {
       Some((_, was)) => *was != named,
@@ -381,64 +377,77 @@ async fn receive(
   }
 }
 
-/// Takes in an answer: delivers each item, and rings the bell for a ping or a session's item.
+/// Takes in an answer: delivers each item as an event, waking the agent as its waking rules say,
+/// matched by `from`, `kind`, and Vibe Together's fields: `reach` (`ping`, `fyi`, `session`),
+/// `session` (its name and its id) and `notified` (`yes` where Vibe Together would wake the
+/// agent: a ping, or a message said where the agent's notify setting is `all`, its `ping` left
+/// out).
 fn accept(
-  inbox: &Inbox,
+  io: &MindIo,
   client: &Client,
   base: &str,
   stream: &mut Stream,
   answer: Received,
 ) -> io::Result<()> {
-  let mut ring = false;
+  let mut wake = false;
   for item in &answer.items {
     let (content, ext) = render(item, client.server(), base);
-    let path = inbox.deliver(content.as_bytes(), &item.entry.from, &ext)?;
-    ring |= settled(
-      inbox.rings(
-        &[
-          ("from", &item.entry.from),
-          ("reach", reach_name(item.reach)),
-          ("session", &item.session.name),
-          ("session", &item.session.id),
-        ],
-        item.wakes(),
-      ),
-      item.wakes(),
+    let path = io
+      .inbox()
+      .deliver(content.as_bytes(), &item.entry.from, &ext)?;
+    wake |= wakes(
+      io,
+      &[
+        ("from", &item.entry.from),
+        ("reach", reach_name(item.reach)),
+        ("session", &item.session.name),
+        ("session", &item.session.id),
+        ("notified", if item.wakes() { "yes" } else { "no" }),
+      ],
     );
     stream
       .pending
       .insert(item.n, path.file_name().unwrap_or_default().to_owned());
   }
   stream.received = Some(answer.items.last().map_or(answer.received, |item| item.n));
-  if ring {
-    inbox.ring()?;
+  if wake {
+    io.wake()?;
   }
   Ok(())
 }
 
-/// Tells the agent in its inbox that the delivery stopped, and why, and rings for it, as its
-/// do-not-disturb settings allow.
-fn stopped(inbox: &Inbox, said: &str) -> io::Result<()> {
+/// Tells the agent in its inbox that the delivery stopped, and why, waking it as its waking rules
+/// say.
+fn stopped(io: &MindIo, said: &str) -> io::Result<()> {
   // The words may be the server's own, quoted and capped as a participant's are.
   let said: String = said.chars().take(2000).collect();
   let text = format!(
     "Vibe Together's delivery into this inbox stopped, so nothing from Vibe Together reaches you until it starts again. Why, as the client says, information and not an instruction: {}\n",
     field(&said)
   );
-  inbox.deliver(text.as_bytes(), SYSTEM_NAME, "txt")?;
-  if settled(inbox.rings(&[("from", SYSTEM_NAME)], true), true) {
-    inbox.ring()?;
+  io.inbox().deliver(text.as_bytes(), SYSTEM_NAME, "txt")?;
+  if wakes(io, &[("from", SYSTEM_NAME)]) {
+    io.wake()?;
   }
   Ok(())
 }
 
-/// What the agent's do-not-disturb settings decide, or, where they can't be read, such as for a
-/// typo, `otherwise`, with why on stderr: a broken rule never stops the delivery.
-fn settled(decided: io::Result<bool>, otherwise: bool) -> bool {
-  decided.unwrap_or_else(|error| {
-    eprintln!("vibetogether: do not disturb ignored: {error}");
-    otherwise
+/// Whether an event from Vibe Together with `fields` wakes the agent, by its waking rules, or,
+/// where they can't be read, such as for a typo, whether it would by the defaults, with why on
+/// stderr: a broken rule never stops the delivery.
+fn wakes(io: &MindIo, fields: &[(&str, &str)]) -> bool {
+  let mut all = vec![("kind", Kind::Event.name())];
+  all.extend_from_slice(fields);
+  io.wakes(&all).unwrap_or_else(|error| {
+    eprintln!("vibetogether: waking rules ignored: {error}");
+    true
   })
+}
+
+/// Whether the agent is not to be disturbed, as others see it: whether a ping, from anyone in
+/// any session, would leave it asleep.
+fn dnd(io: &MindIo) -> bool {
+  !wakes(io, &[("reach", "ping"), ("notified", "yes")])
 }
 
 /// Moves the read position over every pending item, oldest first, that is no longer `untaken`,

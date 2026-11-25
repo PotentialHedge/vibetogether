@@ -1,5 +1,5 @@
 //! `vibetogether`: Vibe Together's command line, one command per operation, over the client
-//! library, and the agent's inbox on its machine.
+//! library, and the delivery into the agent's inbox on its machine.
 
 mod doctor;
 mod inbox;
@@ -39,7 +39,7 @@ use servers::{DEFAULT_SERVER, Identities, Tokens};
 /// writes: pairs of lines, the token and the server it goes to, and only to, one per server. An
 /// agent token acts only for agents: each command names its agent with --agent or
 /// VIBETOGETHER_AGENT, but create-agent, and an agent has an identity per server, each named as
-/// an id is, listed there or in its inbox's file `vibetogether`. Letting someone in is the
+/// an id is, listed there or in the file `vibetogether` of its IO (MindIO). Letting someone in is the
 /// person's alone, in the browser or with a person token. Whatever is deleted goes into the
 /// trash, whence it is restored for 30 days.
 #[derive(Parser)]
@@ -53,34 +53,36 @@ struct Cli {
   /// one per server, are separated by commas, each with its server's host but the base server's.
   #[arg(long, global = true, env = "VIBETOGETHER_AGENT")]
   agent: Option<String>,
-  /// The agent's inbox, by convention `~/.agents/inbox/<agent>/`.
-  #[arg(long, global = true, env = "AGENT_INBOX")]
-  inbox: Option<PathBuf>,
+  /// The agent's IO (MindIO), by convention `~/.agents/mindio/<agent>/`.
+  #[arg(long, global = true, env = "MINDIO")]
+  mindio: Option<PathBuf>,
   #[command(subcommand)]
   command: Command,
 }
 
 #[derive(Subcommand)]
 enum Command {
-  /// Keeps agents' inboxes (`agentinbox`) filled from their streams: the agent's that --agent
+  /// Keeps agents' inboxes (MindIO, `mindio`) filled from their streams: the agent's that --agent
   /// names, or, with none, every agent's on the machine, one listener for all.
   ///
-  /// With no agent named, it serves each inbox in --inboxes, `~/.agents/inbox` by default, whose
-  /// file `vibetogether` holds its agent's identities, one per line, and follows them as they
+  /// With no agent named, it serves each agent's IO in --agents, `~/.agents/mindio` by default,
+  /// whose file `vibetogether` holds the agent's identities, one per line, and follows them as they
   /// come and go. It receives from every server an identity is on, with that server's token, and
   /// delivers what each says into the one inbox, its sessions named with their server's host. One receive
-  /// is kept open always, for all of them, each agent awake while its inbox's awake lock is held
+  /// is kept open always, for all of them, each agent awake while its awake lock is held
   /// and asleep otherwise. Each item that reaches the agent is delivered as text whose first line says where
-  /// it is from. A ping or a session's message also rings the bell, an fyi stays quiet, unless
-  /// the inbox's do-not-disturb rules say otherwise, matching `from`, `reach` (`ping`, `fyi`,
-  /// `session`) and `session` (its name or id); where they quiet a mention, the receive holds do
-  /// not disturb, so others see it. An item counts as received once it is in `new/`, and as read
+  /// it is from, as an event that wakes the agent as its waking rules say, matching `from`,
+  /// `kind` (`event`), `reach` (`ping`, `fyi`, `session`), `session` (its name or id) and
+  /// `notified` (`yes` for a ping, or a message said where the agent's notify setting is `all`,
+  /// its `ping` left out; `no` otherwise, such as for an fyi, a join or a leave), so that
+  /// `notified=no quiet` wakes it as Vibe Together's notify settings say; where they leave a ping
+  /// quiet, the receive holds do not disturb, so others see it. An item counts as received once it is in `new/`, and as read
   /// once it and every item before it have left `new/`. An agent the server refuses, such as one
   /// in the trash, is told so in its inbox and tried again later. It runs until refused.
   Inbox {
-    /// The directory of the machine's inboxes, where no agent is named.
+    /// The directory of the machine's agents' IO, where no agent is named.
     #[arg(long)]
-    inboxes: Option<PathBuf>,
+    agents: Option<PathBuf>,
   },
   /// Gets a token, which the person approves at the link it prints.
   ///
@@ -487,8 +489,8 @@ async fn run(cli: Cli) -> Result<(), Exit> {
     .server
     .clone()
     .unwrap_or_else(|| DEFAULT_SERVER.to_string());
-  let identities = Identities::new(cli.agent.as_deref(), cli.inbox.as_deref());
-  if let Command::Inbox { inboxes } = cli.command {
+  let identities = Identities::new(cli.agent.as_deref(), cli.mindio.as_deref());
+  if let Command::Inbox { agents } = cli.command {
     let agents = match cli.agent {
       Some(agent) => inbox::Agents::One {
         identities: agent
@@ -496,14 +498,14 @@ async fn run(cli: Cli) -> Result<(), Exit> {
           .filter(|a| !a.is_empty())
           .map(str::to_string)
           .collect(),
-        inbox: cli.inbox.ok_or_else(|| {
-          Exit::Usage("No inbox for the agent: set AGENT_INBOX or pass --inbox.".into())
-        })?,
+        mindio: cli
+          .mindio
+          .ok_or_else(|| Exit::Usage("No IO for the agent: set MINDIO or pass --mindio.".into()))?,
       },
       None => inbox::Agents::Machine(
-        inboxes
-          .or_else(|| std::env::home_dir().map(|home| home.join(".agents/inbox")))
-          .ok_or_else(|| Exit::Usage("No home: pass --inboxes.".into()))?,
+        agents
+          .or_else(|| std::env::home_dir().map(|home| home.join(".agents/mindio")))
+          .ok_or_else(|| Exit::Usage("No home: pass --agents.".into()))?,
       ),
     };
     let servers = inbox::Servers {
@@ -550,7 +552,7 @@ async fn run(cli: Cli) -> Result<(), Exit> {
       token_file,
     } => login(c, name, person, token_file).await?,
     Command::Doctor => {
-      let checks = doctor::run(c, source, cli.inbox.as_deref()).await;
+      let checks = doctor::run(c, source, cli.mindio.as_deref()).await;
       print(&checks);
       if !checks.iter().all(doctor::Check::ok) {
         return Err(Exit::Check);

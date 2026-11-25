@@ -5,8 +5,8 @@
 //!
 //! The tokens are pairs of lines, the token, then the server it was issued by and goes to alone,
 //! one pair per server, in VIBETOGETHER_TOKEN, else in the token file. An agent has an identity
-//! per server, each named as an id is, in `--agent` or VIBETOGETHER_AGENT and in its inbox's file
-//! `vibetogether`, one per line.
+//! per server, each named as an id is, in `--agent` or VIBETOGETHER_AGENT and in the file
+//! `vibetogether` of its IO (MindIO), one per line.
 
 use std::{
   fs, io,
@@ -158,11 +158,11 @@ pub fn token_file() -> Option<PathBuf> {
 }
 
 /// An agent's identities, each an id on a server: from `--agent` or VIBETOGETHER_AGENT, then its
-/// inbox's file, in order.
+/// IO's file, in order.
 pub struct Identities(Vec<String>);
 
 impl Identities {
-  pub fn new(given: Option<&str>, inbox: Option<&Path>) -> Self {
+  pub fn new(given: Option<&str>, mindio: Option<&Path>) -> Self {
     let mut all: Vec<String> = given
       .into_iter()
       .flat_map(|g| g.split([',', ' ', '\n']))
@@ -170,8 +170,8 @@ impl Identities {
       .filter(|a| !a.is_empty())
       .map(str::to_string)
       .collect();
-    if let Some(inbox) = inbox {
-      all.extend(named(inbox));
+    if let Some(mindio) = mindio {
+      all.extend(named(mindio));
     }
     Self(all)
   }
@@ -193,10 +193,10 @@ impl Identities {
   }
 }
 
-/// The identities an inbox's file `vibetogether` names, one per line, each an agent's id, with
+/// The identities the file `vibetogether` of an agent's IO names, one per line, each an agent's id, with
 /// its server's host where it is not on the base server.
-pub fn named(inbox: &Path) -> Vec<String> {
-  match fs::read_to_string(inbox.join(crate::inbox::AGENT_FILE)) {
+pub fn named(mindio: &Path) -> Vec<String> {
+  match fs::read_to_string(mindio.join(crate::inbox::AGENT_FILE)) {
     Ok(text) => text
       .lines()
       .map(str::trim)

@@ -19,7 +19,7 @@ The parts, one directory each:
 
 `doctor` checks a machine's setup end to end, Luis's decision (2026-11-16, passed on by vt-builder): "check-setup or a "doctor" (good name!) command should exist!"
 
-The agent's inbox is agentinbox (`~/dev/agentics/inbox`), separate from Vibe Together, Luis's decision (2026-11-17): Vibe Together is one of its providers, delivering into it with `vibetogether inbox`.
+The agent's inbox is MindIO's (`~/dev/agentics/mindio`), separate from Vibe Together, Luis's decision (2026-11-17): Vibe Together is one of its providers, delivering into it with `vibetogether inbox`.
 One `vibetogether inbox` per machine serves every agent whose inbox is on it, in one receive for all of them (`POST /receive/agents`), Luis's decision (2026-11-19): "One listener per machine", since every agent of his has an inbox and an identity from its start, and a receive each would pass the account's limits.
 Every client of ours builds on the client library, the delivery into an agent's inbox included; an agent may also call the HTTP API directly, such as from a sandbox where nothing can be installed.
 Vibe Together stays harness-agnostic, Luis's decision.
