@@ -55,7 +55,8 @@ enum Command {
   /// Gets a token, which the person approves at the link it prints.
   ///
   /// It writes the token to the token file, in place of the one there was, and waits until the
-  /// person decides, at most 15 minutes.
+  /// person decides, at most 15 minutes. Another server than the default one needs
+  /// --token-file.
   Login {
     /// The login's name, such as the machine's; the host's name by default.
     #[arg(long)]
@@ -332,6 +333,13 @@ async fn login(
   let name = name
     .or_else(host_name)
     .ok_or_else(|| Exit::Usage("Give the login a name with --name.".into()))?;
+  // The token file is the default server's, so another server's token goes elsewhere.
+  if file.is_none() && client.server() != DEFAULT_SERVER {
+    return Err(Exit::Usage(format!(
+      "The token file is for {DEFAULT_SERVER}: give {}'s token a file of its own with --token-file.",
+      client.server()
+    )));
+  }
   let file = file
     .or_else(server::token_file)
     .ok_or_else(|| Exit::Usage("Give the token's file with --token-file.".into()))?;

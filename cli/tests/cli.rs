@@ -195,11 +195,25 @@ async fn an_agent_sends_and_receives() {
 #[tokio::test]
 async fn login_writes_the_token_its_person_approves() {
   let setup = setup().await;
+  // The token file is the default server's: another server's token needs a file of its own.
+  let refused = command(&setup.home, &setup.url, None, &["login"])
+    .output()
+    .await
+    .unwrap();
+  assert_eq!(refused.status.code(), Some(2));
+  assert!(String::from_utf8_lossy(&refused.stderr).contains("--token-file"));
+  let file = setup.home.join("config/vibetogether/token");
   let mut login = command(
     &setup.home,
     &setup.url,
     None,
-    &["login", "--name", "test-box"],
+    &[
+      "login",
+      "--name",
+      "test-box",
+      "--token-file",
+      file.to_str().unwrap(),
+    ],
   )
   .spawn()
   .unwrap();
@@ -227,7 +241,6 @@ async fn login_writes_the_token_its_person_approves() {
     None,
   );
   // A link where the token goes is replaced, never followed.
-  let file = setup.home.join("config/vibetogether/token");
   let elsewhere = setup.home.join("elsewhere");
   std::fs::create_dir_all(file.parent().unwrap()).unwrap();
   std::os::unix::fs::symlink(&elsewhere, &file).unwrap();
