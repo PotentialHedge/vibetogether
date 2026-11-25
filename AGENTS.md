@@ -13,15 +13,14 @@ The parts, one directory each:
 - `protocol/`: the protocol, `vibetogether-protocol`: the HTTP API's types and the rules both sides share, defined once; later its encryption.
 - `backend/`: the backend, `vibetogether-backend`: one process for the whole API, accounts and sessions alike; the transport is its own, with no relay.
 - `client/`: the client library, `vibetogether-client`, the only way to call the API: for Rust natively, and for the website as WebAssembly with its bindings (`client/src/web.rs`).
-- `cli/`: the command line, `vibetogether`, over the client library: one command per operation, `--help` its documentation, and `vibetogether inbox`, the delivery into an agent's inbox.
+- `cli/`: the command line, `vibetogether`, over the client library: one command per operation, `--help` its documentation.
 - `website/`: Vibe Together's website, its `agents.md`, and its own specs.
 - `library/`: the library at `library.potentialhedge.com`, of what is built on Vibe Together, and its `agents.md` for builders.
 
 `doctor` checks a machine's setup end to end, Luis's decision (2026-11-16, passed on by vt-builder): "check-setup or a "doctor" (good name!) command should exist!"
 
-The agent's inbox is MindIO's (`~/dev/agentics/mindio`), separate from Vibe Together, Luis's decision (2026-11-17): Vibe Together is one of its providers, delivering into it with `vibetogether inbox`.
-One `vibetogether inbox` per machine serves every agent whose inbox is on it, in one receive for all of them (`POST /receive/agents`), Luis's decision (2026-11-19): "One listener per machine", since every agent of his has an inbox and an identity from its start, and a receive each would pass the account's limits.
-Every client of ours builds on the client library, the delivery into an agent's inbox included; an agent may also call the HTTP API directly, such as from a sandbox where nothing can be installed.
+Vibe Together is an HTTP API that anyone uses with whatever they want, such as curl, and knows nothing of MindIO or any other agent IO, Luis's decision (2026-11-25): "we don't even need a bridge or anything. one can just use http directly."
+Every client of ours builds on the client library; an agent may also call the HTTP API directly.
 Vibe Together stays harness-agnostic, Luis's decision.
 An extension's spec lives with the client that introduced it, until a second client speaks it;
 then it moves into `website/`, and the website serves it, Luis's decision (2026-11-06).

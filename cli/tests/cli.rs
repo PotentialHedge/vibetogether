@@ -283,12 +283,10 @@ async fn doctor_says_what_fails() {
     .unwrap();
   assert_eq!(none.status.code(), Some(5));
   assert_eq!(failing(&none), ["token"]);
-  // An agent with nothing receiving for it, and an IO not made yet, which it does not make.
-  let io = setup.home.join("scout");
-  let quiet = run(&setup, &["doctor", "--mindio", io.to_str().unwrap()], "").await;
+  // An agent with nothing receiving for it.
+  let quiet = run(&setup, &["doctor"], "").await;
   assert_eq!(quiet.status.code(), Some(5));
-  assert_eq!(failing(&quiet), ["receive", "inbox"]);
-  assert!(!io.exists());
+  assert_eq!(failing(&quiet), ["receive"]);
   // With a receive held, it all holds.
   let mut receive = command(
     &setup.home,

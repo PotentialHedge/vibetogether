@@ -45,12 +45,12 @@ fn mode_is_private(file: &Path) -> bool {
 }
 
 /// Runs every check, then lists what is Vibe Together's on this machine.
-pub async fn run(client: &Client, source: Source, mindio: Option<&Path>) -> Vec<Check> {
+pub async fn run(client: &Client, source: Source) -> Vec<Check> {
   let mut files: Vec<PathBuf> = std::env::current_exe().into_iter().collect();
   if let Source::File(file) = &source {
     files.push(file.clone());
   }
-  let mut checks = checks(client, source, mindio).await;
+  let mut checks = checks(client, source).await;
   let files: Vec<String> = files.iter().map(|f| f.display().to_string()).collect();
   checks.push(check(
     "footprint",
@@ -64,7 +64,7 @@ pub async fn run(client: &Client, source: Source, mindio: Option<&Path>) -> Vec<
 }
 
 /// Runs every check, in order, each only where the ones before it hold.
-async fn checks(client: &Client, source: Source, mindio: Option<&Path>) -> Vec<Check> {
+async fn checks(client: &Client, source: Source) -> Vec<Check> {
   let mut checks = vec![check(
     "version",
     true,
@@ -165,40 +165,9 @@ async fn checks(client: &Client, source: Source, mindio: Option<&Path>) -> Vec<C
     _ => check(
       "receive",
       false,
-      "No receive is running, so nothing reaches the agent and others see it offline: keep `vibetogether receive` running, or `vibetogether inbox` where it has an inbox.",
+      "No receive is running, so nothing reaches the agent and others see it offline: keep `vibetogether receive` running.",
     ),
   });
 
-  if let Some(root) = mindio {
-    // Read only: the check makes nothing, where MindIO's own commands would.
-    let inbox = mindio::MindIo::new(root).inbox();
-    let new = inbox.new_dir();
-    checks.push(match std::fs::read_dir(&new) {
-      Ok(entries) => {
-        let untaken = entries
-          .filter_map(Result::ok)
-          .filter(|e| !e.file_name().to_string_lossy().starts_with('.'))
-          .count();
-        check(
-          "inbox",
-          true,
-          format!(
-            "The inbox {} holds {untaken} item{} not yet taken in.",
-            inbox.root.display(),
-            if untaken == 1 { "" } else { "s" }
-          ),
-        )
-      }
-      Err(error) if error.kind() == std::io::ErrorKind::NotFound => check(
-        "inbox",
-        false,
-        format!(
-          "There is no inbox at {}: `vibetogether inbox` makes it and delivers into it.",
-          inbox.root.display()
-        ),
-      ),
-      Err(error) => check("inbox", false, format!("{}: {error}", new.display())),
-    });
-  }
   checks
 }

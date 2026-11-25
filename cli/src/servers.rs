@@ -5,13 +5,9 @@
 //!
 //! The tokens are pairs of lines, the token, then the server it was issued by and goes to alone,
 //! one pair per server, in VIBETOGETHER_TOKEN, else in the token file. An agent has an identity
-//! per server, each named as an id is, in `--agent` or VIBETOGETHER_AGENT and in the file
-//! `vibetogether` of its IO (MindIO), one per line.
+//! per server, each named as an id is, in `--agent` or VIBETOGETHER_AGENT.
 
-use std::{
-  fs, io,
-  path::{Path, PathBuf},
-};
+use std::{fs, path::PathBuf};
 
 use crate::doctor::Source;
 
@@ -157,23 +153,20 @@ pub fn token_file() -> Option<PathBuf> {
   Some(config.join("vibetogether/token"))
 }
 
-/// An agent's identities, each an id on a server: from `--agent` or VIBETOGETHER_AGENT, then its
-/// IO's file, in order.
+/// An agent's identities, each an id on a server: from `--agent` or VIBETOGETHER_AGENT, in order.
 pub struct Identities(Vec<String>);
 
 impl Identities {
-  pub fn new(given: Option<&str>, mindio: Option<&Path>) -> Self {
-    let mut all: Vec<String> = given
-      .into_iter()
-      .flat_map(|g| g.split([',', ' ', '\n']))
-      .map(str::trim)
-      .filter(|a| !a.is_empty())
-      .map(str::to_string)
-      .collect();
-    if let Some(mindio) = mindio {
-      all.extend(named(mindio));
-    }
-    Self(all)
+  pub fn new(given: Option<&str>) -> Self {
+    Self(
+      given
+        .into_iter()
+        .flat_map(|g| g.split([',', ' ', '\n']))
+        .map(str::trim)
+        .filter(|a| !a.is_empty())
+        .map(str::to_string)
+        .collect(),
+    )
   }
 
   /// The identity on `server`, where `base` is what an id without a host is on.
@@ -191,33 +184,6 @@ impl Identities {
   pub fn first_host(&self) -> Option<&str> {
     self.0.iter().find_map(|address| split(address).1)
   }
-}
-
-/// The identities the file `vibetogether` of an agent's IO names, one per line, each an agent's id, with
-/// its server's host where it is not on the base server.
-pub fn named(mindio: &Path) -> Vec<String> {
-  match fs::read_to_string(mindio.join(crate::inbox::AGENT_FILE)) {
-    Ok(text) => text
-      .lines()
-      .map(str::trim)
-      .filter(|line| valid(line))
-      .map(str::to_string)
-      .collect(),
-    Err(e) if e.kind() == io::ErrorKind::NotFound => Vec::new(),
-    Err(_) => Vec::new(),
-  }
-}
-
-/// Whether `address` is an agent's id, with a host or without.
-fn valid(address: &str) -> bool {
-  let (id, host) = split(address);
-  id.starts_with("a_")
-    && id.len() > 2
-    && id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_')
-    && host.is_none_or(|h| {
-      h.bytes()
-        .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'-' | b':'))
-    })
 }
 
 #[cfg(test)]
@@ -250,7 +216,7 @@ mod tests {
   fn an_id_names_its_server_by_its_host() {
     assert_eq!(split("s_1@a.example"), ("s_1", Some("a.example")));
     assert_eq!(split("s_1"), ("s_1", None));
-    let ids = Identities::new(Some("a_pub, a_priv@home.ts.net"), None);
+    let ids = Identities::new(Some("a_pub, a_priv@home.ts.net"));
     assert_eq!(
       ids.on("https://home.ts.net", DEFAULT_SERVER),
       Some("a_priv")
@@ -258,8 +224,6 @@ mod tests {
     assert_eq!(ids.on(DEFAULT_SERVER, DEFAULT_SERVER), Some("a_pub"));
     assert_eq!(ids.on("https://other.example", DEFAULT_SERVER), None);
     assert_eq!(ids.first_host(), Some("home.ts.net"));
-    assert!(valid("a_k3x9@lwirth-server.taile6c58a.ts.net"));
-    assert!(!valid("a_k3x9@evil/x"));
     // A token's server is compared as the HTTP client reads the URL.
     assert!(!same(
       "https:/evil.com/://vibetogether.potentialhedge.com",

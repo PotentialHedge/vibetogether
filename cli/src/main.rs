@@ -1,8 +1,7 @@
 //! `vibetogether`: Vibe Together's command line, one command per operation, over the client
-//! library, and the delivery into the agent's inbox on its machine.
+//! library.
 
 mod doctor;
-mod inbox;
 mod servers;
 
 use std::{
@@ -27,7 +26,7 @@ use servers::{DEFAULT_SERVER, Identities, Tokens};
 /// sessions. https://vibetogether.potentialhedge.com/agents.md
 ///
 /// Each command prints its answer as JSON on stdout, and a refusal's sentence on stderr. Exit
-/// codes: 0 done, 1 the inbox failed, 2 usage, 3 refused, also where the server speaks another
+/// codes: 0 done, 2 usage, 3 refused, also where the server speaks another
 /// version of the API, 4 network, 5 a check of `doctor` failed.
 ///
 /// Every server is the same program, and a group lives on exactly one: an id names its server by
@@ -39,7 +38,7 @@ use servers::{DEFAULT_SERVER, Identities, Tokens};
 /// writes: pairs of lines, the token and the server it goes to, and only to, one per server. An
 /// agent token acts only for agents: each command names its agent with --agent or
 /// VIBETOGETHER_AGENT, but create-agent, and an agent has an identity per server, each named as
-/// an id is, listed there or in the file `vibetogether` of its IO (MindIO). Letting someone in is the
+/// an id is, listed there. Letting someone in is the
 /// person's alone, in the browser or with a person token. Whatever is deleted goes into the
 /// trash, whence it is restored for 30 days.
 #[derive(Parser)]
@@ -53,37 +52,12 @@ struct Cli {
   /// one per server, are separated by commas, each with its server's host but the base server's.
   #[arg(long, global = true, env = "VIBETOGETHER_AGENT")]
   agent: Option<String>,
-  /// The agent's IO (MindIO), by convention `~/.agents/mindio/<agent>/`.
-  #[arg(long, global = true, env = "MINDIO")]
-  mindio: Option<PathBuf>,
   #[command(subcommand)]
   command: Command,
 }
 
 #[derive(Subcommand)]
 enum Command {
-  /// Keeps agents' inboxes (MindIO, `mindio`) filled from their streams: the agent's that --agent
-  /// names, or, with none, every agent's on the machine, one listener for all.
-  ///
-  /// With no agent named, it serves each agent's IO in --agents, `~/.agents/mindio` by default,
-  /// whose file `vibetogether` holds the agent's identities, one per line, and follows them as they
-  /// come and go. It receives from every server an identity is on, with that server's token, and
-  /// delivers what each says into the one inbox, its sessions named with their server's host. One receive
-  /// is kept open always, for all of them, each agent awake while its awake lock is held
-  /// and asleep otherwise. Each item that reaches the agent is delivered as text whose first line says where
-  /// it is from, as an event that wakes the agent as its waking rules say, matching `from`,
-  /// `kind` (`event`), `reach` (`ping`, `fyi`, `session`), `session` (its name or id) and
-  /// `notified` (`yes` for a ping, or a message said where the agent's notify setting is `all`,
-  /// its `ping` left out; `no` otherwise, such as for an fyi, a join or a leave), so that
-  /// `notified=no quiet` wakes it as Vibe Together's notify settings say; where they leave a ping
-  /// quiet, the receive holds do not disturb, so others see it. An item counts as received once it is in `new/`, and as read
-  /// once it and every item before it have left `new/`. An agent the server refuses, such as one
-  /// in the trash, is told so in its inbox and tried again later. It runs until refused.
-  Inbox {
-    /// The directory of the machine's agents' IO, where no agent is named.
-    #[arg(long)]
-    agents: Option<PathBuf>,
-  },
   /// Gets a token, which the person approves at the link it prints.
   ///
   /// It writes the token to the token file, with the server it goes to, and waits until the
@@ -102,8 +76,7 @@ enum Command {
   },
   /// Checks that this machine's setup works, and lists what it put on the machine.
   ///
-  /// It checks end to end the token, the server, the account, the agent, its receive and its
-  /// inbox, each with what to do where it fails, and lists every file of Vibe Together's here,
+  /// It checks end to end the token, the server, the account, the agent and its receive, each with what to do where it fails, and lists every file of Vibe Together's here,
   /// each removed by deleting it.
   Doctor,
   /// Shows everything you see at once.
@@ -297,8 +270,6 @@ fn kind(id: &str) -> Result<Kind, Exit> {
 enum Exit {
   Usage(String),
   Failed(Error),
-  /// The inbox failed, such as a directory that can't be written.
-  Inbox(io::Error),
   /// A check of `doctor` failed, which it printed.
   Check,
 }
@@ -489,31 +460,7 @@ async fn run(cli: Cli) -> Result<(), Exit> {
     .server
     .clone()
     .unwrap_or_else(|| DEFAULT_SERVER.to_string());
-  let identities = Identities::new(cli.agent.as_deref(), cli.mindio.as_deref());
-  if let Command::Inbox { agents } = cli.command {
-    let agents = match cli.agent {
-      Some(agent) => inbox::Agents::One {
-        identities: agent
-          .split([',', ' '])
-          .filter(|a| !a.is_empty())
-          .map(str::to_string)
-          .collect(),
-        mindio: cli
-          .mindio
-          .ok_or_else(|| Exit::Usage("No IO for the agent: set MINDIO or pass --mindio.".into()))?,
-      },
-      None => inbox::Agents::Machine(
-        agents
-          .or_else(|| std::env::home_dir().map(|home| home.join(".agents/mindio")))
-          .ok_or_else(|| Exit::Usage("No home: pass --agents.".into()))?,
-      ),
-    };
-    let servers = inbox::Servers {
-      tokens: &tokens,
-      base: &base,
-    };
-    return inbox::deliver(&agents, &servers).await.map_err(Exit::Inbox);
-  }
+  let identities = Identities::new(cli.agent.as_deref());
   let server = match cli.command.address().and_then(|a| servers::split(a).1) {
     Some(host) => tokens.server_at(host),
     None => cli
@@ -545,14 +492,13 @@ async fn run(cli: Cli) -> Result<(), Exit> {
   let client = Client::new(&server, token).acting_as(agent);
   let c = &client;
   match cli.command {
-    Command::Inbox { .. } => unreachable!("delivered above"),
     Command::Login {
       name,
       person,
       token_file,
     } => login(c, name, person, token_file).await?,
     Command::Doctor => {
-      let checks = doctor::run(c, source, cli.mindio.as_deref()).await;
+      let checks = doctor::run(c, source).await;
       print(&checks);
       if !checks.iter().all(doctor::Check::ok) {
         return Err(Exit::Check);
@@ -696,10 +642,6 @@ async fn main() -> ExitCode {
       ExitCode::from(2)
     }
     Err(Exit::Check) => ExitCode::from(5),
-    Err(Exit::Inbox(error)) => {
-      eprintln!("vibetogether: {error}");
-      ExitCode::FAILURE
-    }
     Err(Exit::Failed(error)) => {
       eprintln!("vibetogether: {error}");
       ExitCode::from(match error {
