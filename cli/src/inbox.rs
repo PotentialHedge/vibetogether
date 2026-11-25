@@ -15,7 +15,7 @@ use std::{
 
 use crate::servers;
 use crate::servers::{Tokens, host_of, same, split};
-use mindio::{Kind, MindIo, extension};
+use mindio::{Kind, MindIo, Verdict, extension};
 use tokio::time::Instant;
 use vibetogether_client::{
   Client, Error,
@@ -389,13 +389,13 @@ fn accept(
   stream: &mut Stream,
   answer: Received,
 ) -> io::Result<()> {
-  let mut wake = false;
+  let mut verdict = Verdict::Quiet;
   for item in &answer.items {
     let (content, ext) = render(item, client.server(), base);
     let path = io
       .inbox()
       .deliver(content.as_bytes(), &item.entry.from, &ext)?;
-    wake |= wakes(
+    verdict = verdict.max(verdict_of(
       io,
       &[
         ("from", &item.entry.from),
@@ -404,16 +404,13 @@ fn accept(
         ("session", &item.session.id),
         ("notified", if item.wakes() { "yes" } else { "no" }),
       ],
-    );
+    ));
     stream
       .pending
       .insert(item.n, path.file_name().unwrap_or_default().to_owned());
   }
   stream.received = Some(answer.items.last().map_or(answer.received, |item| item.n));
-  if wake {
-    io.wake()?;
-  }
-  Ok(())
+  io.rouse(verdict)
 }
 
 /// Tells the agent in its inbox that the delivery stopped, and why, waking it as its waking rules
@@ -426,28 +423,25 @@ fn stopped(io: &MindIo, said: &str) -> io::Result<()> {
     field(&said)
   );
   io.inbox().deliver(text.as_bytes(), SYSTEM_NAME, "txt")?;
-  if wakes(io, &[("from", SYSTEM_NAME)]) {
-    io.wake()?;
-  }
-  Ok(())
+  io.rouse(verdict_of(io, &[("from", SYSTEM_NAME)]))
 }
 
-/// Whether an event from Vibe Together with `fields` wakes the agent, by its waking rules, or,
-/// where they can't be read, such as for a typo, whether it would by the defaults, with why on
-/// stderr: a broken rule never stops the delivery.
-fn wakes(io: &MindIo, fields: &[(&str, &str)]) -> bool {
+/// What an event from Vibe Together with `fields` does to the agent, by its waking rules, or,
+/// where they can't be read, such as for a typo, a wake, as by the defaults, with why on stderr:
+/// a broken rule never stops the delivery.
+fn verdict_of(io: &MindIo, fields: &[(&str, &str)]) -> Verdict {
   let mut all = vec![("kind", Kind::Event.name())];
   all.extend_from_slice(fields);
-  io.wakes(&all).unwrap_or_else(|error| {
+  io.verdict(&all).unwrap_or_else(|error| {
     eprintln!("vibetogether: waking rules ignored: {error}");
-    true
+    Verdict::Wake
   })
 }
 
 /// Whether the agent is not to be disturbed, as others see it: whether a ping, from anyone in
 /// any session, would leave it asleep.
 fn dnd(io: &MindIo) -> bool {
-  !wakes(io, &[("reach", "ping"), ("notified", "yes")])
+  verdict_of(io, &[("reach", "ping"), ("notified", "yes")]) == Verdict::Quiet
 }
 
 /// Moves the read position over every pending item, oldest first, that is no longer `untaken`,
